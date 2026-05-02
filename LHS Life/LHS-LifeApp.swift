@@ -1,10 +1,6 @@
 //
-//  LaSalle_ScheduleApp.swift
+//  LHS-LifeApp.swift
 //  LHS Life
-//
-//  Both CalendarStore and UserSettings are created exactly once here.
-//  They're passed into the environment via .environment() (not .environmentObject())
-//  which is the correct pattern for @Observable types in iOS 17+.
 //
 
 import SwiftUI
@@ -12,11 +8,16 @@ import SwiftUI
 @main
 struct LaSalle_ScheduleApp: App {
 
-    // @State at the App level is the correct owner for @Observable singletons.
-    // Unlike @StateObject, @State at App scope is safe — App is never rebuilt
-    // by SwiftUI the way views are, so reinitialization is not a risk here.
-    @State private var store = CalendarStore()
+    @State private var store    = CalendarStore()
     @State private var settings = UserSettings.shared
+
+    init() {
+        // Warm the Taptic Engine before any interaction happens.
+        // prepare() is cheap and must be called on the main thread — App.init qualifies.
+        Task { @MainActor in
+            HapticEngine.shared.prepare()
+        }
+    }
 
     var body: some Scene {
         WindowGroup {

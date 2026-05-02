@@ -28,7 +28,12 @@ enum BellScheduleDetector {
         let t = title.lowercased()
         if looksLikeBellSchedule(title: title, description: description) { return .bellSchedule }
         if t.contains("game") || t.contains("match") || t.contains("tournament")
-            || t.contains("athletic") || t.contains("sport") { return .athletic }
+            || t.contains("athletic") || t.contains("sport")
+            || t.contains("golf") || t.contains("tennis") || t.contains("swim")
+            || t.contains("basketball") || t.contains("baseball") || t.contains("softball")
+            || t.contains("soccer") || t.contains("football") || t.contains("volleyball")
+            || t.contains("track") || t.contains("cross country") || t.contains("wrestling")
+            || t.contains("lacrosse") || t.contains("vs.") || t.contains(" vs ") { return .athletic }
         if t.contains("mass") || t.contains("liturgy") || t.contains("prayer")
             || t.contains("retreat") || t.contains("service") { return .liturgy }
         if t.contains("exam") || t.contains("test") || t.contains("finals")

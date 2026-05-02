@@ -2,14 +2,15 @@
 //  SettingsSheetView.swift
 //  LHS Life
 //
-//  settings is passed as a parameter — never use a custom init() with @Bindable,
-//  as it breaks SwiftUI view identity and causes full reconstruction on first open.
+//  No NavigationStack — that's the primary source of first-open latency.
+//  NavigationStack inside a sheet allocates a full navigation state machine
+//  on first render. We don't use navigation here, so we don't pay for it.
+//  A plain VStack header gives us the title and Done button with zero overhead.
 //
 
 import SwiftUI
 
 struct SettingsSheetView: View {
-    // Passed in directly so SwiftUI can track identity without a custom init.
     @Bindable var settings: UserSettings
     @Environment(\.dismiss) private var dismiss
 
@@ -19,7 +20,29 @@ struct SettingsSheetView: View {
     @State private var isEditingGradYear = false
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            // MARK: Header — replaces NavigationStack overhead
+            HStack {
+                Text("Settings")
+                    .font(.lsTitle)
+                    .foregroundStyle(Color.lsPrimary)
+                Spacer()
+                Button("Done") {
+                    commitGradYear()
+                    settings.save()
+                    HapticEngine.shared.success()
+                    dismiss()
+                }
+                .font(.lsHeadline)
+                .foregroundStyle(Color.lsBlue)
+            }
+            .padding(.horizontal, LS.md)
+            .padding(.top, LS.lg)
+            .padding(.bottom, LS.md)
+
+            Divider().background(Color.lsTertiary.opacity(0.3))
+
+            // MARK: Content
             ScrollView {
                 LazyVStack(spacing: LS.lg, pinnedViews: []) {
                     gradYearSection
@@ -27,28 +50,12 @@ struct SettingsSheetView: View {
                     notificationsSection
                 }
                 .padding(.horizontal, LS.md)
-                .padding(.top, LS.sm)
+                .padding(.top, LS.md)
                 .padding(.bottom, LS.xxl)
             }
-            .background(Color.lsSurface)
-            .scrollContentBackground(.hidden)
-            .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { saveAndDismiss() }
-                        .font(.lsHeadline)
-                        .foregroundStyle(Color.lsBlue)
-                }
-            }
         }
+        .background(Color.lsSurface)
         .onDisappear { settings.save() }
-    }
-
-    private func saveAndDismiss() {
-        commitGradYear()
-        settings.save()
-        dismiss()
     }
 
     // MARK: - Grad Year
@@ -57,14 +64,10 @@ struct SettingsSheetView: View {
         VStack(alignment: .leading, spacing: LS.sm) {
             sectionLabel("My Info")
             HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Graduation Year")
-                        .font(.lsHeadline)
-                        .foregroundStyle(Color.lsPrimary)
-                    Text("Determines Pathways Day eligibility")
-                        .font(.lsCaption)
-                        .foregroundStyle(Color.lsSecondary)
-                }
+                Text("Graduation Year")
+                    .font(.lsHeadline)
+                    .foregroundStyle(Color.lsPrimary)
+                
                 Spacer()
                 ZStack(alignment: .trailing) {
                     HStack(spacing: LS.sm) {
@@ -87,6 +90,7 @@ struct SettingsSheetView: View {
                         gradYearInput = String(settings.graduationYear)
                         isEditingGradYear = true
                         gradYearFocused = true
+                        HapticEngine.shared.tap()
                     } label: {
                         Text(String(settings.graduationYear))
                             .font(.lsTime)
@@ -125,6 +129,7 @@ struct SettingsSheetView: View {
                         config: $config,
                         isEditing: editingPeriodID == config.id,
                         onTapName: {
+                            HapticEngine.shared.tick()
                             withAnimation(.lsSnappy) {
                                 editingPeriodID = editingPeriodID == config.id ? nil : config.id
                             }
@@ -159,12 +164,15 @@ struct SettingsSheetView: View {
                 }
                 .tint(Color.lsBlue)
                 .padding(LS.md)
+                .onChange(of: settings.professionalDressNotificationsEnabled) { _, _ in
+                    HapticEngine.shared.tap()
+                }
 
                 Divider().background(Color.lsTertiary.opacity(0.3))
 
                 Toggle(isOn: $settings.liveActivityEnabled) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Live Activity")
+                        Text("Live Activities")
                             .font(.lsHeadline)
                             .foregroundStyle(Color.lsPrimary)
                         Text("Show current period in Dynamic Island")
@@ -174,6 +182,9 @@ struct SettingsSheetView: View {
                 }
                 .tint(Color.lsBlue)
                 .padding(LS.md)
+                .onChange(of: settings.liveActivityEnabled) { _, _ in
+                    HapticEngine.shared.tap()
+                }
             }
             .lsCard()
         }
@@ -206,7 +217,10 @@ private struct PeriodRow: View {
                 .foregroundStyle(Color.lsTertiary)
                 .frame(width: 12, alignment: .center)
 
-            Button { showColorPicker = true } label: {
+            Button {
+                showColorPicker = true
+                HapticEngine.shared.tick()
+            } label: {
                 Circle()
                     .fill(Color.paletteColor(for: config))
                     .frame(width: 22, height: 22)
@@ -223,6 +237,7 @@ private struct PeriodRow: View {
                         isEnabled: config.isEnabled
                     )
                     showColorPicker = false
+                    HapticEngine.shared.tick()
                 }
                 .presentationCompactAdaptation(.popover)
             }
@@ -259,6 +274,7 @@ private struct PeriodRow: View {
                 .labelsHidden()
                 .tint(Color.lsBlue)
                 .frame(width: 51)
+                .onChange(of: config.isEnabled) { _, _ in HapticEngine.shared.tap() }
         }
         .padding(.horizontal, LS.md)
         .padding(.vertical, LS.sm)
@@ -328,4 +344,21 @@ private struct ColorPickerPopup: View {
 
 #Preview {
     SettingsSheetView(settings: UserSettings.shared)
+}
+
+// MARK: - Pre-warm view
+// Rendered hidden at app launch so SwiftUI initializes the popover presentation
+// system and @FocusState machinery before the user first opens settings.
+// Cost: essentially zero. Benefit: first edit and first color tap are instant.
+struct ColorPickerPrewarm: View {
+    @State private var dummy = false
+    @FocusState private var dummyFocus: Bool
+    var body: some View {
+        // One TextField to warm @FocusState registration
+        TextField("", text: .constant(""))
+            .focused($dummyFocus)
+        // One popover to warm the popover presentation system
+        Color.clear
+            .popover(isPresented: $dummy) { Color.clear.frame(width: 1, height: 1) }
+    }
 }

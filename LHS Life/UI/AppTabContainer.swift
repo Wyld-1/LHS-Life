@@ -2,9 +2,12 @@
 //  AppTabContainer.swift
 //  LHS Life
 //
-//  LunchWebState lives here — at the container level — so the WKWebView
-//  exists for the entire app session. Tapping the Order tab just reveals
-//  an already-loading view. The tab bar has nothing to do with network loading.
+//  Two-level ZStack:
+//    Layer 0 — tab content
+//    Layer 1 — floating chrome (header top, dock+FAB bottom)
+//
+//  AppDock owns the iOS version branch entirely.
+//  AppTabContainer has zero #available checks.
 //
 
 import SwiftUI
@@ -12,164 +15,154 @@ import SwiftUI
 // MARK: - Tab Definition
 
 enum AppTab: Int, CaseIterable {
-    case today  = 0
-    case events = 1
-    case lunch  = 2
+    case events      = 0
+    case lunch       = 1
+    case powerschool = 2
+    case schoology   = 3
+    case homework    = 4  // iOS 26: becomes the detached search-role circle
 
     var title: String {
         switch self {
-        case .today:  return "Today"
-        case .events: return "Calendar"
-        case .lunch:  return "Order"
+        case .events:       return "Events"
+        case .lunch:        return "Order"
+        case .powerschool:  return "Grades"
+        case .schoology:    return "Schoology"
+        case .homework:     return "Homework"
         }
     }
 
-    var icon: String {
+    var iconName: String {
         switch self {
-        case .today:  return "bell.fill"
-        case .events: return "calendar"
-        case .lunch:  return "fork.knife"
+        case .events:       return "bell.fill"
+        case .lunch:        return "fork.knife"
+        case .powerschool:  return "powerschool-logo"
+        case .schoology:    return "schoology-logo"
+        case .homework:     return "checklist"
         }
     }
+
+    var isCustomAsset: Bool {
+        switch self {
+        case .powerschool, .schoology: return true
+        default: return false
+        }
+    }
+
+    // Legacy dock only shows the four main tabs — homework is iOS 26 search role only
+    static var dockTabs: [AppTab] { [.events, .lunch, .powerschool, .schoology] }
 }
 
-// MARK: - Root Tab Container
+// MARK: - Root Container
 
 struct AppTabContainer: View {
 
     @Environment(CalendarStore.self) private var store
     @Environment(UserSettings.self) private var settings
 
-    @State private var selectedTab: AppTab = .today
+    @State private var selectedTab  = AppTab.events
     @State private var showSettings = false
+    @State private var showHomework = false
 
-    // LunchWebState lives here so the WKWebView survives tab switches.
-    // It's created once when AppTabContainer first appears, loads in the
-    // background, and is passed into LunchTabView as a plain reference.
-    @State private var lunchWebState = LunchWebState()
+    @State private var lunchState = EmbeddedWebState(
+        url: URL(string: "https://lhs.plan.tech/lunch/")!,
+        siteName: "Lunch Order",
+        injectDarkCSS: true
+    )
+    @State private var powerschoolState = EmbeddedWebState(
+        url: URL(string: "https://lasalleyakima.powerschool.com/guardian/home.html?_userTypeHint=student#")!,
+        siteName: "PowerSchool"
+    )
+    @State private var schoologyState = EmbeddedWebState(
+        url: URL(string: "https://lasalleyakima.schoology.com/home")!,
+        siteName: "Schoology"
+    )
 
     var body: some View {
-        let _ = Self._printChanges()  // TELEMETRY: remove before release
-        ZStack(alignment: .top) {
-            Color.lsBackground
-                .ignoresSafeArea()
+        ZStack {
 
-            tabContent
-                .ignoresSafeArea()
+            // MARK: Layer 0 — Content
+            // AppDock owns the tab switching on both OS versions.
+            // On iOS 26 the system TabView handles selection and gestures.
+            // On legacy we opacity-switch here and AppDock drives selectedTab.
+            AppDock(
+                selectedTab: $selectedTab,
+                lunchState: lunchState,
+                powerschoolState: powerschoolState,
+                schoologyState: schoologyState
+            )
 
-            ScheduleHeader(showSettings: $showSettings)
-                .padding(.horizontal, LS.md)
-                .padding(.top, LS.xs)
+            // MARK: Layer 1 — Floating chrome
+            VStack {
+                // Top row: pill header (settings button is inside ScheduleHeader)
+                ScheduleHeader(showSettings: $showSettings)
+                    .padding(.horizontal, LS.md)
+
+                Spacer()
+
+                // Bottom row: FAB is only needed on legacy.
+                // On iOS 26 the .search role tab renders the detached circle.
+                if #unavailable(iOS 26) {
+                    HStack {
+                        Spacer()
+                        HomeworkFAB { showHomework = true }
+                    }
+                    .padding(.horizontal, LS.md)
+                    .padding(.bottom, LS.sm)
+                }
+            }
+            .safeAreaPadding(.top)
+            .safeAreaPadding(.bottom)
         }
-        .task { lunchWebState.initialize() }  // start loading immediately, off the layout pass
+        .background(Color.lsBackground)
+        .task {
+            async let l: () = lunchState.initialize()
+            async let p: () = powerschoolState.initialize()
+            async let s: () = schoologyState.initialize()
+            _ = await (l, p, s)
+        }
+        .background {
+            SettingsSheetView(settings: settings)
+                .frame(width: 0, height: 0).opacity(0)
+                .allowsHitTesting(false).clipped()
+            ColorPickerPrewarm()
+                .frame(width: 0, height: 0).opacity(0)
+                .allowsHitTesting(false).clipped()
+        }
         .sheet(isPresented: $showSettings) {
             SettingsSheetView(settings: settings)
                 .presentationDragIndicator(.visible)
                 .presentationBackground(Color.lsSurface)
         }
-    }
-
-    @ViewBuilder
-    private var tabContent: some View {
-        if #available(iOS 26, *) {
-            iOS26TabView(selectedTab: $selectedTab, lunchWebState: lunchWebState)
-        } else {
-            CustomTabView(selectedTab: $selectedTab, lunchWebState: lunchWebState)
+        .sheet(isPresented: $showHomework) {
+            HomeworkSheet()
+                .environment(store)
+                .environment(settings)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(Color.lsSurface)
         }
     }
 }
 
-// MARK: - iOS 26+
+// MARK: - Homework FAB
 
-@available(iOS 26, *)
-private struct iOS26TabView: View {
-    @Binding var selectedTab: AppTab
-    let lunchWebState: LunchWebState
-
-    var body: some View {
-        TabView(selection: $selectedTab) {
-            Tab(AppTab.today.title,  systemImage: AppTab.today.icon,  value: AppTab.today)  { TodayTabView() }
-            Tab(AppTab.events.title, systemImage: AppTab.events.icon, value: AppTab.events) { EventsTabView() }
-            Tab(AppTab.lunch.title,  systemImage: AppTab.lunch.icon,  value: AppTab.lunch)  { LunchTabView(webState: lunchWebState) }
-        }
-        .tint(Color.lsBlue)
-    }
-}
-
-// MARK: - Custom Tab View (iOS 17–25)
-
-private struct CustomTabView: View {
-    @Binding var selectedTab: AppTab
-    let lunchWebState: LunchWebState
-
-    var body: some View {
-        let _ = Self._printChanges()  // TELEMETRY: remove before release
-        ZStack {
-            TodayTabView()
-                .opacity(selectedTab == .today  ? 1 : 0)
-                .allowsHitTesting(selectedTab == .today)
-            EventsTabView()
-                .opacity(selectedTab == .events ? 1 : 0)
-                .allowsHitTesting(selectedTab == .events)
-            // LunchTabView receives the already-initialized webState — zero work on tab switch
-            LunchTabView(webState: lunchWebState)
-                .opacity(selectedTab == .lunch  ? 1 : 0)
-                .allowsHitTesting(selectedTab == .lunch)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .ignoresSafeArea()
-        .overlay(alignment: .bottom) {
-            CustomTabBar(selectedTab: $selectedTab)
-        }
-    }
-}
-
-// MARK: - Floating Tab Bar
-
-private struct CustomTabBar: View {
-    @Binding var selectedTab: AppTab
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ForEach(AppTab.allCases, id: \.rawValue) { tab in
-                TabBarButton(tab: tab, isSelected: selectedTab == tab) {
-                    withAnimation(.lsSnappy) { selectedTab = tab }
-                }
-            }
-        }
-        .padding(.horizontal, LS.lg)
-        .padding(.vertical, LS.sm)
-        .background {
-            Capsule()
-                .fill(.ultraThinMaterial)
-                .overlay { Capsule().strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5) }
-                .shadow(color: .black.opacity(0.4), radius: 24, y: 8)
-        }
-        .padding(.horizontal, LS.xxl)
-        .padding(.bottom, LS.sm)
-        .safeAreaPadding(.bottom)
-    }
-}
-
-private struct TabBarButton: View {
-    let tab: AppTab
-    let isSelected: Bool
+private struct HomeworkFAB: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            VStack(spacing: 3) {
-                Image(systemName: tab.icon)
-                    .font(.system(size: 20, weight: isSelected ? .semibold : .regular))
-                    .foregroundStyle(isSelected ? Color.lsBlue : Color.lsSecondary)
-                    .scaleEffect(isSelected ? 1.08 : 1.0)
-                    .animation(.lsSnappy, value: isSelected)
-                Text(tab.title)
-                    .font(.lsLabel)
-                    .foregroundStyle(isSelected ? Color.lsBlue : Color.lsSecondary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, LS.xs)
+        Button {
+            HapticEngine.shared.bump()
+            action()
+        } label: {
+            Image(systemName: "checklist")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 48, height: 48)
+                .background {
+                    Circle()
+                        .fill(Color.lsBlue)
+                        .shadow(color: Color.lsBlue.opacity(0.4), radius: 12, y: 4)
+                }
         }
         .buttonStyle(.plain)
     }

@@ -1,11 +1,11 @@
 //
-//  LunchTabView.swift
+//  PowerSchoolTabView.swift
 //  LHS Life
 //
 
 import SwiftUI
 
-struct LunchTabView: View {
+struct PowerSchoolTabView: View {
     @Bindable var webState: EmbeddedWebState
     var body: some View { EmbeddedWebView(webState: webState) }
 }

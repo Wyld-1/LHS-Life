@@ -18,43 +18,73 @@ struct ScheduleHeader: View {
         store.todayState(at: now)
     }
 
-    // Home events only — at LaSalle or Marquette, next 2 days, non-bell-schedule
+    // MARK: - Upcoming highlight
+    //
+    // Rules:
+    //   Weekday (after school / between periods / before school): tomorrow only
+    //   Saturday: today only (e.g. home Saturday events like prom)
+    //   Sunday: today first, then Monday
+    //   Never show away athletic events
+    //   Never look more than 1 school-day ahead on a weekday
+
     private var upcomingHighlight: SchoolEvent? {
         let cal = Calendar.current
-        guard let tomorrow = cal.date(byAdding: .day, value: 1, to: now),
-              let dayAfter  = cal.date(byAdding: .day, value: 2, to: now) else { return nil }
+        let weekday = cal.component(.weekday, from: now)  // 1=Sun, 6=Fri, 7=Sat
 
-        let keys = [
-            DateFormatter.isoDay.string(from: tomorrow),
-            DateFormatter.isoDay.string(from: dayAfter)
-        ]
+        let lookAheadKeys: [String]
+        switch weekday {
+        case 7:  // Saturday — today's events only
+            lookAheadKeys = [DateFormatter.isoDay.string(from: now)]
+        case 1:  // Sunday — today first, then Monday
+            let monday = cal.date(byAdding: .day, value: 1, to: now) ?? now
+            lookAheadKeys = [
+                DateFormatter.isoDay.string(from: now),
+                DateFormatter.isoDay.string(from: monday)
+            ]
+        default:  // Weekday — tomorrow only
+            let tomorrow = cal.date(byAdding: .day, value: 1, to: now) ?? now
+            lookAheadKeys = [DateFormatter.isoDay.string(from: tomorrow)]
+        }
 
-        return keys
+        let result = lookAheadKeys
             .flatMap { store.events(on: $0) }
             .first { event in
                 guard event.category != .bellSchedule else { return false }
                 return isHomeEvent(event)
             }
+
+        // TELEMETRY: remove before release
+        print("[Header] weekday=\(weekday) lookAheadKeys=\(lookAheadKeys)")
+        let candidates = lookAheadKeys.flatMap { store.events(on: $0) }
+        print("[Header] \(candidates.count) candidate events:")
+        for e in candidates {
+            let passes = e.category != .bellSchedule && isHomeEvent(e)
+            print("  \(passes ? "✓" : "✗") '\(e.title)' cat=\(e.category.rawValue) loc='\(e.location ?? "nil")' allDay=\(e.isAllDay)")
+        }
+        print("[Header] highlight=\(result?.title ?? "nil")")
+
+        return result
     }
 
-    /// Home events are at LaSalle or Marquette. Away events are excluded.
+    /// Returns true only for events that take place at LaSalle or a home venue.
+    /// Athletic events with no recognized home venue are always excluded.
+    /// Non-athletic events with no location (assemblies, dress days, prom) are always included.
     private func isHomeEvent(_ event: SchoolEvent) -> Bool {
-        let loc = (event.location ?? "").lowercased()
-        let title = event.title.lowercased()
-        let combined = loc + " " + title
+        // Athletic events only: filter by venue. Away = excluded.
+        // Everything else (prom, mass, dress days) always shows regardless of location.
+        guard event.category == .athletic else { return true }
 
-        // If there's no location, include non-athletic events (assemblies, dress days, etc.)
-        if loc.isEmpty { return event.category != .athletic }
-
-        // Athletic events: only home games
+        let loc = (event.location ?? "").lowercased().trimmingCharacters(in: .whitespaces)
+        guard !loc.isEmpty else { return false }  // athletic + no location = assume away
         let homeVenues = ["lasalle", "la salle", "marquette", "lhs", "home"]
-        return homeVenues.contains { combined.contains($0) }
+        return homeVenues.contains { loc.contains($0) }
     }
 
     var body: some View {
-        HStack(spacing: LS.sm) {
+        HStack() {
             pillContent.frame(maxWidth: .infinity)
-            gearButton
+            Spacer()
+            settingsButton
         }
     }
 
@@ -114,35 +144,16 @@ struct ScheduleHeader: View {
     // MARK: - Gear Button
 
     @ViewBuilder
-    private var gearButton: some View {
-        // MARK: Glass settings button
-        if #available(iOS 26.0, *) {
-            Button {
-                showSettings = true
-            } label: {
-                Image(systemName: "gearshape.fill")
-                    .foregroundStyle(Color.lsSecondary)
-                    .font(.system(size: 20, weight: .semibold))
-                    .frame(width: 40, height: 40)
-            }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.circle)
-        } else {
-            Button {
-                showSettings = true
-            } label: {
-                Image(systemName: "gearshape.fill")
-                    .foregroundStyle(Color.lsSecondary)
-                    .font(.system(size: 20, weight: .semibold))
-                    .frame(width: 40, height: 40)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay {
-                        Circle().strokeBorder(.white.opacity(0.1), lineWidth: 0.5)
-                    }
-                    .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
-            }
-            .buttonStyle(.plain)
+    private var settingsButton: some View {
+        Button {
+            showSettings = true
+        } label: {
+            Image(systemName: "person.crop.circle.fill")
+                .foregroundStyle(Color.lsSecondary)
+                .font(.system(size: 42, weight: .semibold))
+                .shadow(color: .black.opacity(0.5), radius: 8)
         }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Text Logic
