@@ -1,24 +1,18 @@
 //
 //  ContentView.swift
-//  LaSalle Schedule
-//
-//  Created by Liam Lefohn on 5/1/26.
+//  LHS Life
 //
 
 import SwiftUI
 
 struct ContentView: View {
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
-        }
-        .padding()
+        AppTabContainer()
     }
 }
 
 #Preview {
     ContentView()
+        .environment(CalendarStore())
+        .environment(UserSettings.shared)
 }
