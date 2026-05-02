@@ -10,7 +10,7 @@
 		23E395CD2FA53A6D00574B85 /* SwiftSoup in Frameworks */ = {isa = PBXBuildFile; productRef = 23E395CC2FA53A6D00574B85 /* SwiftSoup */; };
 		23E396072FA57AE300574B85 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 23E396062FA57AE200574B85 /* WidgetKit.framework */; };
 		23E396092FA57AE300574B85 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 23E396082FA57AE300574B85 /* SwiftUI.framework */; };
-		23E3961A2FA57AE500574B85 /* LaSalle WidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 23E396042FA57AE200574B85 /* LaSalle WidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		23E3961A2FA57AE500574B85 /* LHS WidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 23E396042FA57AE200574B85 /* LHS WidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -44,7 +44,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				23E3961A2FA57AE500574B85 /* LaSalle WidgetsExtension.appex in Embed Foundation Extensions */,
+				23E3961A2FA57AE500574B85 /* LHS WidgetsExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -52,65 +52,50 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		23E395A12FA5399800574B85 /* LaSalle Schedule.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "LaSalle Schedule.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-		23E395AE2FA5399A00574B85 /* LaSalle ScheduleTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "LaSalle ScheduleTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
-		23E395B82FA5399A00574B85 /* LaSalle ScheduleUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "LaSalle ScheduleUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
-		23E396042FA57AE200574B85 /* LaSalle WidgetsExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "LaSalle WidgetsExtension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
+		23E395A12FA5399800574B85 /* LHS Life.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "LHS Life.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		23E395AE2FA5399A00574B85 /* LHS LifeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "LHS LifeTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		23E395B82FA5399A00574B85 /* LHS LifeUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "LHS LifeUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		23E396042FA57AE200574B85 /* LHS WidgetsExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "LHS WidgetsExtension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		23E396062FA57AE200574B85 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		23E396082FA57AE300574B85 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
-		23E396202FA57CB500574B85 /* LaSalle WidgetsExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "LaSalle WidgetsExtension.entitlements"; sourceTree = "<group>"; };
+		23EAC8792FA5D9A700E9E592 /* LHS WidgetsExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "LHS WidgetsExtension.entitlements"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		23E3961E2FA57AE500574B85 /* Exceptions for "LaSalle Widgets" folder in "LaSalle WidgetsExtension" target */ = {
+		23E3961E2FA57AE500574B85 /* Exceptions for "LaSalle Widgets" folder in "LHS WidgetsExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
-			target = 23E396032FA57AE200574B85 /* LaSalle WidgetsExtension */;
-		};
-		23E396332FA57FD600574B85 /* Exceptions for "LaSalle Schedule" folder in "LaSalle WidgetsExtension" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Models/BellSchedule.swift,
-				Models/PeriodConfig.swift,
-				Models/SchoolEvent.swift,
-				Models/UserSettings.swift,
-				Utilities/BellScheduleDetector.swift,
-				Utilities/ColorPalette.swift,
-				Utilities/PathwaysService.swift,
-				Utilities/ScheduleEngine.swift,
-				Utilities/SharedStore.swift,
-			);
-			target = 23E396032FA57AE200574B85 /* LaSalle WidgetsExtension */;
+			target = 23E396032FA57AE200574B85 /* LHS WidgetsExtension */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		23E395A32FA5399800574B85 /* LaSalle Schedule */ = {
+		23E395A32FA5399800574B85 /* LHS Life */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				23E396332FA57FD600574B85 /* Exceptions for "LaSalle Schedule" folder in "LaSalle WidgetsExtension" target */,
-			);
-			path = "LaSalle Schedule";
+			path = "LHS Life";
 			sourceTree = "<group>";
 		};
 		23E395B12FA5399A00574B85 /* LaSalle ScheduleTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "LaSalle ScheduleTests";
+			name = "LaSalle ScheduleTests";
+			path = "LHS LifeTests";
 			sourceTree = "<group>";
 		};
 		23E395BB2FA5399A00574B85 /* LaSalle ScheduleUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "LaSalle ScheduleUITests";
+			name = "LaSalle ScheduleUITests";
+			path = "LHS LifeUITests";
 			sourceTree = "<group>";
 		};
 		23E3960A2FA57AE300574B85 /* LaSalle Widgets */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				23E3961E2FA57AE500574B85 /* Exceptions for "LaSalle Widgets" folder in "LaSalle WidgetsExtension" target */,
+				23E3961E2FA57AE500574B85 /* Exceptions for "LaSalle Widgets" folder in "LHS WidgetsExtension" target */,
 			);
-			path = "LaSalle Widgets";
+			name = "LaSalle Widgets";
+			path = "LHS Widgets";
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -153,8 +138,8 @@
 		23E395982FA5399800574B85 = {
 			isa = PBXGroup;
 			children = (
-				23E396202FA57CB500574B85 /* LaSalle WidgetsExtension.entitlements */,
-				23E395A32FA5399800574B85 /* LaSalle Schedule */,
+				23EAC8792FA5D9A700E9E592 /* LHS WidgetsExtension.entitlements */,
+				23E395A32FA5399800574B85 /* LHS Life */,
 				23E395B12FA5399A00574B85 /* LaSalle ScheduleTests */,
 				23E395BB2FA5399A00574B85 /* LaSalle ScheduleUITests */,
 				23E3960A2FA57AE300574B85 /* LaSalle Widgets */,
@@ -166,10 +151,10 @@
 		23E395A22FA5399800574B85 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				23E395A12FA5399800574B85 /* LaSalle Schedule.app */,
-				23E395AE2FA5399A00574B85 /* LaSalle ScheduleTests.xctest */,
-				23E395B82FA5399A00574B85 /* LaSalle ScheduleUITests.xctest */,
-				23E396042FA57AE200574B85 /* LaSalle WidgetsExtension.appex */,
+				23E395A12FA5399800574B85 /* LHS Life.app */,
+				23E395AE2FA5399A00574B85 /* LHS LifeTests.xctest */,
+				23E395B82FA5399A00574B85 /* LHS LifeUITests.xctest */,
+				23E396042FA57AE200574B85 /* LHS WidgetsExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -186,9 +171,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		23E395A02FA5399800574B85 /* LaSalle Schedule */ = {
+		23E395A02FA5399800574B85 /* LHS Life */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 23E395C22FA5399A00574B85 /* Build configuration list for PBXNativeTarget "LaSalle Schedule" */;
+			buildConfigurationList = 23E395C22FA5399A00574B85 /* Build configuration list for PBXNativeTarget "LHS Life" */;
 			buildPhases = (
 				23E3959D2FA5399800574B85 /* Sources */,
 				23E3959E2FA5399800574B85 /* Frameworks */,
@@ -201,19 +186,19 @@
 				23E396192FA57AE500574B85 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				23E395A32FA5399800574B85 /* LaSalle Schedule */,
+				23E395A32FA5399800574B85 /* LHS Life */,
 			);
-			name = "LaSalle Schedule";
+			name = "LHS Life";
 			packageProductDependencies = (
 				23E395CC2FA53A6D00574B85 /* SwiftSoup */,
 			);
 			productName = "LaSalle Schedule";
-			productReference = 23E395A12FA5399800574B85 /* LaSalle Schedule.app */;
+			productReference = 23E395A12FA5399800574B85 /* LHS Life.app */;
 			productType = "com.apple.product-type.application";
 		};
-		23E395AD2FA5399A00574B85 /* LaSalle ScheduleTests */ = {
+		23E395AD2FA5399A00574B85 /* LHS LifeTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 23E395C52FA5399A00574B85 /* Build configuration list for PBXNativeTarget "LaSalle ScheduleTests" */;
+			buildConfigurationList = 23E395C52FA5399A00574B85 /* Build configuration list for PBXNativeTarget "LHS LifeTests" */;
 			buildPhases = (
 				23E395AA2FA5399A00574B85 /* Sources */,
 				23E395AB2FA5399A00574B85 /* Frameworks */,
@@ -227,16 +212,16 @@
 			fileSystemSynchronizedGroups = (
 				23E395B12FA5399A00574B85 /* LaSalle ScheduleTests */,
 			);
-			name = "LaSalle ScheduleTests";
+			name = "LHS LifeTests";
 			packageProductDependencies = (
 			);
 			productName = "LaSalle ScheduleTests";
-			productReference = 23E395AE2FA5399A00574B85 /* LaSalle ScheduleTests.xctest */;
+			productReference = 23E395AE2FA5399A00574B85 /* LHS LifeTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		23E395B72FA5399A00574B85 /* LaSalle ScheduleUITests */ = {
+		23E395B72FA5399A00574B85 /* LHS LifeUITests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 23E395C82FA5399A00574B85 /* Build configuration list for PBXNativeTarget "LaSalle ScheduleUITests" */;
+			buildConfigurationList = 23E395C82FA5399A00574B85 /* Build configuration list for PBXNativeTarget "LHS LifeUITests" */;
 			buildPhases = (
 				23E395B42FA5399A00574B85 /* Sources */,
 				23E395B52FA5399A00574B85 /* Frameworks */,
@@ -250,16 +235,16 @@
 			fileSystemSynchronizedGroups = (
 				23E395BB2FA5399A00574B85 /* LaSalle ScheduleUITests */,
 			);
-			name = "LaSalle ScheduleUITests";
+			name = "LHS LifeUITests";
 			packageProductDependencies = (
 			);
 			productName = "LaSalle ScheduleUITests";
-			productReference = 23E395B82FA5399A00574B85 /* LaSalle ScheduleUITests.xctest */;
+			productReference = 23E395B82FA5399A00574B85 /* LHS LifeUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
-		23E396032FA57AE200574B85 /* LaSalle WidgetsExtension */ = {
+		23E396032FA57AE200574B85 /* LHS WidgetsExtension */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 23E3961F2FA57AE500574B85 /* Build configuration list for PBXNativeTarget "LaSalle WidgetsExtension" */;
+			buildConfigurationList = 23E3961F2FA57AE500574B85 /* Build configuration list for PBXNativeTarget "LHS WidgetsExtension" */;
 			buildPhases = (
 				23E396002FA57AE200574B85 /* Sources */,
 				23E396012FA57AE200574B85 /* Frameworks */,
@@ -272,11 +257,11 @@
 			fileSystemSynchronizedGroups = (
 				23E3960A2FA57AE300574B85 /* LaSalle Widgets */,
 			);
-			name = "LaSalle WidgetsExtension";
+			name = "LHS WidgetsExtension";
 			packageProductDependencies = (
 			);
 			productName = "LaSalle WidgetsExtension";
-			productReference = 23E396042FA57AE200574B85 /* LaSalle WidgetsExtension.appex */;
+			productReference = 23E396042FA57AE200574B85 /* LHS WidgetsExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
@@ -305,7 +290,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 23E3959C2FA5399800574B85 /* Build configuration list for PBXProject "LaSalle Schedule" */;
+			buildConfigurationList = 23E3959C2FA5399800574B85 /* Build configuration list for PBXProject "LHS Life" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -322,10 +307,10 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				23E395A02FA5399800574B85 /* LaSalle Schedule */,
-				23E395AD2FA5399A00574B85 /* LaSalle ScheduleTests */,
-				23E395B72FA5399A00574B85 /* LaSalle ScheduleUITests */,
-				23E396032FA57AE200574B85 /* LaSalle WidgetsExtension */,
+				23E395A02FA5399800574B85 /* LHS Life */,
+				23E395AD2FA5399A00574B85 /* LHS LifeTests */,
+				23E395B72FA5399A00574B85 /* LHS LifeUITests */,
+				23E396032FA57AE200574B85 /* LHS WidgetsExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -395,17 +380,17 @@
 /* Begin PBXTargetDependency section */
 		23E395B02FA5399A00574B85 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 23E395A02FA5399800574B85 /* LaSalle Schedule */;
+			target = 23E395A02FA5399800574B85 /* LHS Life */;
 			targetProxy = 23E395AF2FA5399A00574B85 /* PBXContainerItemProxy */;
 		};
 		23E395BA2FA5399A00574B85 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 23E395A02FA5399800574B85 /* LaSalle Schedule */;
+			target = 23E395A02FA5399800574B85 /* LHS Life */;
 			targetProxy = 23E395B92FA5399A00574B85 /* PBXContainerItemProxy */;
 		};
 		23E396192FA57AE500574B85 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 23E396032FA57AE200574B85 /* LaSalle WidgetsExtension */;
+			target = 23E396032FA57AE200574B85 /* LHS WidgetsExtension */;
 			targetProxy = 23E396182FA57AE500574B85 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -537,15 +522,15 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = "LaSalle Schedule/LaSalle Schedule.entitlements";
+				CODE_SIGN_ENTITLEMENTS = "";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = PQW4KRLW78;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "LaSalle-Schedule-Info.plist";
+				INFOPLIST_FILE = "LHS-Life-Info.plist";
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
-				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Reminders access is used to quickly record homework assignments.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -557,7 +542,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "wildcat.lasalle.LaSalle-Schedule";
+				PRODUCT_BUNDLE_IDENTIFIER = wildcat.lasalle.lhslife;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -574,15 +559,15 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = "LaSalle Schedule/LaSalle Schedule.entitlements";
+				CODE_SIGN_ENTITLEMENTS = "";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = PQW4KRLW78;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "LaSalle-Schedule-Info.plist";
+				INFOPLIST_FILE = "LHS-Life-Info.plist";
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
-				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Reminders access is used to quickly record homework assignments.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -594,7 +579,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "wildcat.lasalle.LaSalle-Schedule";
+				PRODUCT_BUNDLE_IDENTIFIER = wildcat.lasalle.lhslife;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -616,7 +601,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "wildcat.lasalle.LaSalle-ScheduleTests";
+				PRODUCT_BUNDLE_IDENTIFIER = wildcat.lasalle.lhslifeScheduleTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -638,7 +623,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "wildcat.lasalle.LaSalle-ScheduleTests";
+				PRODUCT_BUNDLE_IDENTIFIER = wildcat.lasalle.lhslifeScheduleTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -658,7 +643,7 @@
 				DEVELOPMENT_TEAM = PQW4KRLW78;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "wildcat.lasalle.LaSalle-ScheduleUITests";
+				PRODUCT_BUNDLE_IDENTIFIER = wildcat.lasalle.lhslifeScheduledUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -678,7 +663,7 @@
 				DEVELOPMENT_TEAM = PQW4KRLW78;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "wildcat.lasalle.LaSalle-ScheduleUITests";
+				PRODUCT_BUNDLE_IDENTIFIER = wildcat.lasalle.lhslifeScheduledUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -695,13 +680,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
-				CODE_SIGN_ENTITLEMENTS = "LaSalle WidgetsExtension.entitlements";
+				CODE_SIGN_ENTITLEMENTS = "LHS WidgetsExtension.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = PQW4KRLW78;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "LaSalle Widgets/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "LaSalle Widgets";
+				INFOPLIST_FILE = "/Users/liamlefohn/Documents/LaSalle ASB/LHS Life/LHS Widgets/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "LHS Widgets";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -709,7 +694,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "wildcat.lasalle.LaSalle-Schedule.LaSalle-Widgets";
+				PRODUCT_BUNDLE_IDENTIFIER = "wildcat.lasalle.lhslife.lhs-widgets";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -726,13 +711,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
-				CODE_SIGN_ENTITLEMENTS = "LaSalle WidgetsExtension.entitlements";
+				CODE_SIGN_ENTITLEMENTS = "LHS WidgetsExtension.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = PQW4KRLW78;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "LaSalle Widgets/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "LaSalle Widgets";
+				INFOPLIST_FILE = "/Users/liamlefohn/Documents/LaSalle ASB/LHS Life/LHS Widgets/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "LHS Widgets";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -740,7 +725,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "wildcat.lasalle.LaSalle-Schedule.LaSalle-Widgets";
+				PRODUCT_BUNDLE_IDENTIFIER = "wildcat.lasalle.lhslife.lhs-widgets";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -755,7 +740,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		23E3959C2FA5399800574B85 /* Build configuration list for PBXProject "LaSalle Schedule" */ = {
+		23E3959C2FA5399800574B85 /* Build configuration list for PBXProject "LHS Life" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				23E395C02FA5399A00574B85 /* Debug */,
@@ -764,7 +749,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		23E395C22FA5399A00574B85 /* Build configuration list for PBXNativeTarget "LaSalle Schedule" */ = {
+		23E395C22FA5399A00574B85 /* Build configuration list for PBXNativeTarget "LHS Life" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				23E395C32FA5399A00574B85 /* Debug */,
@@ -773,7 +758,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		23E395C52FA5399A00574B85 /* Build configuration list for PBXNativeTarget "LaSalle ScheduleTests" */ = {
+		23E395C52FA5399A00574B85 /* Build configuration list for PBXNativeTarget "LHS LifeTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				23E395C62FA5399A00574B85 /* Debug */,
@@ -782,7 +767,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		23E395C82FA5399A00574B85 /* Build configuration list for PBXNativeTarget "LaSalle ScheduleUITests" */ = {
+		23E395C82FA5399A00574B85 /* Build configuration list for PBXNativeTarget "LHS LifeUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				23E395C92FA5399A00574B85 /* Debug */,
@@ -791,7 +776,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		23E3961F2FA57AE500574B85 /* Build configuration list for PBXNativeTarget "LaSalle WidgetsExtension" */ = {
+		23E3961F2FA57AE500574B85 /* Build configuration list for PBXNativeTarget "LHS WidgetsExtension" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				23E3961C2FA57AE500574B85 /* Debug */,
