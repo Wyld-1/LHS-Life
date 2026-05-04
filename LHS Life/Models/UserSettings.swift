@@ -37,6 +37,13 @@ final class UserSettings {
     var professionalDressNotificationsEnabled: Bool
     var liveActivityEnabled: Bool
 
+    // MARK: - ASB
+
+    /// True if the student is an ASB member (works at the Student Store).
+    var isASBMember: Bool
+    /// Bitmask of weekdays they work: index 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri
+    var asbWorkDays: [Bool]   // 5 elements
+
     // MARK: - Init (reads from disk exactly once)
 
     init() {
@@ -49,14 +56,23 @@ final class UserSettings {
         self.graduationYear = storedYear == 0 ? Self.defaultGradYear : storedYear
 
         if let data = d.data(forKey: Keys.periodConfigs),
-           let decoded = try? JSONDecoder().decode([PeriodConfig].self, from: data) {
+           let decoded = try? JSONDecoder().decode([PeriodConfig].self, from: data),
+           d.integer(forKey: Keys.paletteVersion) == Self.currentPaletteVersion {
             self.periodConfigs = decoded
         } else {
+            // First launch or palette changed — reset to defaults with correct color indices
             self.periodConfigs = PeriodConfig.defaults
+            d.set(Self.currentPaletteVersion, forKey: Keys.paletteVersion)
         }
 
         self.professionalDressNotificationsEnabled = d.object(forKey: Keys.dressNotifs) as? Bool ?? true
         self.liveActivityEnabled = d.object(forKey: Keys.liveActivity) as? Bool ?? false
+        self.isASBMember = d.bool(forKey: Keys.asbMember)
+        if let days = d.array(forKey: Keys.asbWorkDays) as? [Bool], days.count == 5 {
+            self.asbWorkDays = days
+        } else {
+            self.asbWorkDays = [false, false, false, false, false]
+        }
     }
 
     // MARK: - Explicit save (called on settings sheet dismiss only)
@@ -66,6 +82,8 @@ final class UserSettings {
         store.set(graduationYear, forKey: Keys.gradYear)
         store.set(professionalDressNotificationsEnabled, forKey: Keys.dressNotifs)
         store.set(liveActivityEnabled, forKey: Keys.liveActivity)
+        store.set(isASBMember, forKey: Keys.asbMember)
+        store.set(asbWorkDays, forKey: Keys.asbWorkDays)
         if let data = try? JSONEncoder().encode(periodConfigs) {
             store.set(data, forKey: Keys.periodConfigs)
         }
@@ -95,5 +113,11 @@ final class UserSettings {
         static let periodConfigs = "period_configs"
         static let dressNotifs   = "dress_notifications_enabled"
         static let liveActivity  = "live_activity_enabled"
+        static let paletteVersion = "palette_version"
+        static let asbMember     = "asb_member"
+        static let asbWorkDays   = "asb_work_days"
     }
+
+    /// Current palette version. Increment any time ColorPalette.colors order changes.
+    private static let currentPaletteVersion = 2
 }

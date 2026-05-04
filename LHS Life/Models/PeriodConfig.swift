@@ -23,13 +23,16 @@ struct PeriodConfig: Identifiable, Codable, Hashable {
         return trimmed.isEmpty ? (id == 0 ? "Period 0" : "Period \(id)") : trimmed
     }
 
+    /// Default color index per period: gray, red, orange, yellow, green, sky, blue, lavender, gray
+    private static let defaultColorIndices = [0, 1, 2, 3, 4, 5, 6, 7, 0]
+
     /// Default configs for all period slots.
     static let defaults: [PeriodConfig] = (0...8).map { n in
         PeriodConfig(
             id: n,
             customName: "",
-            colorIndex: n % ColorPalette.colors.count,
-            isEnabled: !(n == 0 || n == 8)  // 0 and 8 off by default
+            colorIndex: defaultColorIndices[n],
+            isEnabled: !(n == 0 || n == 8)
         )
     }
 }

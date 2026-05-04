@@ -46,6 +46,7 @@ struct SettingsSheetView: View {
             ScrollView {
                 LazyVStack(spacing: LS.lg, pinnedViews: []) {
                     gradYearSection
+                    asbSection
                     periodsSection
                     notificationsSection
                 }
@@ -116,6 +117,72 @@ struct SettingsSheetView: View {
         }
         isEditingGradYear = false
         gradYearFocused = false
+    }
+
+    // MARK: - ASB
+
+    private static let weekdayNames = ["Mon", "Tue", "Wed", "Thu", "Fri"]
+
+    private var asbSection: some View {
+        VStack(alignment: .leading, spacing: LS.sm) {
+            // ASB toggle lives inside the My Info card
+            VStack(spacing: 0) {
+                Toggle(isOn: $settings.isASBMember) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("ASB Member")
+                            .font(.lsHeadline)
+                            .foregroundStyle(Color.lsPrimary)
+                        Text("Enables student leadership notifications")
+                            .font(.lsCaption)
+                            .foregroundStyle(Color.lsSecondary)
+                    }
+                }
+                .tint(Color.lsBlue)
+                .padding(LS.md)
+                .onChange(of: settings.isASBMember) { _, _ in HapticEngine.shared.tap() }
+
+                // Work days — revealed when ASB is on
+                if settings.isASBMember {
+                    Divider().background(Color.lsTertiary.opacity(0.3))
+
+                    VStack(alignment: .leading, spacing: LS.sm) {
+                        Text("I work Student Store on:")
+                            .font(.lsCaption)
+                            .foregroundStyle(Color.lsSecondary)
+                            .padding(.horizontal, LS.md)
+                            .padding(.top, LS.sm)
+
+                        HStack(spacing: LS.sm) {
+                            ForEach(0..<5, id: \.self) { i in
+                                Button {
+                                    HapticEngine.shared.tick()
+                                    settings.asbWorkDays[i].toggle()
+                                } label: {
+                                    Text(Self.weekdayNames[i])
+                                        .font(.lsCaption)
+                                        .foregroundStyle(settings.asbWorkDays[i] ? .white : Color.lsSecondary)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, LS.xs + 2)
+                                        .background(
+                                            settings.asbWorkDays[i]
+                                                ? Color.lsBlue
+                                                : Color.lsSurfaceRaised
+                                        )
+                                        .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .animation(.lsSnappy, value: settings.asbWorkDays[i])
+                            }
+                        }
+                        .padding(.horizontal, LS.md)
+                        .padding(.bottom, LS.md)
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            .lsCard()
+            .animation(.lsSnappy, value: settings.isASBMember)
+        }
     }
 
     // MARK: - Periods

@@ -60,8 +60,10 @@ struct AppTabContainer: View {
     @Environment(UserSettings.self) private var settings
 
     @State private var selectedTab  = AppTab.events
-    @State private var showSettings = false
-    @State private var showHomework = false
+    @State private var previousTab   = AppTab.events
+    @State private var showSettings  = false
+    @State private var showHomework  = false
+    @State private var isLaunching   = true   // true until all web states are ready
 
     @State private var lunchState = EmbeddedWebState(
         url: URL(string: "https://lhs.plan.tech/lunch/")!,
@@ -77,6 +79,15 @@ struct AppTabContainer: View {
         siteName: "Schoology"
     )
 
+    // Progress: calendar load (0.33) + each web state (0.22 each)
+    private var launchProgress: Double {
+        var p = store.events.isEmpty ? 0.0 : 0.34
+        if lunchState.isReady       { p += 0.22 }
+        if powerschoolState.isReady { p += 0.22 }
+        if schoologyState.isReady   { p += 0.22 }
+        return min(p, 1.0)
+    }
+
     var body: some View {
         ZStack {
 
@@ -88,32 +99,86 @@ struct AppTabContainer: View {
                 selectedTab: $selectedTab,
                 lunchState: lunchState,
                 powerschoolState: powerschoolState,
-                schoologyState: schoologyState
+                schoologyState: schoologyState,
+                onSameTabTap: { tab in
+                    // Tapping the active tab acts as a home button
+                    switch tab {
+                    case .powerschool: powerschoolState.reload()
+                    case .schoology:   schoologyState.reload()
+                    case .lunch:       lunchState.reload()
+                    default: break
+                    }
+                }
             )
 
-            // MARK: Layer 1 — Floating chrome
+            // Layer 1 — Floating chrome
             VStack {
-                // Top row: pill header (settings button is inside ScheduleHeader)
                 ScheduleHeader(showSettings: $showSettings)
                     .padding(.horizontal, LS.md)
 
                 Spacer()
 
-                // Bottom row: FAB is only needed on legacy.
-                // On iOS 26 the .search role tab renders the detached circle.
-                if #unavailable(iOS 26) {
-                    HStack {
-                        Spacer()
-                        HomeworkFAB { showHomework = true }
+                HStack(alignment: .bottom) {
+                    Spacer()
+                    VStack(spacing: LS.sm) {
+                        if selectedTab == .powerschool {
+                            WebNavButtons(
+                                webState: powerschoolState,
+                                onHomeTap: { powerschoolState.reload() }
+                            )
+                        } else if selectedTab == .schoology {
+                            WebNavButtons(
+                                webState: schoologyState,
+                                onHomeTap: { schoologyState.reload() }
+                            )
+                        }
+                        // FAB only on legacy — iOS 26 uses the system search tab circle
+                        if #unavailable(iOS 26) {
+                            HomeworkFAB {
+                                HapticEngine.shared.bump()
+                                withAnimation(.lsSpring) { showHomework = true }
+                            }
+                        }
                     }
-                    .padding(.horizontal, LS.md)
-                    .padding(.bottom, LS.sm)
                 }
+                .padding(.horizontal, LS.md)
+                .padding(.bottom, LS.xxl)
             }
             .safeAreaPadding(.top)
             .safeAreaPadding(.bottom)
+
+            // Homework popup
+            if showHomework {
+                HomeworkPopup(onDismiss: { withAnimation(.lsSpring) { showHomework = false } })
+                    .environment(store)
+                    .environment(settings)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    .zIndex(10)
+            }
+
+            // Launch screen — blocks interaction until everything is ready
+            if isLaunching {
+                LaunchScreen(progress: launchProgress)
+                    .transition(.opacity)
+                    .zIndex(20)
+            }
         }
         .background(Color.lsBackground)
+        .onChange(of: launchProgress) { _, progress in
+            if progress >= 1.0 && isLaunching {
+                withAnimation(.easeInOut(duration: 0.4)) { isLaunching = false }
+            }
+        }
+        .onChange(of: selectedTab) { old, new in
+            if new == .homework {
+                // Snap back to previous tab immediately — content never changes.
+                // The popup floats over whatever tab was active.
+                selectedTab = previousTab
+                withAnimation(.lsSpring) { showHomework = true }
+            } else {
+                previousTab = new
+            }
+        }
         .task {
             async let l: () = lunchState.initialize()
             async let p: () = powerschoolState.initialize()
@@ -130,14 +195,6 @@ struct AppTabContainer: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsSheetView(settings: settings)
-                .presentationDragIndicator(.visible)
-                .presentationBackground(Color.lsSurface)
-        }
-        .sheet(isPresented: $showHomework) {
-            HomeworkSheet()
-                .environment(store)
-                .environment(settings)
-                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(Color.lsSurface)
         }

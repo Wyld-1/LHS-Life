@@ -22,6 +22,7 @@ struct AppDock: View {
     let lunchState:       EmbeddedWebState
     let powerschoolState: EmbeddedWebState
     let schoologyState:   EmbeddedWebState
+    var onSameTabTap: (AppTab) -> Void = { _ in }
 
     var body: some View {
         if #available(iOS 26, *) {
@@ -36,7 +37,8 @@ struct AppDock: View {
                 selectedTab: $selectedTab,
                 lunchState: lunchState,
                 powerschoolState: powerschoolState,
-                schoologyState: schoologyState
+                schoologyState: schoologyState,
+                onSameTabTap: onSameTabTap
             )
         }
     }
@@ -88,9 +90,18 @@ private struct SystemTabDock: View {
 private struct HomeworkSearchTab: View {
     @Environment(CalendarStore.self) private var store
     @Environment(UserSettings.self) private var settings
+    @State private var show = true
 
     var body: some View {
-        HomeworkSheet()
+        ZStack {
+            Color.lsBackground.ignoresSafeArea()
+            if show {
+                HomeworkPopup(onDismiss: { show = false })
+                    .environment(store)
+                    .environment(settings)
+            }
+        }
+        .onAppear { show = true }
     }
 }
 
@@ -100,6 +111,7 @@ private struct LegacyTabDock: View {
     let lunchState:       EmbeddedWebState
     let powerschoolState: EmbeddedWebState
     let schoologyState:   EmbeddedWebState
+    var onSameTabTap: (AppTab) -> Void = { _ in }
 
     var body: some View {
         ZStack {
@@ -121,7 +133,7 @@ private struct LegacyTabDock: View {
             VStack {
                 Spacer()
                 HStack {
-                    LegacyDockBar(selectedTab: $selectedTab)
+                    LegacyDockBar(selectedTab: $selectedTab, onSameTabTap: onSameTabTap)
                     Spacer()
                 }
                 .padding(.horizontal, LS.md)
@@ -135,13 +147,20 @@ private struct LegacyTabDock: View {
 
 private struct LegacyDockBar: View {
     @Binding var selectedTab: AppTab
+    var onSameTabTap: (AppTab) -> Void = { _ in }
 
     var body: some View {
         HStack(spacing: 0) {
             ForEach(AppTab.dockTabs, id: \.rawValue) { tab in
                 LegacyDockButton(tab: tab, isSelected: selectedTab == tab) {
-                    HapticEngine.shared.tap()
-                    withAnimation(.lsSnappy) { selectedTab = tab }
+                    if tab == selectedTab {
+                        // Already on this tab — treat as home
+                        HapticEngine.shared.tap()
+                        onSameTabTap(tab)
+                    } else {
+                        HapticEngine.shared.tap()
+                        withAnimation(.lsSnappy) { selectedTab = tab }
+                    }
                 }
             }
         }

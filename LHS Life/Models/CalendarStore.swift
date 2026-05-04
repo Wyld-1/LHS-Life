@@ -72,6 +72,9 @@ final class CalendarStore {
             if settings.professionalDressNotificationsEnabled {
                 await NotificationService.scheduleProfessionalDressNotifications(for: fetched)
             }
+            if settings.isASBMember {
+                await NotificationService.scheduleASBNotifications(settings: settings, store: self)
+            }
         } catch {
             self.error = AppError(underlying: error)
         }

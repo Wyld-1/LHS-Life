@@ -3,13 +3,11 @@
 //  LHS Life
 //
 //  Generic web view state + view for Lunch, PowerSchool, and Schoology.
-//  The WKWebView fills the entire screen (including behind header + dock).
-//  Content insets push the actual page content into the visible area.
-//  A gradient overlay fades the top edge into the app background color.
+//  Mobile user agent forces responsive mobile layout on all sites.
 //
 
 import SwiftUI
-import WebKit
+internal import WebKit
 
 // MARK: - Navigation Delegate
 
@@ -23,7 +21,10 @@ final class EmbeddedWebDelegate: NSObject, WKNavigationDelegate {
         }
     }
     func webView(_ webView: WKWebView, didFinish _: WKNavigation!) {
-        Task { @MainActor [weak self] in self?.state?.isLoading = false }
+        Task { @MainActor [weak self] in
+            self?.state?.isLoading = false
+            self?.state?.canGoBack = webView.canGoBack
+        }
     }
     func webView(_ webView: WKWebView, didFail _: WKNavigation!, withError e: Error) {
         Task { @MainActor [weak self] in
@@ -47,6 +48,7 @@ final class EmbeddedWebState {
     var isLoading = false
     var loadError: Error? = nil
     var isReady   = false
+    var canGoBack = false
 
     private(set) var webView: WKWebView? = nil
     private let delegate = EmbeddedWebDelegate()
@@ -61,6 +63,10 @@ final class EmbeddedWebState {
         self.injectDarkCSS = injectDarkCSS
         delegate.state     = self
     }
+
+    // iPhone Mobile Safari user agent — forces mobile/responsive layout on all sites.
+    // Schoology and PowerSchool serve desktop HTML when the view identifies as iPad/Mac.
+    private static let mobileUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
 
     private static let darkModeCSS = """
         body, div, p, span, td, th, label, input, select, textarea, a {
@@ -94,10 +100,10 @@ final class EmbeddedWebState {
             config.userContentController.addUserScript(Self.cssScript)
         }
         let wv = WKWebView(frame: UIScreen.main.bounds, configuration: config)
+        wv.customUserAgent = Self.mobileUserAgent
         wv.backgroundColor = UIColor(red: 0.074, green: 0.086, blue: 0.11, alpha: 1)
         wv.scrollView.backgroundColor = .clear
         wv.isOpaque = true
-        // Don't clip to safe area — we manage insets manually
         wv.scrollView.contentInsetAdjustmentBehavior = .never
         wv.navigationDelegate = delegate
         webView = wv
@@ -106,7 +112,6 @@ final class EmbeddedWebState {
         wv.load(URLRequest(url: url))
     }
 
-    /// Call after geometry is known to push content below header and above dock.
     @MainActor
     func applyInsets(top: CGFloat, bottom: CGFloat) {
         guard let wv = webView else { return }
@@ -132,22 +137,17 @@ struct EmbeddedWebView: View {
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .top) {
-
-                // Web view — fills the entire screen including behind chrome
                 if let wv = webState.webView {
                     WebViewRepresentable(webView: wv)
                         .frame(width: geo.size.width, height: geo.size.height)
                         .ignoresSafeArea()
                         .onAppear {
-                            // Top: status bar + header pill (~88pt) + a little breathing room
-                            // Bottom: home indicator + dock height + extra padding
                             let topInset    = 140.0
                             let bottomInset = 0.0
                             webState.applyInsets(top: topInset, bottom: bottomInset)
                         }
                 }
 
-                // Loading state
                 if webState.isLoading || !webState.isReady {
                     Color.lsBackground.ignoresSafeArea()
                     ProgressView()
@@ -155,7 +155,6 @@ struct EmbeddedWebView: View {
                         .scaleEffect(1.3)
                 }
 
-                // Error state
                 if let error = webState.loadError {
                     Color.lsBackground.ignoresSafeArea()
                     VStack(spacing: LS.md) {
@@ -176,7 +175,6 @@ struct EmbeddedWebView: View {
                     }
                 }
 
-                // Top gradient — blends page content into app background under the header.
                 LinearGradient(
                     stops: [
                         .init(color: .lsBackground, location: 0),

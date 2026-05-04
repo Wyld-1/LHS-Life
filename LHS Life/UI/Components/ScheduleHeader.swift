@@ -197,7 +197,7 @@ struct ScheduleHeader: View {
     private var weekendText: String {
         switch Calendar.current.component(.weekday, from: now) {
         case 6:  return "Happy Friday 🎉"
-        case 7, 1: return "Enjoy the weekend"
+        case 7, 1: return "Enjoy the weekend!"
         default: return "No school today"
         }
     }

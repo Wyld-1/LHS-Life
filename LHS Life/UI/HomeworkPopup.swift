@@ -1,0 +1,311 @@
+//
+//  HomeworkPopup.swift
+//  LHS Life
+//
+//  Centered popup card floating over the current tab.
+//  Fixed vertical position — ignores keyboard movements entirely.
+//  "Pick a Date" expands a DatePicker inline inside the card.
+//
+
+import SwiftUI
+
+struct HomeworkPopup: View {
+    @Environment(CalendarStore.self) private var store
+    @Environment(UserSettings.self) private var settings
+    @StateObject private var reminders = RemindersService()
+
+    let onDismiss: () -> Void
+
+    @State private var title             = ""
+    @State private var selectedPeriodID  = 1
+    @State private var dueDate: Date?    = nil
+    @State private var showInlinePicker  = false
+    @State private var isSaving          = false
+    @State private var errorMessage: String? = nil
+    @FocusState private var titleFocused: Bool
+
+    private var enabledPeriods: [PeriodConfig] {
+        settings.periodConfigs.filter { $0.isEnabled }
+    }
+
+    private var selectedConfig: PeriodConfig? {
+        settings.config(for: selectedPeriodID)
+    }
+
+    var body: some View {
+        ZStack {
+            // Scrim — tapping outside dismisses
+            Color.black.opacity(0.45)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    titleFocused = false
+                    withAnimation(.lsSnappy) { onDismiss() }
+                }
+
+            // Card — offset upward so keyboard doesn't obscure it
+            card
+                .padding(.horizontal, LS.xl)
+                .offset(y: -40)
+        }
+        .ignoresSafeArea(.keyboard)
+        .onAppear {
+            // Pick the best default period:
+            //   In session → current period
+            //   Between periods / before school → next period
+            //   Everything else → first enabled period
+            let state = store.todayState()
+            let bestPeriodID: Int? = {
+                if let slot = state.currentSlot, let num = periodNumber(from: slot.period.name) {
+                    return num
+                }
+                if let slot = state.nextSlot, let num = periodNumber(from: slot.period.name) {
+                    return num
+                }
+                return nil
+            }()
+            if let num = bestPeriodID, settings.config(for: num)?.isEnabled == true {
+                selectedPeriodID = num
+            } else {
+                selectedPeriodID = enabledPeriods.first?.id ?? 1
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { titleFocused = true }
+            Task { if !reminders.isAuthorized { _ = await reminders.requestAccess() } }
+        }
+    }
+
+    // MARK: - Card
+
+    private var card: some View {
+        VStack(spacing: LS.sm) {
+
+            // Text field
+            TextField("Assignment name", text: $title)
+                .font(.lsBody)
+                .foregroundStyle(Color.lsPrimary)
+                .focused($titleFocused)
+                .submitLabel(.done)
+                .onSubmit {
+                    guard !title.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+                    Task { await save() }
+                }
+                .padding(.horizontal, LS.md)
+                .padding(.vertical, LS.sm + 2)
+                .background(Color.lsSurfaceRaised)
+                .clipShape(RoundedRectangle(cornerRadius: LS.radiusSm, style: .continuous))
+
+            // Class + Date row
+            HStack(spacing: LS.sm) {
+                classMenu
+                dateMenu
+            }
+
+            // Inline date picker — expands inside the card when "Pick a Date" is tapped
+            if showInlinePicker {
+                DatePicker(
+                    "",
+                    selection: Binding(
+                        get: { dueDate ?? Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date() },
+                        set: { dueDate = $0; HapticEngine.shared.tick() }
+                    ),
+                    in: Date()...,
+                    displayedComponents: [.date]
+                )
+                .datePickerStyle(.graphical)
+                .tint(Color.lsBlue)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            // Error
+            if let err = errorMessage {
+                Text(err)
+                    .font(.lsCaption)
+                    .foregroundStyle(Color.lsDestructive)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            // Cancel / Save
+            HStack(spacing: LS.sm) {
+                Button("Cancel") {
+                    HapticEngine.shared.tap()
+                    titleFocused = false
+                    withAnimation(.lsSnappy) { onDismiss() }
+                }
+                .font(.lsHeadline)
+                .foregroundStyle(Color.lsPrimary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, LS.sm + 2)
+                .background(Color.lsSurfaceRaised)
+                .clipShape(Capsule())
+                .buttonStyle(.plain)
+
+                Button {
+                    Task { await save() }
+                } label: {
+                    Group {
+                        if isSaving {
+                            ProgressView().tint(.white).scaleEffect(0.85)
+                        } else {
+                            Text("Save").font(.lsHeadline).foregroundStyle(.white)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, LS.sm + 2)
+                    .background(
+                        title.trimmingCharacters(in: .whitespaces).isEmpty
+                            ? Color.lsBlue.opacity(0.4) : Color.lsBlue
+                    )
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+            }
+            .padding(.top, LS.xs)
+        }
+        .padding(LS.md)
+        .background {
+            RoundedRectangle(cornerRadius: LS.radiusLg, style: .continuous)
+                .fill(.regularMaterial)
+                .overlay {
+                    RoundedRectangle(cornerRadius: LS.radiusLg, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5)
+                }
+        }
+        .shadow(color: .black.opacity(0.35), radius: 40, y: 8)
+        .animation(.lsSnappy, value: showInlinePicker)
+    }
+
+    // MARK: - Class Menu
+
+    private var classMenu: some View {
+        Menu {
+            Picker("Class", selection: $selectedPeriodID) {
+                ForEach(enabledPeriods) { config in
+                    Text(config.displayName).tag(config.id)
+                }
+            }
+        } label: {
+            HStack(spacing: LS.xs) {
+                if let config = selectedConfig {
+                    Circle()
+                        .fill(Color.paletteColor(for: config))
+                        .frame(width: 9, height: 9)
+                    Text(config.displayName)
+                        .font(.lsBody)
+                        .foregroundStyle(Color.lsPrimary)
+                        .lineLimit(1)
+                }
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color.lsSecondary)
+            }
+            .padding(.horizontal, LS.sm)
+            .padding(.vertical, LS.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.lsSurfaceRaised)
+            .clipShape(RoundedRectangle(cornerRadius: LS.radiusSm, style: .continuous))
+        }
+        .tint(Color.lsPrimary)
+        .onChange(of: selectedPeriodID) { _, _ in
+            titleFocused = false
+            HapticEngine.shared.tick()
+        }
+    }
+
+    // MARK: - Date Menu
+
+    private var dateMenu: some View {
+        Menu {
+            Button("Tomorrow") {
+                dueDate = nextDay()
+                showInlinePicker = false
+                HapticEngine.shared.tick()
+            }
+            Button("Next week") {
+                dueDate = nextMonday()
+                showInlinePicker = false
+                HapticEngine.shared.tick()
+            }
+            Button("Pick a Date") {
+                titleFocused = false
+                withAnimation(.lsSnappy) {
+                    showInlinePicker.toggle()
+                }
+            }
+            if dueDate != nil {
+                Divider()
+                Button("Remove Date", role: .destructive) {
+                    dueDate = nil
+                    showInlinePicker = false
+                    HapticEngine.shared.tick()
+                }
+            }
+        } label: {
+            HStack(spacing: LS.xs) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(dueDate == nil ? Color.lsSecondary : Color.lsBlue)
+                if let due = dueDate {
+                    Text(shortDate(due))
+                        .font(.lsCaption)
+                        .foregroundStyle(Color.lsBlue)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, LS.sm)
+            .padding(.vertical, LS.sm)
+            .background(Color.lsSurfaceRaised)
+            .clipShape(RoundedRectangle(cornerRadius: LS.radiusSm, style: .continuous))
+        }
+        .simultaneousGesture(TapGesture().onEnded { titleFocused = false })
+    }
+
+    // MARK: - Save
+
+    private func save() async {
+        let trimmed = title.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        isSaving = true
+        errorMessage = nil
+        let className = selectedConfig?.displayName ?? "Homework"
+        do {
+            try await reminders.addAssignment(title: trimmed, className: className, dueDate: dueDate)
+            HapticEngine.shared.success()
+            onDismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+            isSaving = false
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func nextDay() -> Date {
+        Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date())) ?? Date()
+    }
+
+    private func nextMonday() -> Date {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let weekday = cal.component(.weekday, from: today)
+        let daysUntilMonday = weekday == 2 ? 7 : (9 - weekday) % 7
+        return cal.date(byAdding: .day, value: daysUntilMonday, to: today) ?? today
+    }
+
+    private func shortDate(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d"
+        return f.string(from: date)
+    }
+
+    private func periodNumber(from name: String) -> Int? {
+        let parts = name.split(separator: " ")
+        guard parts.count == 2, parts[0].lowercased() == "period" else { return nil }
+        return Int(parts[1])
+    }
+}
+
+#Preview {
+    HomeworkPopup(onDismiss: {})
+        .environment(CalendarStore())
+        .environment(UserSettings.shared)
+}
