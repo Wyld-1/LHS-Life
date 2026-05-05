@@ -3,48 +3,68 @@
 //  LHS Life
 //
 //  Manages the lifecycle of the schedule Live Activity.
-//  Starts when school begins, updates every 30 seconds via a timer
-//  (ActivityKit throttles updates — 30s is a safe interval),
-//  and ends when school is over or the user disables the feature.
-//
-//  App target only.
+//  Update intervals are dynamic:
+//    inSession      → every 5 minutes (bell time is stable mid-period)
+//    betweenPeriods → every 30 seconds (transitions matter)
+//    beforeSchool   → every 30 seconds
+//  staleDate is set to the next period transition so the system knows
+//  exactly when to prompt a refresh.
 //
 
 import Foundation
 import ActivityKit
-import Combine
 
 @MainActor
-final class LiveActivityService: ObservableObject {
+@Observable
+final class LiveActivityService {
 
     static let shared = LiveActivityService()
     private init() {}
 
     private var currentActivity: Activity<ScheduleActivityAttributes>?
-    private var updateTimer: Timer?
+    private var lastUpdateTime: Date = .distantPast
 
     // MARK: - Public API
 
-    /// Call whenever the schedule state changes or settings are updated.
-    func update(state: ScheduleEngine.ScheduleState,
-                settings: UserSettings) {
+    func update(state: ScheduleEngine.ScheduleState, settings: UserSettings) {
         guard settings.liveActivityEnabled else {
             Task { await end() }
             return
         }
-
-        let content = buildContentState(from: state, settings: settings)
 
         switch state.dayState {
         case .inSession, .betweenPeriods, .beforeSchool:
             if currentActivity == nil {
                 start(state: state, settings: settings)
             } else {
-                Task { await updateContent(content) }
+                let interval = dynamicUpdateInterval(for: state)
+                let now = Date()
+                guard now.timeIntervalSince(lastUpdateTime) >= interval else { return }
+                lastUpdateTime = now
+                let content = buildContentState(from: state, settings: settings)
+                let stale = staleDateForNextTransition(state: state)
+                Task { await updateContent(content, staleDate: stale) }
             }
         case .afterSchool, .noSchedule, .holiday, .pathwaysDay:
             Task { await end() }
         }
+    }
+
+    // MARK: - Dynamic interval
+
+    private func dynamicUpdateInterval(for state: ScheduleEngine.ScheduleState) -> TimeInterval {
+        switch state.dayState {
+        case .inSession:            return 300  // 5 min — bell time unchanged mid-period
+        case .betweenPeriods,
+             .beforeSchool:         return 30   // 30s — passing time is short
+        default:                    return 300
+        }
+    }
+
+    private func staleDateForNextTransition(state: ScheduleEngine.ScheduleState) -> Date {
+        if let slot = state.currentSlot { return slot.endDate }
+        if let next = state.nextSlot    { return next.startDate }
+        return Date().addingTimeInterval(300)
     }
 
     // MARK: - Start
@@ -52,8 +72,7 @@ final class LiveActivityService: ObservableObject {
     private func start(state: ScheduleEngine.ScheduleState, settings: UserSettings) {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
 
-        // Use the current or next slot's color
-        let slot = state.currentSlot ?? state.nextSlot
+        let slot     = state.currentSlot ?? state.nextSlot
         let colorHex = slot.flatMap { s in
             s.config.map { ColorPalette.color(at: $0.colorIndex).hex }
         } ?? "#3A6FD8"
@@ -63,16 +82,16 @@ final class LiveActivityService: ObservableObject {
             schoolName: "LaSalle"
         )
         let content = buildContentState(from: state, settings: settings)
+        let stale   = staleDateForNextTransition(state: state)
 
         do {
             let activity = try Activity.request(
                 attributes: attributes,
-                content: .init(state: content, staleDate: Date().addingTimeInterval(120)),
+                content: .init(state: content, staleDate: stale),
                 pushType: nil
             )
             currentActivity = activity
-            startUpdateTimer(settings: settings)
-            print("[LiveActivity] Started: \(activity.id)")
+            lastUpdateTime  = Date()
         } catch {
             print("[LiveActivity] Failed to start: \(error)")
         }
@@ -80,50 +99,19 @@ final class LiveActivityService: ObservableObject {
 
     // MARK: - Update
 
-    private func updateContent(_ content: ScheduleActivityAttributes.ContentState) async {
+    private func updateContent(_ content: ScheduleActivityAttributes.ContentState,
+                                staleDate: Date) async {
         guard let activity = currentActivity else { return }
-        await activity.update(.init(state: content, staleDate: Date().addingTimeInterval(120)))
+        await activity.update(.init(state: content, staleDate: staleDate))
     }
 
     // MARK: - End
 
     func end() async {
-        stopUpdateTimer()
         guard let activity = currentActivity else { return }
         await activity.end(nil, dismissalPolicy: .immediate)
         currentActivity = nil
-        print("[LiveActivity] Ended")
-    }
-
-    // MARK: - Timer (updates every 30s — ActivityKit rate-limits more frequent calls)
-
-    private func startUpdateTimer(settings: UserSettings) {
-        stopUpdateTimer()
-        updateTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.tickUpdate(settings: settings)
-            }
-        }
-    }
-
-    private func stopUpdateTimer() {
-        updateTimer?.invalidate()
-        updateTimer = nil
-    }
-
-    private func tickUpdate(settings: UserSettings) {
-        // Re-read from SharedStore so widgets stay current without hitting the network
-        let schedules  = SharedStore.readBellSchedules()
-        let dayKey     = DateFormatter.isoDay.string(from: Date())
-        let schedule   = schedules[dayKey]
-        let state      = ScheduleEngine.state(
-            for: Date(),
-            schedule: schedule,
-            settings: settings,
-            isPathwaysDay: false,
-            isHoliday: false
-        )
-        update(state: state, settings: settings)
+        lastUpdateTime  = .distantPast
     }
 
     // MARK: - Content Builder
@@ -133,9 +121,18 @@ final class LiveActivityService: ObservableObject {
         settings: UserSettings
     ) -> ScheduleActivityAttributes.ContentState {
 
-        let currentName   = state.currentSlot?.displayName ?? "—"
-        let nextName      = state.nextSlot?.displayName
-        let headerText    = ScheduleEngine.headerPrimaryText(for: state)
+        let currentName  = state.currentSlot?.displayName ?? "—"
+        let nextName     = state.nextSlot?.displayName
+        let headerText   = ScheduleEngine.headerPrimaryText(for: state)
+
+        let nextBellTime: String?
+        if let current = state.currentSlot {
+            nextBellTime = ScheduleEngine.timeString(current.endDate)
+        } else if let next = state.nextSlot {
+            nextBellTime = ScheduleEngine.timeString(next.startDate)
+        } else {
+            nextBellTime = nil
+        }
 
         let secondsRemaining: Int
         let durationSeconds: Int
@@ -144,9 +141,8 @@ final class LiveActivityService: ObservableObject {
             secondsRemaining = max(0, Int(slot.timeRemaining))
             durationSeconds  = max(1, Int(slot.duration))
         } else if let next = state.nextSlot {
-            // Between periods — count down to next period start
             secondsRemaining = max(0, Int(next.startDate.timeIntervalSince(Date())))
-            durationSeconds  = secondsRemaining  // progress stays at 0
+            durationSeconds  = max(1, secondsRemaining)
         } else {
             secondsRemaining = 0
             durationSeconds  = 1
@@ -162,6 +158,7 @@ final class LiveActivityService: ObservableObject {
             secondsRemaining: secondsRemaining,
             periodDurationSeconds: durationSeconds,
             nextPeriodName: nextName,
+            nextBellTime: nextBellTime,
             isOffSchedule: isOff,
             headerText: headerText
         )

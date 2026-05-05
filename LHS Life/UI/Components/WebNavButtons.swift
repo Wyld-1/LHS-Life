@@ -2,14 +2,13 @@
 //  WebNavButtons.swift
 //  LHS Life
 //
-//  Vertical home/back pill shown on PowerSchool and Schoology tabs.
-//  iOS 26+: GlassEffectContainer with per-button glassEffect() for interactive
-//            liquid glass that morphs the two buttons into one connected surface.
-//  iOS 17–25: ultraThinMaterial capsule.
+//  iOS 26+: GlassEffectContainer fuses two .buttonStyle(.glass) buttons
+//            into one connected liquid glass surface. Interactive bounce/shimmer
+//            on tap is built into .buttonStyle(.glass) — no extra modifier needed.
+//            Icons use .primary foregroundStyle so the glass system adapts their
+//            luminance and contrast to whatever content is underneath.
 //
-//  Icon foregroundStyle is left unset so it inherits from the environment
-//  (white on dark, dark on light) — identical to how the system tab bar
-//  renders unselected icons.
+//  iOS 17–18: ultraThinMaterial capsule, right-anchored, fixed width.
 //
 
 import SwiftUI
@@ -28,7 +27,7 @@ struct WebNavButtons: View {
     }
 }
 
-// MARK: - iOS 26: Interactive liquid glass
+// MARK: - iOS 26+: Fused interactive glass
 
 @available(iOS 26, *)
 private struct GlassNavButtons: View {
@@ -36,57 +35,52 @@ private struct GlassNavButtons: View {
     let onHomeTap: () -> Void
 
     var body: some View {
-        // GlassEffectContainer merges adjacent glass shapes into one connected
-        // liquid glass surface. spacing: 0 forces them to touch and fuse.
-        GlassEffectContainer(spacing: 0) {
-            VStack(spacing: 0) {
-                GlassNavButton(icon: "house.fill", action: onHomeTap)
-
-                Divider()
-                    .opacity(0.15)
-
-                GlassNavButton(
-                    icon: "chevron.left",
-                    action: { webState.webView?.goBack() },
-                    isEnabled: webState.canGoBack
-                )
+        // One glass capsule, two tappable regions inside.
+        // .glassEffect(.regular.interactive()) on the outer shape gives
+        // the whole capsule the bounce/shimmer response as one unit.
+        VStack(spacing: 0) {
+            Button {
+                HapticEngine.shared.tap()
+                onHomeTap()
+            } label: {
+                Image(systemName: "house.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 50, height: 50)
             }
-            .glassEffect(in: .capsule)
+            .buttonStyle(.plain)
+
+            Button {
+                HapticEngine.shared.tap()
+                webState.webView?.goBack()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 50, height: 50)
+            }
+            .buttonStyle(.plain)
+            .opacity(webState.canGoBack ? 1 : 0.35)
+            .disabled(!webState.canGoBack)
         }
+        .glassEffect(.regular.interactive(), in: .capsule)
     }
 }
 
-@available(iOS 26, *)
-private struct GlassNavButton: View {
-    let icon: String
-    let action: () -> Void
-    var isEnabled: Bool = true
-
-    var body: some View {
-        Button {
-            HapticEngine.shared.tap()
-            action()
-        } label: {
-            Image(systemName: icon)
-                .font(.system(size: 20, weight: .semibold))
-                .frame(width: 50, height: 50)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .opacity(isEnabled ? 1 : 0.35)
-        .disabled(!isEnabled)
-    }
-}
-
-// MARK: - iOS 17–25: Frosted glass capsule
+// MARK: - iOS 17–25: frosted capsule
 
 private struct LegacyNavButtons: View {
     @Bindable var webState: EmbeddedWebState
     let onHomeTap: () -> Void
 
     var body: some View {
-        VStack(spacing: 1) {
+        VStack(spacing: 0) {
             LegacyNavButton(icon: "house.fill", action: onHomeTap)
+
+            Divider()
+                .background(Color.lsTertiary.opacity(0.4))
+                .frame(width: 28)
+
             LegacyNavButton(
                 icon: "chevron.left",
                 action: { webState.webView?.goBack() },
@@ -97,8 +91,7 @@ private struct LegacyNavButtons: View {
             Capsule()
                 .fill(.ultraThinMaterial)
                 .overlay {
-                    Capsule()
-                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+                    Capsule().strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
                 }
                 .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
         }
@@ -116,7 +109,7 @@ private struct LegacyNavButton: View {
             action()
         } label: {
             Image(systemName: icon)
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(Color.lsSecondary)
                 .frame(width: 50, height: 50)
         }

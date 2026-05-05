@@ -134,7 +134,6 @@ struct AppTabContainer: View {
                                 onHomeTap: { schoologyState.reload() }
                             )
                         }
-                        // FAB only on legacy — iOS 26 uses the system search tab circle
                         if #unavailable(iOS 26) {
                             HomeworkFAB {
                                 HapticEngine.shared.bump()
@@ -143,7 +142,7 @@ struct AppTabContainer: View {
                         }
                     }
                 }
-                .padding(.horizontal, LS.md)
+                .padding(.trailing, LS.md)
                 .padding(.bottom, LS.xxl)
             }
             .safeAreaPadding(.top)

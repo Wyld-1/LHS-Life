@@ -81,19 +81,7 @@ struct ScheduleHeader: View {
 
     private var pillContent: some View {
         ZStack(alignment: .leading) {
-            // Background
-            if #available(iOS 26.0, *) {
-                Capsule()
-                    .glassEffect()
-                    .shadow(color: .black.opacity(0.3), radius: 16, y: 6)
-            } else {
-                Capsule()
-                    .fill(.ultraThinMaterial)
-                    .overlay { Capsule().strokeBorder(Color.white.opacity(0.07), lineWidth: 0.5) }
-                    .shadow(color: .black.opacity(0.3), radius: 16, y: 6)
-            }
-
-            // Progress fill
+            // Progress fill — sits behind text, above glass
             if state.dayState == .inSession, let slot = state.currentSlot {
                 GeometryReader { geo in
                     Capsule()
@@ -110,13 +98,13 @@ struct ScheduleHeader: View {
                 VStack(spacing: 2) {
                     Text(primaryText)
                         .font(.lsHeadline)
-                        .foregroundStyle(Color.lsPrimary)
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
                     if let sub = secondaryText {
                         Text(sub)
                             .font(.lsCaption)
-                            .foregroundStyle(Color.lsSecondary)
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
                 }
@@ -126,6 +114,18 @@ struct ScheduleHeader: View {
             .padding(.vertical, LS.sm)
         }
         .fixedSize(horizontal: false, vertical: true)
+        .background {
+            if #available(iOS 26.0, *) {
+                // Interactive glass: bounces and shimmers on tap like system controls
+                Capsule()
+                    .glassEffect(.regular.interactive())
+            } else {
+                Capsule()
+                    .fill(.ultraThinMaterial)
+                    .overlay { Capsule().strokeBorder(Color.white.opacity(0.07), lineWidth: 0.5) }
+                    .shadow(color: .black.opacity(0.3), radius: 16, y: 6)
+            }
+        }
         .contentShape(Capsule())
         .onTapGesture {
             guard onPillTap != nil else { return }
@@ -215,7 +215,15 @@ struct ScheduleHeader: View {
     // MARK: - Timer
 
     private func startTimer() {
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in now = Date() }
+        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [self] _ in
+            Task { @MainActor in
+                self.now = Date()
+                LiveActivityService.shared.update(
+                    state: self.store.todayState(at: self.now),
+                    settings: self.settings
+                )
+            }
+        }
     }
     private func stopTimer() { timer?.invalidate(); timer = nil }
 }

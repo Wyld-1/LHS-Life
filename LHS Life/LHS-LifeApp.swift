@@ -5,6 +5,7 @@
 
 import SwiftUI
 import UserNotifications
+import ActivityKit
 
 @main
 struct LaSalle_ScheduleApp: App {
@@ -18,6 +19,13 @@ struct LaSalle_ScheduleApp: App {
         }
         // Handle notification taps (e.g. TeamReach deep link from ASB announcement)
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
+        // Request notification authorization on first launch.
+        // This must happen before any notifications are scheduled.
+        // The system only shows the permission dialog once — subsequent calls
+        // return the existing status silently.
+        Task {
+            _ = await NotificationService.requestAuthorization()
+        }
     }
 
     var body: some Scene {
