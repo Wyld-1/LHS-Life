@@ -113,8 +113,10 @@ struct AppTabContainer: View {
 
             // Layer 1 — Floating chrome
             VStack {
-                ScheduleHeader(showSettings: $showSettings)
-                    .padding(.horizontal, LS.md)
+                ScheduleHeader(showSettings: $showSettings, onPillTap: {
+                    withAnimation(.lsSnappy) { selectedTab = .events }
+                })
+                .padding(.horizontal, LS.md)
 
                 Spacer()
 
