@@ -11,6 +11,9 @@ struct ScheduleHeader: View {
     @Environment(UserSettings.self) private var settings
     @Binding var showSettings: Bool
 
+    /// Called when the user taps the schedule pill. Use to navigate to the Events tab.
+    var onPillTap: (() -> Void)? = nil
+
     @State private var now: Date = Date()
     @State private var timer: Timer? = nil
 
@@ -46,32 +49,18 @@ struct ScheduleHeader: View {
             lookAheadKeys = [DateFormatter.isoDay.string(from: tomorrow)]
         }
 
-        let result = lookAheadKeys
+        return lookAheadKeys
             .flatMap { store.events(on: $0) }
             .first { event in
                 guard event.category != .bellSchedule else { return false }
                 return isHomeEvent(event)
             }
-
-        // TELEMETRY: remove before release
-        print("[Header] weekday=\(weekday) lookAheadKeys=\(lookAheadKeys)")
-        let candidates = lookAheadKeys.flatMap { store.events(on: $0) }
-        print("[Header] \(candidates.count) candidate events:")
-        for e in candidates {
-            let passes = e.category != .bellSchedule && isHomeEvent(e)
-            print("  \(passes ? "✓" : "✗") '\(e.title)' cat=\(e.category.rawValue) loc='\(e.location ?? "nil")' allDay=\(e.isAllDay)")
-        }
-        print("[Header] highlight=\(result?.title ?? "nil")")
-
-        return result
     }
 
     /// Returns true only for events that take place at LaSalle or a home venue.
     /// Athletic events with no recognized home venue are always excluded.
     /// Non-athletic events with no location (assemblies, dress days, prom) are always included.
     private func isHomeEvent(_ event: SchoolEvent) -> Bool {
-        // Athletic events only: filter by venue. Away = excluded.
-        // Everything else (prom, mass, dress days) always shows regardless of location.
         guard event.category == .athletic else { return true }
 
         let loc = (event.location ?? "").lowercased().trimmingCharacters(in: .whitespaces)
@@ -81,7 +70,7 @@ struct ScheduleHeader: View {
     }
 
     var body: some View {
-        HStack() {
+        HStack {
             pillContent.frame(maxWidth: .infinity)
             Spacer()
             settingsButton
@@ -137,6 +126,12 @@ struct ScheduleHeader: View {
             .padding(.vertical, LS.sm)
         }
         .fixedSize(horizontal: false, vertical: true)
+        .contentShape(Capsule())
+        .onTapGesture {
+            guard onPillTap != nil else { return }
+            HapticEngine.shared.tap()
+            onPillTap?()
+        }
         .onAppear  { startTimer() }
         .onDisappear { stopTimer() }
     }
@@ -174,7 +169,7 @@ struct ScheduleHeader: View {
             return mins > 60 ? "School at \(ScheduleEngine.timeString(next.startDate))" : "School in \(mins) min"
         case .afterSchool:  return weekendText
         case .noSchedule:   return weekendText
-        case .pathwaysDay:  return "Intership Day"
+        case .pathwaysDay:  return "Internship Day"
         case .holiday:      return "No school today"
         }
     }

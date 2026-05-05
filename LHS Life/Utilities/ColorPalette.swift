@@ -26,7 +26,7 @@ enum ColorPalette {
         PaletteColor(id: 3, name: "Gold",      hex: "#F5B800"),  // Yellow
         PaletteColor(id: 4, name: "Mint",      hex: "#34C78A"),  // Green
         PaletteColor(id: 5, name: "Sky",       hex: "#38BDF8"),  // Light blue
-        PaletteColor(id: 6, name: "LaSalle",   hex: "#3A6FD8"),  // Dark blue
+        PaletteColor(id: 6, name: "LaSalle Blue", hex: "#3A6FD8"),  // Dark blue
         PaletteColor(id: 7, name: "Lavender",  hex: "#A78BFA"),  // Purple
         PaletteColor(id: 8, name: "Rose",      hex: "#F472B6"),  // Pink
         PaletteColor(id: 9, name: "Teal",      hex: "#2DD4BF"),  // Teal

@@ -279,17 +279,7 @@ struct HomeworkPopup: View {
 
     // MARK: - Helpers
 
-    private func nextDay() -> Date {
-        Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date())) ?? Date()
-    }
-
-    private func nextMonday() -> Date {
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: Date())
-        let weekday = cal.component(.weekday, from: today)
-        let daysUntilMonday = weekday == 2 ? 7 : (9 - weekday) % 7
-        return cal.date(byAdding: .day, value: daysUntilMonday, to: today) ?? today
-    }
+    // nextDay() and nextMonday() live in DateHelpers.swift for testability.
 
     private func shortDate(_ date: Date) -> String {
         let f = DateFormatter()

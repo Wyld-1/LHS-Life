@@ -1,19 +1,14 @@
 //
 //  LaSalle_ScheduleTests.swift
-//  LaSalle ScheduleTests
+//  LHS LifeTests
 //
-//  Created by Liam Lefohn on 5/1/26.
+//  This file is intentionally minimal. All tests live in their own files:
+//  ScheduleEngineTests, ICalParserTests, BellScheduleParserTests, etc.
 //
 
-import Testing
-@testable import LaSalle_Schedule
+import XCTest
+@testable import LHS_Life
 
-struct LaSalle_ScheduleTests {
-
-    @Test func example() async throws {
-        // Write your test here and use APIs like `#expect(...)` to check expected conditions.
-        // Swift Testing Documentation
-        // https://developer.apple.com/documentation/testing
-    }
-
+final class LaSalle_ScheduleTests: XCTestCase {
+    // Placeholder — real tests are in dedicated files.
 }
