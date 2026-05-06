@@ -29,6 +29,7 @@ extension Color {
     // Semantic
     static let lsDestructive    = Color(hex: "#FF6B6B")
     static let lsSuccess        = Color(hex: "#34C78A")
+    static let lsOrange         = Color(hex: "#FB923C")
 
     // Header gradient stops
     static let lsHeaderTop      = Color(hex: "#0D1220")

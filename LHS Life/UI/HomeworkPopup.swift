@@ -4,7 +4,6 @@
 //
 //  Centered popup card floating over the current tab.
 //  Fixed vertical position — ignores keyboard movements entirely.
-//  "Pick a Date" expands a DatePicker inline inside the card.
 //
 
 import SwiftUI
@@ -19,6 +18,7 @@ struct HomeworkPopup: View {
     @State private var title             = ""
     @State private var selectedPeriodID  = 1
     @State private var dueDate: Date?    = nil
+    @State private var priority          = ReminderPriority.none
     @State private var showInlinePicker  = false
     @State private var isSaving          = false
     @State private var errorMessage: String? = nil
@@ -34,7 +34,6 @@ struct HomeworkPopup: View {
 
     var body: some View {
         ZStack {
-            // Scrim — tapping outside dismisses
             Color.black.opacity(0.45)
                 .ignoresSafeArea()
                 .onTapGesture {
@@ -42,25 +41,16 @@ struct HomeworkPopup: View {
                     withAnimation(.lsSnappy) { onDismiss() }
                 }
 
-            // Card — offset upward so keyboard doesn't obscure it
             card
                 .padding(.horizontal, LS.xl)
                 .offset(y: -40)
         }
         .ignoresSafeArea(.keyboard)
         .onAppear {
-            // Pick the best default period:
-            //   In session → current period
-            //   Between periods / before school → next period
-            //   Everything else → first enabled period
             let state = store.todayState()
             let bestPeriodID: Int? = {
-                if let slot = state.currentSlot, let num = periodNumber(from: slot.period.name) {
-                    return num
-                }
-                if let slot = state.nextSlot, let num = periodNumber(from: slot.period.name) {
-                    return num
-                }
+                if let slot = state.currentSlot, let num = periodNumber(from: slot.period.name) { return num }
+                if let slot = state.nextSlot,    let num = periodNumber(from: slot.period.name) { return num }
                 return nil
             }()
             if let num = bestPeriodID, settings.config(for: num)?.isEnabled == true {
@@ -78,7 +68,7 @@ struct HomeworkPopup: View {
     private var card: some View {
         VStack(spacing: LS.sm) {
 
-            // Text field
+            // Assignment title
             TextField("Assignment name", text: $title)
                 .font(.lsBody)
                 .foregroundStyle(Color.lsPrimary)
@@ -91,15 +81,16 @@ struct HomeworkPopup: View {
                 .padding(.horizontal, LS.md)
                 .padding(.vertical, LS.sm + 2)
                 .background(Color.lsSurfaceRaised)
-                .clipShape(RoundedRectangle(cornerRadius: LS.radiusSm, style: .continuous))
+                .clipShape(Capsule())
 
-            // Class + Date row
+            // Class | Priority | Date row
             HStack(spacing: LS.sm) {
                 classMenu
+                priorityButton
                 dateMenu
             }
 
-            // Inline date picker — expands inside the card when "Pick a Date" is tapped
+            // Inline date picker
             if showInlinePicker {
                 DatePicker(
                     "",
@@ -113,6 +104,9 @@ struct HomeworkPopup: View {
                 .datePickerStyle(.graphical)
                 .tint(Color.lsBlue)
                 .transition(.opacity.combined(with: .move(edge: .top)))
+                .onChange(of: dueDate) { _, _ in
+                    withAnimation(.lsSnappy) { showInlinePicker = false }
+                }
             }
 
             // Error
@@ -138,9 +132,7 @@ struct HomeworkPopup: View {
                 .clipShape(Capsule())
                 .buttonStyle(.plain)
 
-                Button {
-                    Task { await save() }
-                } label: {
+                Button { Task { await save() } } label: {
                     Group {
                         if isSaving {
                             ProgressView().tint(.white).scaleEffect(0.85)
@@ -163,10 +155,10 @@ struct HomeworkPopup: View {
         }
         .padding(LS.md)
         .background {
-            RoundedRectangle(cornerRadius: LS.radiusLg, style: .continuous)
+            RoundedRectangle(cornerRadius: LS.radiusXl, style: .continuous)
                 .fill(.regularMaterial)
                 .overlay {
-                    RoundedRectangle(cornerRadius: LS.radiusLg, style: .continuous)
+                    RoundedRectangle(cornerRadius: LS.radiusXl, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5)
                 }
         }
@@ -190,25 +182,56 @@ struct HomeworkPopup: View {
                         .fill(Color.paletteColor(for: config))
                         .frame(width: 9, height: 9)
                     Text(config.displayName)
-                        .font(.lsBody)
+                        .font(.lsCaption)
                         .foregroundStyle(Color.lsPrimary)
                         .lineLimit(1)
                 }
+                Spacer(minLength: 0)
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(Color.lsSecondary)
             }
             .padding(.horizontal, LS.sm)
             .padding(.vertical, LS.sm)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity)
             .background(Color.lsSurfaceRaised)
-            .clipShape(RoundedRectangle(cornerRadius: LS.radiusSm, style: .continuous))
+            .clipShape(Capsule())
         }
         .tint(Color.lsPrimary)
         .onChange(of: selectedPeriodID) { _, _ in
             titleFocused = false
             HapticEngine.shared.tick()
         }
+    }
+
+    // MARK: - Priority Button
+    // Fixed-width. Always shows !!! — unlit ones are gray, lit ones orange.
+    // Cycles: none → low(!) → medium(!!) → high(!!!) → none. No menu.
+
+    private var priorityButton: some View {
+        Button {
+            priority = priority.next
+            HapticEngine.shared.tick()
+        } label: {
+            HStack(spacing: 1) {
+                Text("!")
+                    .foregroundStyle(priority == .low || priority == .medium || priority == .high
+                                     ? Color.lsOrange : Color.lsTertiary)
+                Text("!")
+                    .foregroundStyle(priority == .medium || priority == .high
+                                     ? Color.lsOrange : Color.lsTertiary)
+                Text("!")
+                    .foregroundStyle(priority == .high
+                                     ? Color.lsOrange : Color.lsTertiary)
+            }
+            .font(.system(size: 14, weight: .bold))
+            .padding(.horizontal, LS.sm)
+            .padding(.vertical, LS.sm)
+            .fixedSize()
+            .background(Color.lsSurfaceRaised)
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Date Menu
@@ -220,16 +243,14 @@ struct HomeworkPopup: View {
                 showInlinePicker = false
                 HapticEngine.shared.tick()
             }
-            Button("Next week") {
+            Button("Next Monday") {
                 dueDate = nextMonday()
                 showInlinePicker = false
                 HapticEngine.shared.tick()
             }
-            Button("Pick a Date") {
+            Button("Custom") {
                 titleFocused = false
-                withAnimation(.lsSnappy) {
-                    showInlinePicker.toggle()
-                }
+                withAnimation(.lsSnappy) { showInlinePicker.toggle() }
             }
             if dueDate != nil {
                 Divider()
@@ -242,19 +263,18 @@ struct HomeworkPopup: View {
         } label: {
             HStack(spacing: LS.xs) {
                 Image(systemName: "calendar")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(dueDate == nil ? Color.lsSecondary : Color.lsBlue)
-                if let due = dueDate {
-                    Text(shortDate(due))
-                        .font(.lsCaption)
-                        .foregroundStyle(Color.lsBlue)
-                        .lineLimit(1)
-                }
+                Text(dueDate.map { shortDate($0) } ?? "Due")
+                    .font(.lsCaption)
+                    .foregroundStyle(dueDate == nil ? Color.lsSecondary : Color.lsBlue)
+                    .lineLimit(1)
             }
             .padding(.horizontal, LS.sm)
             .padding(.vertical, LS.sm)
+            .fixedSize()
             .background(Color.lsSurfaceRaised)
-            .clipShape(RoundedRectangle(cornerRadius: LS.radiusSm, style: .continuous))
+            .clipShape(Capsule())
         }
         .simultaneousGesture(TapGesture().onEnded { titleFocused = false })
     }
@@ -268,7 +288,12 @@ struct HomeworkPopup: View {
         errorMessage = nil
         let className = selectedConfig?.displayName ?? "Homework"
         do {
-            try await reminders.addAssignment(title: trimmed, className: className, dueDate: dueDate)
+            try await reminders.addAssignment(
+                title: trimmed,
+                className: className,
+                dueDate: dueDate,
+                priority: priority.rawValue
+            )
             HapticEngine.shared.success()
             onDismiss()
         } catch {
@@ -278,8 +303,6 @@ struct HomeworkPopup: View {
     }
 
     // MARK: - Helpers
-
-    // nextDay() and nextMonday() live in DateHelpers.swift for testability.
 
     private func shortDate(_ date: Date) -> String {
         let f = DateFormatter()

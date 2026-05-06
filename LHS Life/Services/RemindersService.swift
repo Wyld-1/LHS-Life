@@ -1,21 +1,27 @@
 //
 //  RemindersService.swift
-//  LaSalle Schedule
+//  LHS Life
 //
-//  Wraps EventKit to create reminders in a "Homework" list,
-//  organized into per-class sublists.
+//  Creates and manages a single "Homework" list in Apple Reminders.
+//  The list identifier is persisted so renaming by the user doesn't break the link.
+//  Silently matches existing sections by class name (case-insensitive) for power users.
+//  Class name is always written to reminder notes as a fallback.
 //
 
 import Foundation
 import EventKit
+import Observation
 import Combine
 
 @MainActor
 final class RemindersService: ObservableObject {
 
-    private let store = EKEventStore()
-
+    private let ekStore = EKEventStore()
     @Published var authorizationStatus: EKAuthorizationStatus = .notDetermined
+
+    private static let listNameKey       = "homework_list_identifier"
+    private static let defaultListTitle  = "Homework"
+    private static let defaults          = UserDefaults(suiteName: UserSettings.appGroupID) ?? .standard
 
     init() {
         authorizationStatus = EKEventStore.authorizationStatus(for: .reminder)
@@ -25,68 +31,110 @@ final class RemindersService: ObservableObject {
 
     func requestAccess() async -> Bool {
         do {
-            let granted = try await store.requestFullAccessToReminders()
+            let granted = try await ekStore.requestFullAccessToReminders()
             authorizationStatus = EKEventStore.authorizationStatus(for: .reminder)
             return granted
         } catch {
-            print("[RemindersService] Access request failed: \(error)")
             return false
         }
     }
 
-    var isAuthorized: Bool {
-        authorizationStatus == .fullAccess
-    }
+    var isAuthorized: Bool { authorizationStatus == .fullAccess }
 
     // MARK: - Add Assignment
 
-    func addAssignment(title: String, className: String, dueDate: Date?) async throws {
+    /// Priority follows EKReminder convention: 0 = none, 1 = high, 5 = medium, 9 = low.
+    func addAssignment(
+        title: String,
+        className: String,
+        dueDate: Date?,
+        priority: Int = 0
+    ) async throws {
         guard isAuthorized else { throw RemindersError.notAuthorized }
 
-        let list = try homeworkList(for: className)
-        let reminder = EKReminder(eventStore: store)
-        reminder.title = title
+        let list = try homeworkList()
+        let reminder = EKReminder(eventStore: ekStore)
+        reminder.title    = title
         reminder.calendar = list
-        reminder.notes = className
+        reminder.notes    = className          // class name always in notes
+        reminder.priority = priority
 
         if let due = dueDate {
-            reminder.addAlarm(EKAlarm(absoluteDate: due))
             reminder.dueDateComponents = Calendar.current.dateComponents(
-                [.year, .month, .day, .hour, .minute], from: due
+                [.year, .month, .day], from: due
             )
         }
 
-        try store.save(reminder, commit: true)
+        try ekStore.save(reminder, commit: true)
     }
 
-    // MARK: - List Management
+    // MARK: - Homework List
 
-    /// Returns the reminder list for a class by name, creating it if needed.
-    /// Synchronous — EventKit calendar operations don't need async.
-    private func homeworkList(for className: String) throws -> EKCalendar {
-        let title = className.trimmingCharacters(in: .whitespaces).isEmpty
-            ? "Homework"
-            : className
-
-        if let existing = store.calendars(for: .reminder).first(where: { $0.title == title }) {
+    /// Returns the persistent "Homework" reminder list, creating it if needed.
+    /// Identified by stored calendarIdentifier so user can rename freely.
+    private func homeworkList() throws -> EKCalendar {
+        // 1. Look up by stored identifier
+        if let id = Self.defaults.string(forKey: Self.listNameKey),
+           let cal = ekStore.calendar(withIdentifier: id),
+           cal.allowsContentModifications {
+            return cal
+        }
+        // 2. Fall back to searching by title (handles first launch or deleted list)
+        if let existing = ekStore.calendars(for: .reminder)
+            .first(where: { $0.title.lowercased() == Self.defaultListTitle.lowercased() }) {
+            Self.defaults.set(existing.calendarIdentifier, forKey: Self.listNameKey)
             return existing
         }
-
-        let newList = EKCalendar(for: .reminder, eventStore: store)
-        newList.title = title
+        // 3. Create a new list
+        let newList    = EKCalendar(for: .reminder, eventStore: ekStore)
+        newList.title  = Self.defaultListTitle
         newList.source = preferredSource()
-        try store.saveCalendar(newList, commit: true)
+        try ekStore.saveCalendar(newList, commit: true)
+        Self.defaults.set(newList.calendarIdentifier, forKey: Self.listNameKey)
         return newList
     }
 
     private func preferredSource() -> EKSource? {
-        if let iCloud = store.sources.first(where: { $0.sourceType == .calDAV && $0.title == "iCloud" }) {
-            return iCloud
+        ekStore.sources.first { $0.sourceType == .calDAV && $0.title == "iCloud" }
+            ?? ekStore.sources.first { $0.sourceType == .local }
+    }
+}
+
+// MARK: - Priority
+
+/// Maps our UI labels to EKReminder priority integers.
+enum ReminderPriority: Int, CaseIterable {
+    case none   = 0
+    case low    = 9
+    case medium = 5
+    case high   = 1
+
+    var label: String {
+        switch self {
+        case .none:   return "None"
+        case .low:    return "Low"
+        case .medium: return "Medium"
+        case .high:   return "High"
         }
-        if let local = store.sources.first(where: { $0.sourceType == .local }) {
-            return local
+    }
+
+    var exclamations: String {
+        switch self {
+        case .none:   return ""
+        case .low:    return "!"
+        case .medium: return "!!"
+        case .high:   return "!!!"
         }
-        return nil
+    }
+
+    /// Cycles none → low → medium → high → none
+    var next: ReminderPriority {
+        switch self {
+        case .none:   return .low
+        case .low:    return .medium
+        case .medium: return .high
+        case .high:   return .none
+        }
     }
 }
 
@@ -95,6 +143,6 @@ final class RemindersService: ObservableObject {
 enum RemindersError: LocalizedError {
     case notAuthorized
     var errorDescription: String? {
-        "Please allow LaSalle Schedule to access Reminders in Settings."
+        "Allow LHS Life to access Reminders in Settings to save assignments."
     }
 }

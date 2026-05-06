@@ -78,6 +78,7 @@ final class UserSettings {
     // MARK: - State
 
     var hasCompletedOnboarding: Bool
+    var accessApproved: Bool
     var graduationYear: Int
     var periodConfigs: [PeriodConfig]
     var professionalDressNotificationsEnabled: Bool
@@ -99,6 +100,7 @@ final class UserSettings {
         self.store = d
 
         self.hasCompletedOnboarding = d.bool(forKey: Keys.onboarding)
+        self.accessApproved = d.bool(forKey: Keys.accessApproved)
 
         let storedYear = d.integer(forKey: Keys.gradYear)
         self.graduationYear = storedYear == 0 ? Self.defaultGradYear : storedYear
@@ -170,6 +172,7 @@ final class UserSettings {
 
     func save() {
         store.set(hasCompletedOnboarding, forKey: Keys.onboarding)
+        store.set(accessApproved, forKey: Keys.accessApproved)
         store.set(graduationYear, forKey: Keys.gradYear)
         store.set(professionalDressNotificationsEnabled, forKey: Keys.dressNotifs)
         store.set(liveActivityMode.rawValue, forKey: Keys.liveActivityMode)
@@ -202,6 +205,7 @@ final class UserSettings {
 
     private enum Keys {
         static let onboarding           = "onboarding_complete"
+        static let accessApproved        = "access_approved"
         static let gradYear             = "graduation_year"
         static let periodConfigs        = "period_configs"
         static let dressNotifs          = "dress_notifications_enabled"

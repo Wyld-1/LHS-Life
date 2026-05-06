@@ -6,8 +6,15 @@
 import SwiftUI
 
 struct ContentView: View {
+    @Environment(UserSettings.self) private var settings
+
     var body: some View {
-        AppTabContainer()
+        if settings.accessApproved {
+            AppTabContainer()
+        } else {
+            AccessGuardView(settings: settings)
+                .transition(.opacity)
+        }
     }
 }
 

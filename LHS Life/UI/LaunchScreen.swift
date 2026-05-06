@@ -20,21 +20,24 @@ struct LaunchScreen: View {
                 Spacer()
 
                 // Logo / wordmark
-                VStack(spacing: LS.lg) {
-                    Image(systemName: "graduationcap.fill")
-                        .font(.system(size: 56, weight: .semibold))
-                        .foregroundStyle(Color.lsBlue)
+                VStack(spacing: LS.md) {
+                    Image("lhs-lightning")
+                        .resizable()
+                        .renderingMode(.original)
+                        .frame(width: 90, height: 90)
 
-                    Text("LHS Life")
-                        .font(.lsDisplay)
-                        .foregroundStyle(Color.lsPrimary)
-
-                    Text("LA SALLE HIGH SCHOOL")
-                        .font(.lsLabel)
-                        .foregroundStyle(Color.lsSecondary)
-                        .tracking(2)
+                    VStack(spacing: LS.sm) {
+                        Text("LHS Life")
+                            .font(.lsDisplay)
+                            .foregroundStyle(Color.lsPrimary)
+                        Text("LA SALLE HIGH SCHOOL · YAKIMA")
+                            .font(.lsLabel)
+                            .foregroundStyle(Color.lsSecondary)
+                            .tracking(2)
+                    }
                 }
 
+                Spacer()
                 Spacer()
 
                 // Progress bar
@@ -43,19 +46,20 @@ struct LaunchScreen: View {
                         ZStack(alignment: .leading) {
                             Capsule()
                                 .fill(Color.lsTertiary.opacity(0.3))
-                                .frame(height: 4)
+                                .frame(height: 6)
                             Capsule()
                                 .fill(Color.lsBlue)
-                                .frame(width: geo.size.width * progress, height: 4)
+                                .frame(width: geo.size.width * progress, height: 6)
                                 .animation(.easeInOut(duration: 0.3), value: progress)
                         }
                     }
-                    .frame(height: 4)
+                    .frame(height: 8)
                     .padding(.horizontal, LS.xxl)
 
                     Text("Loading…")
-                        .font(.lsCaption)
+                        .font(.lsLabel)
                         .foregroundStyle(Color.lsSecondary)
+                        .tracking(1)
                 }
                 .padding(.bottom, LS.xxl)
             }
