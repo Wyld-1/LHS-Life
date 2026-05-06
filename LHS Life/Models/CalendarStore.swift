@@ -75,6 +75,7 @@ final class CalendarStore {
             if settings.isASBMember {
                 await NotificationService.scheduleASBNotifications(settings: settings, store: self)
             }
+            await NotificationService.scheduleAbnormalScheduleNotifications(settings: settings, store: self)
         } catch {
             self.error = AppError(underlying: error)
         }

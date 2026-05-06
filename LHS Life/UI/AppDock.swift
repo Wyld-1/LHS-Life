@@ -25,7 +25,8 @@ struct AppDock: View {
     var onSameTabTap: (AppTab) -> Void = { _ in }
 
     var body: some View {
-        if #available(iOS 26, *) {
+        if #available(iOS 26, *), UIDevice.current.userInterfaceIdiom == .phone {
+            // iPhone iOS 26+: system liquid glass tab bar
             SystemTabDock(
                 selectedTab: $selectedTab,
                 lunchState: lunchState,
@@ -33,6 +34,7 @@ struct AppDock: View {
                 schoologyState: schoologyState
             )
         } else {
+            // iPhone iOS 17-25, and iPad (iPad uses AppTabContainer's iPadLayout directly)
             LegacyTabDock(
                 selectedTab: $selectedTab,
                 lunchState: lunchState,

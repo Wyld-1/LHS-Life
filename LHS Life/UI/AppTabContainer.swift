@@ -2,12 +2,15 @@
 //  AppTabContainer.swift
 //  LHS Life
 //
-//  Two-level ZStack:
-//    Layer 0 — tab content
-//    Layer 1 — floating chrome (header top, dock+FAB bottom)
+//  Single branch point at the top level: iPhone vs iPad.
 //
-//  AppDock owns the iOS version branch entirely.
-//  AppTabContainer has zero #available checks.
+//  iPhone — ZStack with floating pill+button at top, AppDock at bottom.
+//           Completely unchanged from the original design.
+//
+//  iPad   — System TabView (top bar, Apple's preferred layout) with:
+//             • ScheduleHeaderPill as .tabViewBottomAccessory (like Music's Now Playing)
+//             • SettingsButton as .toolbar item (top-right, always visible)
+//           No floating ZStack chrome on iPad — the system owns the layout.
 //
 
 import SwiftUI
@@ -19,7 +22,7 @@ enum AppTab: Int, CaseIterable {
     case lunch       = 1
     case powerschool = 2
     case schoology   = 3
-    case homework    = 4  // iOS 26: becomes the detached search-role circle
+    case homework    = 4
 
     var title: String {
         switch self {
@@ -48,7 +51,6 @@ enum AppTab: Int, CaseIterable {
         }
     }
 
-    // Legacy dock only shows the four main tabs — homework is iOS 26 search role only
     static var dockTabs: [AppTab] { [.events, .lunch, .powerschool, .schoology] }
 }
 
@@ -59,11 +61,11 @@ struct AppTabContainer: View {
     @Environment(CalendarStore.self) private var store
     @Environment(UserSettings.self) private var settings
 
-    @State private var selectedTab  = AppTab.events
+    @State private var selectedTab   = AppTab.events
     @State private var previousTab   = AppTab.events
     @State private var showSettings  = false
     @State private var showHomework  = false
-    @State private var isLaunching   = true   // true until all web states are ready
+    @State private var isLaunching   = true
 
     @State private var lunchState = EmbeddedWebState(
         url: URL(string: "https://lhs.plan.tech/lunch/")!,
@@ -79,7 +81,10 @@ struct AppTabContainer: View {
         siteName: "Schoology"
     )
 
-    // Progress: calendar load (0.33) + each web state (0.22 each)
+    private var isPhone: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone
+    }
+
     private var launchProgress: Double {
         var p = store.events.isEmpty ? 0.0 : 0.34
         if lunchState.isReady       { p += 0.22 }
@@ -89,91 +94,20 @@ struct AppTabContainer: View {
     }
 
     var body: some View {
-        ZStack {
-
-            // MARK: Layer 0 — Content
-            // AppDock owns the tab switching on both OS versions.
-            // On iOS 26 the system TabView handles selection and gestures.
-            // On legacy we opacity-switch here and AppDock drives selectedTab.
-            AppDock(
-                selectedTab: $selectedTab,
-                lunchState: lunchState,
-                powerschoolState: powerschoolState,
-                schoologyState: schoologyState,
-                onSameTabTap: { tab in
-                    // Tapping the active tab acts as a home button
-                    switch tab {
-                    case .powerschool: powerschoolState.reload()
-                    case .schoology:   schoologyState.reload()
-                    case .lunch:       lunchState.reload()
-                    default: break
-                    }
-                }
-            )
-
-            // Layer 1 — Floating chrome
-            VStack {
-                ScheduleHeader(showSettings: $showSettings, onPillTap: {
-                    withAnimation(.lsSnappy) { selectedTab = .events }
-                })
-                .padding(.horizontal, LS.md)
-
-                Spacer()
-
-                HStack(alignment: .bottom) {
-                    Spacer()
-                    VStack(spacing: LS.sm) {
-                        if selectedTab == .powerschool {
-                            WebNavButtons(
-                                webState: powerschoolState,
-                                onHomeTap: { powerschoolState.reload() }
-                            )
-                        } else if selectedTab == .schoology {
-                            WebNavButtons(
-                                webState: schoologyState,
-                                onHomeTap: { schoologyState.reload() }
-                            )
-                        }
-                        if #unavailable(iOS 26) {
-                            HomeworkFAB {
-                                HapticEngine.shared.bump()
-                                withAnimation(.lsSpring) { showHomework = true }
-                            }
-                        }
-                    }
-                }
-                .padding(.trailing, LS.md)
-                .padding(.bottom, LS.xxl)
-            }
-            .safeAreaPadding(.top)
-            .safeAreaPadding(.bottom)
-
-            // Homework popup
-            if showHomework {
-                HomeworkPopup(onDismiss: { withAnimation(.lsSpring) { showHomework = false } })
-                    .environment(store)
-                    .environment(settings)
-                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                    .zIndex(10)
-            }
-
-            // Launch screen — blocks interaction until everything is ready
-            if isLaunching {
-                LaunchScreen(progress: launchProgress)
-                    .transition(.opacity)
-                    .zIndex(20)
+        Group {
+            if isPhone {
+                iPhoneLayout
+            } else {
+                iPadLayout
             }
         }
-        .background(Color.lsBackground)
         .onChange(of: launchProgress) { _, progress in
             if progress >= 1.0 && isLaunching {
                 withAnimation(.easeInOut(duration: 0.4)) { isLaunching = false }
             }
         }
-        .onChange(of: selectedTab) { old, new in
+        .onChange(of: selectedTab) { _, new in
             if new == .homework {
-                // Snap back to previous tab immediately — content never changes.
-                // The popup floats over whatever tab was active.
                 selectedTab = previousTab
                 withAnimation(.lsSpring) { showHomework = true }
             } else {
@@ -200,9 +134,168 @@ struct AppTabContainer: View {
                 .presentationBackground(Color.lsSurface)
         }
     }
+
+    // MARK: - iPhone Layout
+    // Exactly as before — floating ZStack with pill+button at top, dock at bottom.
+    // Zero changes from the original iPhone design.
+
+    private var iPhoneLayout: some View {
+        ZStack {
+            AppDock(
+                selectedTab: $selectedTab,
+                lunchState: lunchState,
+                powerschoolState: powerschoolState,
+                schoologyState: schoologyState,
+                onSameTabTap: { tab in
+                    switch tab {
+                    case .powerschool: powerschoolState.reload()
+                    case .schoology:   schoologyState.reload()
+                    case .lunch:       lunchState.reload()
+                    default: break
+                    }
+                }
+            )
+
+            VStack {
+                // Pill + settings button together at the top
+                ScheduleHeader(showSettings: $showSettings, onPillTap: {
+                    withAnimation(.lsSnappy) { selectedTab = .events }
+                })
+                .padding(.horizontal, LS.md)
+
+                Spacer()
+
+                HStack(alignment: .bottom) {
+                    Spacer()
+                    VStack(spacing: LS.sm) {
+                        if selectedTab == .powerschool {
+                            WebNavButtons(webState: powerschoolState,
+                                          onHomeTap: { powerschoolState.reload() })
+                        } else if selectedTab == .schoology {
+                            WebNavButtons(webState: schoologyState,
+                                          onHomeTap: { schoologyState.reload() })
+                        }
+                        if #unavailable(iOS 26) {
+                            HomeworkFAB {
+                                HapticEngine.shared.bump()
+                                withAnimation(.lsSpring) { showHomework = true }
+                            }
+                        }
+                    }
+                }
+                .padding(.trailing, LS.md)
+                .padding(.bottom, LS.xxl)
+            }
+            .safeAreaPadding(.top)
+            .safeAreaPadding(.bottom)
+
+            if showHomework {
+                HomeworkPopup(onDismiss: { withAnimation(.lsSpring) { showHomework = false } })
+                    .environment(store)
+                    .environment(settings)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    .zIndex(10)
+            }
+
+            if isLaunching {
+                LaunchScreen(progress: launchProgress)
+                    .transition(.opacity)
+                    .zIndex(20)
+            }
+        }
+        .background(Color.lsBackground)
+    }
+
+    // MARK: - iPad Layout
+    // System TabView at top (Apple's preferred iPad pattern).
+    // Pill as bottom accessory — like Apple Music's Now Playing bar.
+    // Settings button in toolbar — always top-right.
+
+    @ViewBuilder
+    private var iPadLayout: some View {
+        if #available(iOS 26, *) {
+            iPadTabView
+        } else {
+            // iPad on iOS 17-25: use the legacy ZStack layout
+            // (iOS 26 is the only version where tabViewBottomAccessory is available)
+            iPhoneLayout
+        }
+    }
+
+    @available(iOS 26, *)
+    private var iPadTabView: some View {
+        TabView(selection: $selectedTab) {
+            Tab("Events", systemImage: "bell.fill", value: AppTab.events) {
+                EventsTabView()
+            }
+            Tab("Order", systemImage: "fork.knife", value: AppTab.lunch) {
+                LunchTabView(webState: lunchState)
+            }
+            Tab(value: AppTab.powerschool) {
+                PowerSchoolTabView(webState: powerschoolState)
+                    .overlay(alignment: .bottomTrailing) {
+                        WebNavButtons(webState: powerschoolState,
+                                      onHomeTap: { powerschoolState.reload() })
+                        .padding(.trailing, LS.md)
+                        .padding(.bottom, LS.xxl)
+                    }
+            } label: {
+                Label("Grades", image: "powerschool-logo")
+            }
+            Tab(value: AppTab.schoology) {
+                SchoologyTabView(webState: schoologyState)
+                    .overlay(alignment: .bottomTrailing) {
+                        WebNavButtons(webState: schoologyState,
+                                      onHomeTap: { schoologyState.reload() })
+                        .padding(.trailing, LS.md)
+                        .padding(.bottom, LS.xxl)
+                    }
+            } label: {
+                Label("Schoology", image: "schoology-logo")
+            }
+            Tab(value: AppTab.homework, role: .search) {
+                iPadHomeworkContent
+            } label: {
+                Label("Homework", systemImage: "checklist")
+            }
+        }
+        .tabBarMinimizeBehavior(.onScrollDown)
+        .tint(Color.lsBlue)
+        // Pill lives at the bottom — mirrors Apple Music's Now Playing bar
+        .tabViewBottomAccessory {
+            ScheduleHeaderPill(onPillTap: {
+                withAnimation(.lsSnappy) { selectedTab = .events }
+            })
+            .padding(.horizontal, LS.md)
+            .padding(.vertical, LS.xs)
+        }
+        // Settings button always top-right in the toolbar
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                SettingsButton(showSettings: $showSettings)
+            }
+        }
+        .overlay {
+            if isLaunching {
+                LaunchScreen(progress: launchProgress)
+                    .transition(.opacity)
+                    .zIndex(20)
+            }
+        }
+    }
+
+    @available(iOS 26, *)
+    private var iPadHomeworkContent: some View {
+        ZStack {
+            Color.lsBackground.ignoresSafeArea()
+            HomeworkPopup(onDismiss: { selectedTab = previousTab })
+                .environment(store)
+                .environment(settings)
+        }
+    }
 }
 
-// MARK: - Homework FAB
+// MARK: - Homework FAB (iPhone legacy only)
 
 private struct HomeworkFAB: View {
     let action: () -> Void

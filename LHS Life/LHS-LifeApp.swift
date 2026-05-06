@@ -17,12 +17,9 @@ struct LaSalle_ScheduleApp: App {
         Task { @MainActor in
             HapticEngine.shared.prepare()
         }
-        // Handle notification taps (e.g. TeamReach deep link from ASB announcement)
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
-        // Request notification authorization on first launch.
-        // This must happen before any notifications are scheduled.
-        // The system only shows the permission dialog once — subsequent calls
-        // return the existing status silently.
+        // Register notification categories (abnormal schedule action button)
+        NotificationService.registerCategories()
         Task {
             _ = await NotificationService.requestAuthorization()
         }
@@ -43,21 +40,29 @@ struct LaSalle_ScheduleApp: App {
 final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationDelegate()
 
-    // Show notifications even when app is in foreground
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                  willPresent notification: UNNotification,
                                  withCompletionHandler handler: @escaping (UNNotificationPresentationOptions) -> Void) {
         handler([.banner, .sound])
     }
 
-    // Handle tap — open TeamReach if the notification carries a URL
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                  didReceive response: UNNotificationResponse,
                                  withCompletionHandler handler: @escaping () -> Void) {
+
+        // Abnormal schedule — "Show Today's Schedule" action enables LA for today
+        if response.actionIdentifier == NotificationService.enableLiveActivityActionID {
+            Task { @MainActor in
+                UserSettings.shared.enableLiveActivityForToday()
+            }
+        }
+
+        // TeamReach deep link from ASB announcement
         if let urlString = response.notification.request.content.userInfo["url"] as? String,
            let url = URL(string: urlString) {
             UIApplication.shared.open(url)
         }
+
         handler()
     }
 }

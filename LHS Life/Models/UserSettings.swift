@@ -1,50 +1,98 @@
 //
 //  UserSettings.swift
-//  LaSalle Schedule
+//  LHS Life
 //
-//  @Observable replaces ObservableObject + @Published + Combine.
-//  The Observation framework is available in all targets (app + widget)
-//  on iOS 17+. No Combine import needed.
-//
-//  Add this file to: LaSalle Schedule target + LaSalle Schedule Widgets target
+//  @Observable — no Combine needed.
+//  Add this file to: LHS Life target + LHS Widgets target
 //
 
 import Foundation
 import Observation
 
+// MARK: - Live Activity Mode
+
+enum LiveActivityMode: Int, Codable, CaseIterable {
+    case off           = 0
+    case everyDay      = 1
+    case abnormalOnly  = 2
+
+    var label: String {
+        switch self {
+        case .off:          return "Off"
+        case .everyDay:     return "Every Day"
+        case .abnormalOnly: return "Abnormal Days"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .off:          return "Never show live bell schedule"
+        case .everyDay:     return "Always show live bell schedule"
+        case .abnormalOnly: return "Only on days with liturgy, early release, etc."
+        }
+    }
+}
+
+/// Three states for each ASB work day.
+/// Stored as Int raw values so [ASBDayMode] encodes cleanly to UserDefaults.
+enum ASBDayMode: Int, Codable, CaseIterable {
+    case off                   = 0  // gray  — no notifications
+    case announcementsAndStore = 1 // blue — announcement + student store
+    case announcementsOnly     = 2  // orange  — announcement reminder only
+
+    var color: String {
+        switch self {
+        case .off:                   return "#94A3B8"  // Slate
+        case .announcementsAndStore: return "#3A6FD8"  // LaSalle Blue
+        case .announcementsOnly:     return "#FB923C"  // Peach/Orange
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .off:                   return "Off"
+        case .announcementsAndStore: return "Announcements & Store"
+        case .announcementsOnly:     return "Announcements"
+        }
+    }
+
+    /// Cycles to the next state
+    var next: ASBDayMode {
+        switch self {
+        case .off:                   return .announcementsAndStore
+        case .announcementsAndStore: return .announcementsOnly
+        case .announcementsOnly:     return .off
+        }
+    }
+}
+
+// MARK: - UserSettings
+
 @Observable
 final class UserSettings {
 
-    // MARK: - App Group
-
     static let appGroupID = "group.lasalle.widgetinfo"
-
     @ObservationIgnored private let store: UserDefaults
-
-    // MARK: - Singleton
-    // Created once at the App level and passed via .environment().
-    // Never create with @State inside a view — @State reinitializes on rebuilds.
-
     static let shared = UserSettings()
 
     // MARK: - State
-    // All stored properties are automatically tracked by @Observable.
-    // No @Published needed.
 
     var hasCompletedOnboarding: Bool
     var graduationYear: Int
     var periodConfigs: [PeriodConfig]
     var professionalDressNotificationsEnabled: Bool
-    var liveActivityEnabled: Bool
+    var liveActivityMode: LiveActivityMode
+    /// Temporary per-day override: Live Activity enabled just for today.
+    var liveActivityEnabledToday: Bool
+    @ObservationIgnored private var liveActivityTodayKey: String = ""
 
     // MARK: - ASB
 
-    /// True if the student is an ASB member (works at the Student Store).
     var isASBMember: Bool
-    /// Bitmask of weekdays they work: index 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri
-    var asbWorkDays: [Bool]   // 5 elements
+    /// Three-state mode per weekday (Mon=0…Fri=4)
+    var asbWorkDays: [ASBDayMode]  // 5 elements
 
-    // MARK: - Init (reads from disk exactly once)
+    // MARK: - Init
 
     init() {
         let d = UserDefaults(suiteName: UserSettings.appGroupID) ?? .standard
@@ -60,32 +108,77 @@ final class UserSettings {
            d.integer(forKey: Keys.paletteVersion) == Self.currentPaletteVersion {
             self.periodConfigs = decoded
         } else {
-            // First launch or palette changed — reset to defaults with correct color indices
             self.periodConfigs = PeriodConfig.defaults
             d.set(Self.currentPaletteVersion, forKey: Keys.paletteVersion)
         }
 
         self.professionalDressNotificationsEnabled = d.object(forKey: Keys.dressNotifs) as? Bool ?? true
-        self.liveActivityEnabled = d.object(forKey: Keys.liveActivity) as? Bool ?? false
+        let rawMode = d.integer(forKey: Keys.liveActivityMode)
+        self.liveActivityMode = LiveActivityMode(rawValue: rawMode) ?? .off
         self.isASBMember = d.bool(forKey: Keys.asbMember)
-        if let days = d.array(forKey: Keys.asbWorkDays) as? [Bool], days.count == 5 {
-            self.asbWorkDays = days
+
+        // Decode ASBDayMode array
+        if let data = d.data(forKey: Keys.asbWorkDays),
+           let decoded = try? JSONDecoder().decode([ASBDayMode].self, from: data),
+           decoded.count == 5 {
+            self.asbWorkDays = decoded
         } else {
-            self.asbWorkDays = [false, false, false, false, false]
+            self.asbWorkDays = Array(repeating: .off, count: 5)
+        }
+
+        // Per-day Live Activity override — check if it's still today
+        let todayKey = DateFormatter.isoDay.string(from: Date())
+        let savedKey = d.string(forKey: Keys.liveActivityTodayKey) ?? ""
+        self.liveActivityEnabledToday = savedKey == todayKey && d.bool(forKey: Keys.liveActivityToday)
+        self.liveActivityTodayKey = todayKey
+    }
+
+    // MARK: - Live Activity effective state
+
+    /// True if Live Activities should run right now.
+    /// Pass the current schedule type so .abnormalOnly can activate automatically.
+    func liveActivityEffectivelyEnabled(scheduleType: ScheduleType?) -> Bool {
+        let todayKey = DateFormatter.isoDay.string(from: Date())
+        if todayKey != liveActivityTodayKey {
+            liveActivityEnabledToday = false
+            liveActivityTodayKey = todayKey
+        }
+        switch liveActivityMode {
+        case .off:          return liveActivityEnabledToday
+        case .everyDay:     return true
+        case .abnormalOnly:
+            let abnormal: Set<ScheduleType> = [.lateStart, .earlyRelease, .assembly, .custom]
+            return abnormal.contains(scheduleType ?? .unknown)
         }
     }
 
-    // MARK: - Explicit save (called on settings sheet dismiss only)
+    /// Backwards-compat computed var for callers without schedule context.
+    var liveActivityEffectivelyEnabled: Bool {
+        liveActivityEffectivelyEnabled(scheduleType: nil)
+    }
+
+    /// Enable Live Activity just for today.
+    func enableLiveActivityForToday() {
+        let todayKey = DateFormatter.isoDay.string(from: Date())
+        liveActivityEnabledToday = true
+        liveActivityTodayKey = todayKey
+        store.set(true, forKey: Keys.liveActivityToday)
+        store.set(todayKey, forKey: Keys.liveActivityTodayKey)
+    }
+
+    // MARK: - Save
 
     func save() {
         store.set(hasCompletedOnboarding, forKey: Keys.onboarding)
         store.set(graduationYear, forKey: Keys.gradYear)
         store.set(professionalDressNotificationsEnabled, forKey: Keys.dressNotifs)
-        store.set(liveActivityEnabled, forKey: Keys.liveActivity)
+        store.set(liveActivityMode.rawValue, forKey: Keys.liveActivityMode)
         store.set(isASBMember, forKey: Keys.asbMember)
-        store.set(asbWorkDays, forKey: Keys.asbWorkDays)
         if let data = try? JSONEncoder().encode(periodConfigs) {
             store.set(data, forKey: Keys.periodConfigs)
+        }
+        if let data = try? JSONEncoder().encode(asbWorkDays) {
+            store.set(data, forKey: Keys.asbWorkDays)
         }
     }
 
@@ -108,16 +201,18 @@ final class UserSettings {
     }
 
     private enum Keys {
-        static let onboarding    = "onboarding_complete"
-        static let gradYear      = "graduation_year"
-        static let periodConfigs = "period_configs"
-        static let dressNotifs   = "dress_notifications_enabled"
-        static let liveActivity  = "live_activity_enabled"
-        static let paletteVersion = "palette_version"
-        static let asbMember     = "asb_member"
-        static let asbWorkDays   = "asb_work_days"
+        static let onboarding           = "onboarding_complete"
+        static let gradYear             = "graduation_year"
+        static let periodConfigs        = "period_configs"
+        static let dressNotifs          = "dress_notifications_enabled"
+        static let liveActivityMode      = "live_activity_mode"
+        static let abnormalNotifs        = "abnormal_schedule_notifications"  // legacy, unused
+        static let liveActivityToday    = "live_activity_today"
+        static let liveActivityTodayKey = "live_activity_today_key"
+        static let paletteVersion       = "palette_version"
+        static let asbMember            = "asb_member"
+        static let asbWorkDays          = "asb_work_days"
     }
 
-    /// Current palette version. Increment any time ColorPalette.colors order changes.
     private static let currentPaletteVersion = 2
 }

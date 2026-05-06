@@ -2,12 +2,11 @@
 //  NotificationService.swift
 //  LHS Life
 //
-//  Schedules two kinds of local notifications:
-//    1. Professional dress — 9 PM the evening before
-//    2. ASB reminders — on work days:
-//       • 10 min before school starts: announcement reminder + TeamReach deep link
-//       • 5 min before break ends: head to Student Store
-//       • 5 min before lunch ends: head to Student Store
+//  Local notifications:
+//    1. Professional dress — 9 PM evening before
+//    2. ASB — per day mode (announcements only / announcements + store)
+//       Skipped on Pathways Days for eligible juniors/seniors
+//    3. Abnormal schedule — morning of, for users without Live Activities
 //
 
 import Foundation
@@ -17,13 +16,33 @@ enum NotificationService {
 
     private static let center = UNUserNotificationCenter.current()
 
+    // MARK: - Category for abnormal schedule action
+
+    static let abnormalScheduleCategoryID = "ABNORMAL_SCHEDULE"
+    static let enableLiveActivityActionID = "ENABLE_LIVE_ACTIVITY"
+
+    /// Register notification categories — call once at app launch.
+    static func registerCategories() {
+        let enableAction = UNNotificationAction(
+            identifier: enableLiveActivityActionID,
+            title: "Show Today's Schedule",
+            options: [.foreground]
+        )
+        let category = UNNotificationCategory(
+            identifier: abnormalScheduleCategoryID,
+            actions: [enableAction],
+            intentIdentifiers: [],
+            options: []
+        )
+        center.setNotificationCategories([category])
+    }
+
     // MARK: - Authorization
 
     static func requestAuthorization() async -> Bool {
         do {
             return try await center.requestAuthorization(options: [.alert, .sound, .badge])
         } catch {
-            print("[NotificationService] Auth failed: \(error)")
             return false
         }
     }
@@ -74,11 +93,7 @@ enum NotificationService {
 
     // MARK: - ASB Reminders
 
-    /// Call whenever ASB settings or the bell schedule changes.
-    /// Replaces all existing ASB notifications with fresh ones for the next 14 days.
-    static func scheduleASBNotifications(settings: UserSettings,
-                                          store: CalendarStore) async {
-        // Clear all existing ASB notifications
+    static func scheduleASBNotifications(settings: UserSettings, store: CalendarStore) async {
         let existing = await center.pendingNotificationRequests()
         let asbIDs = existing.filter { $0.identifier.hasPrefix("asb-") }.map { $0.identifier }
         center.removePendingNotificationRequests(withIdentifiers: asbIDs)
@@ -88,24 +103,34 @@ enum NotificationService {
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
 
-        // Schedule for the next 14 days
         for dayOffset in 0..<14 {
             guard let date = cal.date(byAdding: .day, value: dayOffset, to: today) else { continue }
-            let weekday = cal.component(.weekday, from: date)  // 1=Sun…7=Sat
-            guard weekday >= 2, weekday <= 6 else { continue }  // Mon–Fri only
+            let weekday = cal.component(.weekday, from: date)
+            guard weekday >= 2, weekday <= 6 else { continue }
             let dayIndex = weekday - 2  // 0=Mon…4=Fri
-            guard settings.asbWorkDays[dayIndex] else { continue }
+            let mode = settings.asbWorkDays[dayIndex]
+            guard mode != .off else { continue }
 
             let dayKey = DateFormatter.isoDay.string(from: date)
             guard let schedule = store.bellSchedule(for: dayKey) else { continue }
 
+            // Skip Pathways Days for eligible juniors/seniors
+            let isPathways = PathwaysService.isPathwaysDay(
+                on: dayKey, events: store.events, graduationYear: settings.graduationYear
+            )
+            if isPathways { continue }
+
+            // Announcement always fires for .announcementsOnly and .announcementsAndStore
             await scheduleAnnouncementNotification(date: date, schedule: schedule, dayKey: dayKey)
-            await scheduleBreakNotification(date: date, schedule: schedule, dayKey: dayKey)
-            await scheduleLunchNotification(date: date, schedule: schedule, dayKey: dayKey)
+
+            // Store notifications only for .announcementsAndStore
+            if mode == .announcementsAndStore {
+                await scheduleBreakNotification(date: date, schedule: schedule, dayKey: dayKey)
+                await scheduleLunchNotification(date: date, schedule: schedule, dayKey: dayKey)
+            }
         }
     }
 
-    // 10 min before school starts — announcement reminder with TeamReach link
     private static func scheduleAnnouncementNotification(date: Date, schedule: BellSchedule, dayKey: String) async {
         guard let firstPeriod = schedule.periods.first,
               let startDate = firstPeriod.startDate(on: date),
@@ -117,7 +142,6 @@ enum NotificationService {
         content.title = "Announcement Time"
         content.body  = "School starts in 10 minutes. Time to do announcements!"
         content.sound = .default
-        // Deep link to open TeamReach app (standard URL scheme)
         content.userInfo = ["url": "teamreach://"]
 
         let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
@@ -126,7 +150,6 @@ enum NotificationService {
                                                      content: content, trigger: trigger))
     }
 
-    // 5 min before break STARTS — head to Student Store
     private static func scheduleBreakNotification(date: Date, schedule: BellSchedule, dayKey: String) async {
         guard let breakPeriod = schedule.periods.first(where: { $0.name.lowercased() == "break" }),
               let breakStart = breakPeriod.startDate(on: date),
@@ -137,7 +160,7 @@ enum NotificationService {
         let content = UNMutableNotificationContent()
         content.title = "Head to Student Store"
         content.body  = "Break starts in 5 minutes."
-        content.sound = .default  // haptic fires per user's notification settings
+        content.sound = .default
 
         let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
@@ -145,7 +168,6 @@ enum NotificationService {
                                                      content: content, trigger: trigger))
     }
 
-    // 5 min before lunch STARTS — head to Student Store
     private static func scheduleLunchNotification(date: Date, schedule: BellSchedule, dayKey: String) async {
         guard let lunchPeriod = schedule.periods.first(where: { $0.name.lowercased() == "lunch" }),
               let lunchStart = lunchPeriod.startDate(on: date),
@@ -161,6 +183,65 @@ enum NotificationService {
         let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
         try? await center.add(UNNotificationRequest(identifier: "asb-lunch-\(dayKey)",
+                                                     content: content, trigger: trigger))
+    }
+
+    // MARK: - Abnormal Schedule Notifications
+
+    /// Schedules a morning notification for any upcoming day with a non-regular schedule.
+    /// Only fires if the user has Live Activities disabled — otherwise they already see it.
+    /// Not sent for Pathways Days or holidays — those aren't schedule variations.
+    static func scheduleAbnormalScheduleNotifications(settings: UserSettings,
+                                                       store: CalendarStore) async {
+        // Remove old abnormal notifications
+        let existing = await center.pendingNotificationRequests()
+        let ids = existing.filter { $0.identifier.hasPrefix("abnormal-") }.map { $0.identifier }
+        center.removePendingNotificationRequests(withIdentifiers: ids)
+
+        // Send abnormal notifications only for .off users.
+        // .everyDay — already see Dynamic Island, no notification needed.
+        // .abnormalOnly — already get Dynamic Island on odd days, no notification needed.
+        guard settings.liveActivityMode == .off, await isAuthorized else { return }
+
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let abnormalTypes: Set<ScheduleType> = [.lateStart, .earlyRelease, .assembly, .custom]
+
+        for dayOffset in 0..<14 {
+            guard let date = cal.date(byAdding: .day, value: dayOffset, to: today) else { continue }
+            let dayKey = DateFormatter.isoDay.string(from: date)
+            guard let schedule = store.bellSchedule(for: dayKey) else { continue }
+            guard abnormalTypes.contains(schedule.scheduleType) else { continue }
+
+            // Skip Pathways Days — students know they're off campus
+            let isPathways = PathwaysService.isPathwaysDay(
+                on: dayKey, events: store.events, graduationYear: settings.graduationYear
+            )
+            if isPathways { continue }
+
+            await scheduleAbnormalNotification(date: date, schedule: schedule, dayKey: dayKey)
+        }
+    }
+
+    private static func scheduleAbnormalNotification(date: Date,
+                                                      schedule: BellSchedule,
+                                                      dayKey: String) async {
+        // Fire at 7:00 AM on the day
+        var comps = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        comps.hour = 7; comps.minute = 0; comps.second = 0
+        guard let fireDate = Calendar.current.date(from: comps),
+              fireDate > Date() else { return }
+
+        let typeName = schedule.scheduleType.rawValue  // "Block", "Late Start", etc.
+
+        let content = UNMutableNotificationContent()
+        content.title = "Different Schedule Today"
+        content.body  = "Tap to pin the live bell schedule to your home screen."
+        content.sound = .default
+        content.categoryIdentifier = abnormalScheduleCategoryID
+
+        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+        try? await center.add(UNNotificationRequest(identifier: "abnormal-\(dayKey)",
                                                      content: content, trigger: trigger))
     }
 }

@@ -2,11 +2,6 @@
 //  SettingsSheetView.swift
 //  LHS Life
 //
-//  No NavigationStack — that's the primary source of first-open latency.
-//  NavigationStack inside a sheet allocates a full navigation state machine
-//  on first render. We don't use navigation here, so we don't pay for it.
-//  A plain VStack header gives us the title and Done button with zero overhead.
-//
 
 import SwiftUI
 
@@ -21,7 +16,6 @@ struct SettingsSheetView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // MARK: Header — replaces NavigationStack overhead
             HStack {
                 Text("Settings")
                     .font(.lsTitle)
@@ -42,13 +36,12 @@ struct SettingsSheetView: View {
 
             Divider().background(Color.lsTertiary.opacity(0.3))
 
-            // MARK: Content
             ScrollView {
                 LazyVStack(spacing: LS.lg, pinnedViews: []) {
                     gradYearSection
-                    asbSection
                     periodsSection
-                    notificationsSection
+                    notificationsSection   // includes Live Activity
+                    asbSection             // moved to bottom — power user feature
                 }
                 .padding(.horizontal, LS.md)
                 .padding(.top, LS.md)
@@ -68,7 +61,6 @@ struct SettingsSheetView: View {
                 Text("Graduation Year")
                     .font(.lsHeadline)
                     .foregroundStyle(Color.lsPrimary)
-                
                 Spacer()
                 ZStack(alignment: .trailing) {
                     HStack(spacing: LS.sm) {
@@ -119,72 +111,6 @@ struct SettingsSheetView: View {
         gradYearFocused = false
     }
 
-    // MARK: - ASB
-
-    private static let weekdayNames = ["Mon", "Tue", "Wed", "Thu", "Fri"]
-
-    private var asbSection: some View {
-        VStack(alignment: .leading, spacing: LS.sm) {
-            // ASB toggle lives inside the My Info card
-            VStack(spacing: 0) {
-                Toggle(isOn: $settings.isASBMember) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("ASB Member")
-                            .font(.lsHeadline)
-                            .foregroundStyle(Color.lsPrimary)
-                        Text("Enables student leadership notifications")
-                            .font(.lsCaption)
-                            .foregroundStyle(Color.lsSecondary)
-                    }
-                }
-                .tint(Color.lsBlue)
-                .padding(LS.md)
-                .onChange(of: settings.isASBMember) { _, _ in HapticEngine.shared.tap() }
-
-                // Work days — revealed when ASB is on
-                if settings.isASBMember {
-                    Divider().background(Color.lsTertiary.opacity(0.3))
-
-                    VStack(alignment: .leading, spacing: LS.sm) {
-                        Text("I work Student Store on:")
-                            .font(.lsCaption)
-                            .foregroundStyle(Color.lsSecondary)
-                            .padding(.horizontal, LS.md)
-                            .padding(.top, LS.sm)
-
-                        HStack(spacing: LS.sm) {
-                            ForEach(0..<5, id: \.self) { i in
-                                Button {
-                                    HapticEngine.shared.tick()
-                                    settings.asbWorkDays[i].toggle()
-                                } label: {
-                                    Text(Self.weekdayNames[i])
-                                        .font(.lsCaption)
-                                        .foregroundStyle(settings.asbWorkDays[i] ? .white : Color.lsSecondary)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, LS.xs + 2)
-                                        .background(
-                                            settings.asbWorkDays[i]
-                                                ? Color.lsBlue
-                                                : Color.lsSurfaceRaised
-                                        )
-                                        .clipShape(Capsule())
-                                }
-                                .buttonStyle(.plain)
-                                .animation(.lsSnappy, value: settings.asbWorkDays[i])
-                            }
-                        }
-                        .padding(.horizontal, LS.md)
-                        .padding(.bottom, LS.md)
-                    }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-            }
-            .lsCard()
-            .animation(.lsSnappy, value: settings.isASBMember)
-        }
-    }
-
     // MARK: - Periods
 
     private var periodsSection: some View {
@@ -213,7 +139,7 @@ struct SettingsSheetView: View {
         }
     }
 
-    // MARK: - Notifications
+    // MARK: - Notifications + Live Activity
 
     private var notificationsSection: some View {
         VStack(alignment: .leading, spacing: LS.sm) {
@@ -237,23 +163,132 @@ struct SettingsSheetView: View {
 
                 Divider().background(Color.lsTertiary.opacity(0.3))
 
-                Toggle(isOn: $settings.liveActivityEnabled) {
+                // Live Activity mode — Menu with three options
+                HStack {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Live Activities")
                             .font(.lsHeadline)
                             .foregroundStyle(Color.lsPrimary)
-                        Text("Show current period in Dynamic Island")
+                        Text(settings.liveActivityMode.description)
+                            .font(.lsCaption)
+                            .foregroundStyle(Color.lsSecondary)
+                    }
+                    Spacer()
+                    Menu {
+                        ForEach(LiveActivityMode.allCases, id: \.rawValue) { mode in
+                            Button {
+                                settings.liveActivityMode = mode
+                                HapticEngine.shared.tick()
+                            } label: {
+                                if settings.liveActivityMode == mode {
+                                    Label(mode.label, systemImage: "checkmark")
+                                } else {
+                                    Text(mode.label)
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: LS.xs) {
+                            Text(settings.liveActivityMode.label)
+                                .font(.lsBody)
+                                .foregroundStyle(Color.lsBlue)
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(Color.lsBlue)
+                        }
+                        .padding(.horizontal, LS.sm)
+                        .padding(.vertical, LS.xs)
+                        .background(Color.lsBlue.opacity(0.12))
+                        .clipShape(Capsule())
+                    }
+                    .tint(Color.lsPrimary)
+                }
+                .padding(LS.md)
+            }
+            .lsCard()
+        }
+    }
+
+    // MARK: - ASB (moved to bottom)
+
+    private static let weekdayNames = ["Mon", "Tue", "Wed", "Thu", "Fri"]
+
+    private var asbSection: some View {
+        VStack(alignment: .leading, spacing: LS.sm) {
+            sectionLabel("Student Leadership")
+            VStack(spacing: 0) {
+                Toggle(isOn: $settings.isASBMember) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("ASB Member")
+                            .font(.lsHeadline)
+                            .foregroundStyle(Color.lsPrimary)
+                        Text("Enables student leadership reminders")
                             .font(.lsCaption)
                             .foregroundStyle(Color.lsSecondary)
                     }
                 }
                 .tint(Color.lsBlue)
                 .padding(LS.md)
-                .onChange(of: settings.liveActivityEnabled) { _, _ in
-                    HapticEngine.shared.tap()
+                .onChange(of: settings.isASBMember) { _, _ in HapticEngine.shared.tap() }
+
+                if settings.isASBMember {
+                    Divider()
+                        .background(Color.lsTertiary.opacity(0.3))
+
+                    VStack(alignment: .leading, spacing: LS.md) {
+                        Text("My working days:")
+                            .font(.lsCaption)
+                            .foregroundStyle(Color.lsSecondary)
+                            .padding(.horizontal, LS.md)
+                            .padding(.top, LS.md)
+
+                        // Day buttons — tap to cycle through three states
+                        HStack(spacing: LS.sm) {
+                            ForEach(0..<5, id: \.self) { i in
+                                let mode = settings.asbWorkDays[i]
+                                Button {
+                                    HapticEngine.shared.tick()
+                                    settings.asbWorkDays[i] = mode.next
+                                } label: {
+                                    Text(Self.weekdayNames[i])
+                                        .font(.lsCaption)
+                                        .foregroundStyle(mode == .off ? Color.lsSecondary : .white)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, LS.sm)
+                                        .background(
+                                            mode == .off
+                                                ? Color.lsSurfaceRaised
+                                                : Color(hex: mode.color)
+                                        )
+                                        .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .animation(.lsSnappy, value: mode)
+                            }
+                        }
+                        .padding(.horizontal, LS.md)
+
+                        // Color key
+                        VStack(alignment: .leading, spacing: LS.xs) {
+                            ForEach(ASBDayMode.allCases.filter { $0 != .off }, id: \.rawValue) { m in
+                                HStack(spacing: LS.xs) {
+                                    Circle()
+                                        .fill(Color(hex: m.color))
+                                        .frame(width: 8, height: 8)
+                                    Text(m.label)
+                                        .font(.lsCaption)
+                                        .foregroundStyle(Color.lsSecondary)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, LS.md)
+                        .padding(.bottom, LS.md)
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
             .lsCard()
+            .animation(.lsSnappy, value: settings.isASBMember)
         }
     }
 
@@ -353,12 +388,8 @@ private struct PeriodRow: View {
 
     private func commitName() {
         let trimmed = nameInput.trimmingCharacters(in: .whitespaces)
-        config = PeriodConfig(
-            id: config.id,
-            customName: trimmed,
-            colorIndex: config.colorIndex,
-            isEnabled: config.isEnabled
-        )
+        config = PeriodConfig(id: config.id, customName: trimmed,
+                              colorIndex: config.colorIndex, isEnabled: config.isEnabled)
         fieldFocused = false
         if isEditing { onTapName() }
     }
@@ -369,7 +400,6 @@ private struct PeriodRow: View {
 private struct ColorPickerPopup: View {
     let selectedIndex: Int
     let onSelect: (Int) -> Void
-
     private let columns = Array(repeating: GridItem(.fixed(40), spacing: LS.sm), count: 5)
 
     var body: some View {
@@ -378,7 +408,6 @@ private struct ColorPickerPopup: View {
                 .font(.lsCaption)
                 .foregroundStyle(Color.lsSecondary)
                 .padding(.top, LS.sm)
-
             LazyVGrid(columns: columns, spacing: LS.sm) {
                 ForEach(ColorPalette.colors) { paletteColor in
                     let isSelected = paletteColor.id == selectedIndex
@@ -413,19 +442,13 @@ private struct ColorPickerPopup: View {
     SettingsSheetView(settings: UserSettings.shared)
 }
 
-// MARK: - Pre-warm view
-// Rendered hidden at app launch so SwiftUI initializes the popover presentation
-// system and @FocusState machinery before the user first opens settings.
-// Cost: essentially zero. Benefit: first edit and first color tap are instant.
+// MARK: - Pre-warm
+
 struct ColorPickerPrewarm: View {
     @State private var dummy = false
     @FocusState private var dummyFocus: Bool
     var body: some View {
-        // One TextField to warm @FocusState registration
-        TextField("", text: .constant(""))
-            .focused($dummyFocus)
-        // One popover to warm the popover presentation system
-        Color.clear
-            .popover(isPresented: $dummy) { Color.clear.frame(width: 1, height: 1) }
+        TextField("", text: .constant("")).focused($dummyFocus)
+        Color.clear.popover(isPresented: $dummy) { Color.clear.frame(width: 1, height: 1) }
     }
 }

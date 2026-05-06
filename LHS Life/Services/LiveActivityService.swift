@@ -27,7 +27,11 @@ final class LiveActivityService {
     // MARK: - Public API
 
     func update(state: ScheduleEngine.ScheduleState, settings: UserSettings) {
-        guard settings.liveActivityEnabled else {
+        // Get today's schedule type for .abnormalOnly evaluation
+        let dayKey = DateFormatter.isoDay.string(from: Date())
+        let scheduleType = SharedStore.readBellSchedules()[dayKey]?.scheduleType
+
+        guard settings.liveActivityEffectivelyEnabled(scheduleType: scheduleType) else {
             Task { await end() }
             return
         }

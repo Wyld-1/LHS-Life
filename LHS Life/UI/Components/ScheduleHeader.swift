@@ -1,17 +1,45 @@
 //
 //  ScheduleHeader.swift
-//  LaSalle Schedule
+//  LHS Life
+//
+//  Two independent components:
+//
+//  ScheduleHeaderPill — the pill with text and progress fill. No settings button.
+//                       Used by both iPhone (top) and iPad (bottom accessory).
+//
+//  SettingsButton     — standalone settings button, always pinned top-right.
+//
+//  The 1-second timer lives in ScheduleHeaderPill since it owns the live state.
 //
 
 import SwiftUI
 
-struct ScheduleHeader: View {
+// MARK: - Settings Button (always top-right, platform-agnostic)
+
+struct SettingsButton: View {
+    @Binding var showSettings: Bool
+
+    var body: some View {
+        Button {
+            showSettings = true
+        } label: {
+            Image(systemName: "person.crop.circle.fill")
+                .foregroundStyle(Color.lsSecondary)
+                .font(.system(size: 42, weight: .semibold))
+                .shadow(color: .black.opacity(0.5), radius: 8)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Schedule Header Pill
+
+struct ScheduleHeaderPill: View {
 
     @Environment(CalendarStore.self) private var store
     @Environment(UserSettings.self) private var settings
-    @Binding var showSettings: Bool
 
-    /// Called when the user taps the schedule pill. Use to navigate to the Events tab.
+    /// Called when the pill is tapped — used to navigate to Events tab on iPhone.
     var onPillTap: (() -> Void)? = nil
 
     @State private var now: Date = Date()
@@ -22,29 +50,22 @@ struct ScheduleHeader: View {
     }
 
     // MARK: - Upcoming highlight
-    //
-    // Rules:
-    //   Weekday (after school / between periods / before school): tomorrow only
-    //   Saturday: today only (e.g. home Saturday events like prom)
-    //   Sunday: today first, then Monday
-    //   Never show away athletic events
-    //   Never look more than 1 school-day ahead on a weekday
 
     private var upcomingHighlight: SchoolEvent? {
         let cal = Calendar.current
-        let weekday = cal.component(.weekday, from: now)  // 1=Sun, 6=Fri, 7=Sat
+        let weekday = cal.component(.weekday, from: now)
 
         let lookAheadKeys: [String]
         switch weekday {
-        case 7:  // Saturday — today's events only
+        case 7:
             lookAheadKeys = [DateFormatter.isoDay.string(from: now)]
-        case 1:  // Sunday — today first, then Monday
+        case 1:
             let monday = cal.date(byAdding: .day, value: 1, to: now) ?? now
             lookAheadKeys = [
                 DateFormatter.isoDay.string(from: now),
                 DateFormatter.isoDay.string(from: monday)
             ]
-        default:  // Weekday — tomorrow only
+        default:
             let tomorrow = cal.date(byAdding: .day, value: 1, to: now) ?? now
             lookAheadKeys = [DateFormatter.isoDay.string(from: tomorrow)]
         }
@@ -57,31 +78,19 @@ struct ScheduleHeader: View {
             }
     }
 
-    /// Returns true only for events that take place at LaSalle or a home venue.
-    /// Athletic events with no recognized home venue are always excluded.
-    /// Non-athletic events with no location (assemblies, dress days, prom) are always included.
     private func isHomeEvent(_ event: SchoolEvent) -> Bool {
         guard event.category == .athletic else { return true }
-
         let loc = (event.location ?? "").lowercased().trimmingCharacters(in: .whitespaces)
-        guard !loc.isEmpty else { return false }  // athletic + no location = assume away
+        guard !loc.isEmpty else { return false }
         let homeVenues = ["lasalle", "la salle", "marquette", "lhs", "home"]
         return homeVenues.contains { loc.contains($0) }
     }
 
+    // MARK: - Body
+
     var body: some View {
-        HStack {
-            pillContent.frame(maxWidth: .infinity)
-            Spacer()
-            settingsButton
-        }
-    }
-
-    // MARK: - Pill
-
-    private var pillContent: some View {
         ZStack(alignment: .leading) {
-            // Progress fill — sits behind text, above glass
+            // Progress fill
             if state.dayState == .inSession, let slot = state.currentSlot {
                 GeometryReader { geo in
                     Capsule()
@@ -116,9 +125,7 @@ struct ScheduleHeader: View {
         .fixedSize(horizontal: false, vertical: true)
         .background {
             if #available(iOS 26.0, *) {
-                // Interactive glass: bounces and shimmers on tap like system controls
-                Capsule()
-                    .glassEffect(.regular.interactive())
+                Capsule().glassEffect(.regular.interactive())
             } else {
                 Capsule()
                     .fill(.ultraThinMaterial)
@@ -134,21 +141,6 @@ struct ScheduleHeader: View {
         }
         .onAppear  { startTimer() }
         .onDisappear { stopTimer() }
-    }
-
-    // MARK: - Gear Button
-
-    @ViewBuilder
-    private var settingsButton: some View {
-        Button {
-            showSettings = true
-        } label: {
-            Image(systemName: "person.crop.circle.fill")
-                .foregroundStyle(Color.lsSecondary)
-                .font(.system(size: 42, weight: .semibold))
-                .shadow(color: .black.opacity(0.5), radius: 8)
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Text Logic
@@ -167,10 +159,10 @@ struct ScheduleHeader: View {
             guard let next = state.nextSlot else { return weekendText }
             let mins = Int(ceil(next.startDate.timeIntervalSince(now) / 60))
             return mins > 60 ? "School at \(ScheduleEngine.timeString(next.startDate))" : "School in \(mins) min"
-        case .afterSchool:  return weekendText
-        case .noSchedule:   return weekendText
-        case .pathwaysDay:  return "Internship Day"
-        case .holiday:      return "No school today"
+        case .afterSchool:   return weekendText
+        case .noSchedule:    return weekendText
+        case .pathwaysDay:   return "Internship Day"
+        case .holiday:       return "No school today"
         }
     }
 
@@ -191,20 +183,18 @@ struct ScheduleHeader: View {
 
     private var weekendText: String {
         switch Calendar.current.component(.weekday, from: now) {
-        case 6:  return "Happy Friday 🎉"
+        case 6:    return "Happy Friday 🎉"
         case 7, 1: return "Enjoy the weekend!"
-        default: return "No school today"
+        default:   return "No school today"
         }
     }
 
     private func upcomingEventText(_ event: SchoolEvent) -> String {
         let isTomorrow = Calendar.current.isDateInTomorrow(event.startDate)
         let dayName = isTomorrow ? "tomorrow" : DateFormatter.shortWeekday.string(from: event.startDate)
-        if event.isAllDay {
-            return "\(event.title): \(dayName)"
-        } else {
-            return "\(event.title): \(dayName) @ \(ScheduleEngine.timeString(event.startDate))"
-        }
+        return event.isAllDay
+            ? "\(event.title): \(dayName)"
+            : "\(event.title): \(dayName) @ \(ScheduleEngine.timeString(event.startDate))"
     }
 
     private func progressColor(slot: ScheduleEngine.ActiveSlot) -> Color {
@@ -226,6 +216,22 @@ struct ScheduleHeader: View {
         }
     }
     private func stopTimer() { timer?.invalidate(); timer = nil }
+}
+
+// MARK: - Convenience: iPhone header (pill + settings button together)
+// Used only on iPhone where they appear as one unit at the top.
+
+struct ScheduleHeader: View {
+    @Binding var showSettings: Bool
+    var onPillTap: (() -> Void)? = nil
+
+    var body: some View {
+        HStack(spacing: LS.sm) {
+            ScheduleHeaderPill(onPillTap: onPillTap)
+                .frame(maxWidth: .infinity)
+            SettingsButton(showSettings: $showSettings)
+        }
+    }
 }
 
 private extension DateFormatter {
