@@ -5,6 +5,9 @@
 //  Shared between the app target and the widget extension target.
 //  Add this file to: LHS Life target + LHS Widgets target
 //
+//  Copied from LHS Live — the working implementation on iOS 26.5.
+//  Uses integer seconds + formatted time strings rather than Dates.
+//
 
 import ActivityKit
 import Foundation
@@ -28,7 +31,6 @@ struct ScheduleActivityAttributes: ActivityAttributes {
         /// Display name of the next period
         var nextPeriodName: String?
         /// Time of the next bell as a formatted string e.g. "10:50 AM"
-        /// This is what's shown instead of a countdown — stable between updates
         var nextBellTime: String?
         /// True when school is not in session
         var isOffSchedule: Bool

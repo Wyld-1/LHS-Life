@@ -11,8 +11,11 @@ import SwiftUI
 @main
 struct LaSalle_WidgetsBundle: WidgetBundle {
     var body: some Widget {
-        LaSalle_Widgets()
-        LaSalle_WidgetsControl()
+        // Temporarily isolated to diagnose Live Activity rendering issue.
+        // Other widgets commented out per Apple Developer Forums workaround:
+        // mixing widgets + Live Activity in bundle can silently suppress LA on device.
+        // LaSalle_Widgets()
+        // LaSalle_WidgetsControl()
         LaSalle_WidgetsLiveActivity()
     }
 }

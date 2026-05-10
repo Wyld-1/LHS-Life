@@ -2,9 +2,8 @@
 //  EventsTabView.swift
 //  LHS Life
 //
-//  Content scrolls full-screen behind the floating header.
-//  A gradient fade at the top creates a soft blend under the pill.
-//  Safe area insets ensure content doesn't hide under the dock.
+//  Single ScrollView: inset → WeekStrip → EventsDayView.
+//  EventsDayView is a pure fixed-height canvas — no internal scroll view.
 //
 
 import SwiftUI
@@ -13,55 +12,41 @@ struct EventsTabView: View {
     @Environment(CalendarStore.self) private var store
     @Environment(UserSettings.self) private var settings
 
+    @State private var selectedDate: Date = Date()
+
     var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .top) {
-                // MARK: Scrollable content — fills entire screen
-                ScrollView {
-                    VStack(alignment: .leading, spacing: LS.lg) {
-                        // Space behind the header — content scrolls under it
-                        Color.clear.frame(height: 120)
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 0) {
 
-                        Text("Today")
-                            .font(.lsDisplay)
-                            .foregroundStyle(Color.lsPrimary)
-                            .padding(.horizontal, LS.md)
+                // Clears the floating pill
+                Color.clear.frame(height: LS.contentTopInset)
 
-                        Text("Schedule timeline and calendar go here.")
-                            .font(.lsBody)
-                            .foregroundStyle(Color.lsSecondary)
-                            .padding(.horizontal, LS.md)
-
-                        // Bottom clearance: safe area + dock height + FAB
-                        Color.clear.frame(height: geo.safeAreaInsets.bottom + 100)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .scrollContentBackground(.hidden)
-                .ignoresSafeArea()
-
-                // MARK: Top gradient — fades content behind the header pill
-                // Starts fully opaque at the very top, transparent ~100pt down.
-                // This means the header always reads clearly and content
-                // gracefully disappears as it scrolls up behind it.
-                LinearGradient(
-                    stops: [
-                        .init(color: Color.lsBackground, location: 0),
-                        .init(color: Color.lsBackground, location: 0.35),
-                        .init(color: Color.lsBackground.opacity(0), location: 1)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
+                // Week strip — scrolls with the page
+                WeekStrip(
+                    selectedDate: $selectedDate,
+                    onLabelTap: { /* open week/month grid — wired later */ }
                 )
-                .frame(height: geo.safeAreaInsets.top + 96)
-                .frame(maxWidth: .infinity)
-                .ignoresSafeArea(edges: .top)
-                .allowsHitTesting(false)  // passes taps through to content below
+                .padding(.bottom, LS.sm)
+
+                // Day canvas — fixed height, no internal scroll
+                let dayKey   = DateFormatter.isoDay.string(from: selectedDate)
+                let schedule = store.bellSchedules[dayKey]
+                let events   = store.events(on: dayKey)
+
+                EventsDayView(
+                    date:     selectedDate,
+                    schedule: schedule,
+                    events:   events,
+                    settings: settings
+                )
+
+                // Bottom clearance: tab bar + a little breathing room
+                Color.clear.frame(height: LS.tabBarHeight + LS.lg)
             }
+            .frame(maxWidth: .infinity)
         }
-        .background(Color.lsBackground)
         .ignoresSafeArea()
+        .background(Color.lsBackground)
     }
 }
 

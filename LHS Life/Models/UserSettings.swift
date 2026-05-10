@@ -80,6 +80,7 @@ final class UserSettings {
     var hasCompletedOnboarding: Bool
     var accessApproved: Bool
     var graduationYear: Int
+    var schoolEmail: String
     var periodConfigs: [PeriodConfig]
     var professionalDressNotificationsEnabled: Bool
     var liveActivityMode: LiveActivityMode
@@ -101,6 +102,7 @@ final class UserSettings {
 
         self.hasCompletedOnboarding = d.bool(forKey: Keys.onboarding)
         self.accessApproved = d.bool(forKey: Keys.accessApproved)
+        self.schoolEmail = d.string(forKey: Keys.schoolEmail) ?? ""
 
         let storedYear = d.integer(forKey: Keys.gradYear)
         self.graduationYear = storedYear == 0 ? Self.defaultGradYear : storedYear
@@ -173,6 +175,7 @@ final class UserSettings {
     func save() {
         store.set(hasCompletedOnboarding, forKey: Keys.onboarding)
         store.set(accessApproved, forKey: Keys.accessApproved)
+        store.set(schoolEmail, forKey: Keys.schoolEmail)
         store.set(graduationYear, forKey: Keys.gradYear)
         store.set(professionalDressNotificationsEnabled, forKey: Keys.dressNotifs)
         store.set(liveActivityMode.rawValue, forKey: Keys.liveActivityMode)
@@ -198,14 +201,15 @@ final class UserSettings {
 
     private static var defaultGradYear: Int {
         let comps = Calendar.current.dateComponents([.year, .month], from: Date())
-        let year  = comps.year ?? 2026
+        let year  = comps.year ?? Calendar.current.component(.year, from: Date())
         let month = comps.month ?? 1
-        return month >= 8 ? year + 2 : year + 1
+        return month >= 8 ? year + 1 : year
     }
 
     private enum Keys {
         static let onboarding           = "onboarding_complete"
         static let accessApproved        = "access_approved"
+        static let schoolEmail           = "school_email"
         static let gradYear             = "graduation_year"
         static let periodConfigs        = "period_configs"
         static let dressNotifs          = "dress_notifications_enabled"

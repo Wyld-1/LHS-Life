@@ -83,7 +83,7 @@ enum NotificationService {
 
         let content = UNMutableNotificationContent()
         content.title = "Professional Dress Tomorrow"
-        content.body  = "LaSalle requires professional dress for \(event.title) tomorrow."
+        content.body  = "LaSalle requires professional dress for \(event.title)."
         content.sound = .default
 
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
@@ -131,18 +131,34 @@ enum NotificationService {
         }
     }
 
+    // MARK: - Shared helper
+
+    /// Returns the first main-school-day period, skipping Period 0 and
+    /// any period starting before 7:30 AM. Used by announcement and
+    /// abnormal schedule notifications so they fire relative to the
+    /// actual school start time, not an optional early period.
+    private static func firstMainPeriod(in schedule: BellSchedule) -> Period? {
+        // Prefer explicit Period 1
+        if let p1 = schedule.periods.first(where: { $0.name == "Period 1" }) { return p1 }
+        // Fallback: first period at or after 7:30 AM
+        return schedule.periods.first {
+            let h = $0.startTime.hour ?? 0
+            let m = $0.startTime.minute ?? 0
+            return (h == 7 && m >= 30) || h >= 8
+        }
+    }
+
     private static func scheduleAnnouncementNotification(date: Date, schedule: BellSchedule, dayKey: String) async {
-        guard let firstPeriod = schedule.periods.first,
+        guard let firstPeriod = firstMainPeriod(in: schedule),
               let startDate = firstPeriod.startDate(on: date),
-              let fireDate = Calendar.current.date(byAdding: .minute, value: -10, to: startDate),
+              let fireDate = Calendar.current.date(byAdding: .minute, value: -5, to: startDate),
               fireDate > Date()
         else { return }
 
         let content = UNMutableNotificationContent()
-        content.title = "Announcement Time"
-        content.body  = "School starts in 10 minutes. Time to do announcements!"
+        content.title = "Morning Announcements"
+        content.body  = "You're doing announcements this morning!"
         content.sound = .default
-        content.userInfo = ["url": "teamreach://"]
 
         let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
@@ -151,7 +167,15 @@ enum NotificationService {
     }
 
     private static func scheduleBreakNotification(date: Date, schedule: BellSchedule, dayKey: String) async {
-        guard let breakPeriod = schedule.periods.first(where: { $0.name.lowercased() == "break" }),
+        // Match any period whose name contains "break" — covers "Break",
+        // "10 Minute Break", "Morning Break", etc.
+        // Only fire for short breaks (≤20 min) — excludes lunch-length slots
+        // that might also be named generically.
+        guard let breakPeriod = schedule.periods.first(where: {
+                  $0.name.lowercased().contains("break") &&
+                  ($0.durationMinutes ?? 0) >= 10 &&
+                  ($0.durationMinutes ?? 999) <= 20
+              }),
               let breakStart = breakPeriod.startDate(on: date),
               let fireDate = Calendar.current.date(byAdding: .minute, value: -5, to: breakStart),
               fireDate > Date()
@@ -226,13 +250,14 @@ enum NotificationService {
     private static func scheduleAbnormalNotification(date: Date,
                                                       schedule: BellSchedule,
                                                       dayKey: String) async {
-        // Fire at 7:00 AM on the day
-        var comps = Calendar.current.dateComponents([.year, .month, .day], from: date)
-        comps.hour = 7; comps.minute = 0; comps.second = 0
-        guard let fireDate = Calendar.current.date(from: comps),
+        // Fire 5 minutes before the main school day starts.
+        // Uses firstMainPeriod so it adapts to late starts, etc.
+        guard let firstPeriod = firstMainPeriod(in: schedule),
+              let startDate = firstPeriod.startDate(on: date),
+              let fireDate = Calendar.current.date(byAdding: .minute, value: -5, to: startDate),
               fireDate > Date() else { return }
 
-        let typeName = schedule.scheduleType.rawValue  // "Block", "Late Start", etc.
+        //let typeName = schedule.scheduleType.rawValue
 
         let content = UNMutableNotificationContent()
         content.title = "Different Schedule Today"
@@ -240,6 +265,7 @@ enum NotificationService {
         content.sound = .default
         content.categoryIdentifier = abnormalScheduleCategoryID
 
+        let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
         try? await center.add(UNNotificationRequest(identifier: "abnormal-\(dayKey)",
                                                      content: content, trigger: trigger))

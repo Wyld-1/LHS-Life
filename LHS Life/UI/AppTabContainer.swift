@@ -5,12 +5,7 @@
 //  Single branch point at the top level: iPhone vs iPad.
 //
 //  iPhone — ZStack with floating pill+button at top, AppDock at bottom.
-//           Completely unchanged from the original design.
-//
-//  iPad   — System TabView (top bar, Apple's preferred layout) with:
-//             • ScheduleHeaderPill as .tabViewBottomAccessory (like Music's Now Playing)
-//             • SettingsButton as .toolbar item (top-right, always visible)
-//           No floating ZStack chrome on iPad — the system owns the layout.
+//  iPad   — System TabView (top bar) with pill as bottom accessory.
 //
 
 import SwiftUI
@@ -61,11 +56,11 @@ struct AppTabContainer: View {
     @Environment(CalendarStore.self) private var store
     @Environment(UserSettings.self) private var settings
 
-    @State private var selectedTab   = AppTab.events
-    @State private var previousTab   = AppTab.events
-    @State private var showSettings  = false
-    @State private var showHomework  = false
-    @State private var isLaunching   = true
+    @State private var selectedTab  = AppTab.events
+    @State private var previousTab  = AppTab.events
+    @State private var showSettings = false
+    @State private var showHomework = false
+    @State private var isLaunching  = true
 
     @State private var lunchState = EmbeddedWebState(
         url: URL(string: "https://lhs.plan.tech/lunch/")!,
@@ -81,9 +76,7 @@ struct AppTabContainer: View {
         siteName: "Schoology"
     )
 
-    private var isPhone: Bool {
-        UIDevice.current.userInterfaceIdiom == .phone
-    }
+    private var isPhone: Bool { UIDevice.current.userInterfaceIdiom == .phone }
 
     private var launchProgress: Double {
         var p = store.events.isEmpty ? 0.0 : 0.34
@@ -95,11 +88,7 @@ struct AppTabContainer: View {
 
     var body: some View {
         Group {
-            if isPhone {
-                iPhoneLayout
-            } else {
-                iPadLayout
-            }
+            if isPhone { iPhoneLayout } else { iPadLayout }
         }
         .onChange(of: launchProgress) { _, progress in
             if progress >= 1.0 && isLaunching {
@@ -136,8 +125,6 @@ struct AppTabContainer: View {
     }
 
     // MARK: - iPhone Layout
-    // Exactly as before — floating ZStack with pill+button at top, dock at bottom.
-    // Zero changes from the original iPhone design.
 
     private var iPhoneLayout: some View {
         ZStack {
@@ -157,7 +144,6 @@ struct AppTabContainer: View {
             )
 
             VStack {
-                // Pill + settings button together at the top
                 ScheduleHeader(showSettings: $showSettings, onPillTap: {
                     withAnimation(.lsSnappy) { selectedTab = .events }
                 })
@@ -186,8 +172,21 @@ struct AppTabContainer: View {
                 .padding(.trailing, LS.md)
                 .padding(.bottom, LS.xxl)
             }
-            .safeAreaPadding(.top)
             .safeAreaPadding(.bottom)
+            .background(alignment: .top) {
+                LinearGradient(
+                    stops: [
+                        .init(color: Color.lsBackground,            location: 0),
+                        .init(color: Color.lsBackground,            location: 0.3),
+                        .init(color: Color.lsBackground.opacity(0), location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: LS.contentTopInset)
+                .ignoresSafeArea(edges: .top)
+                .allowsHitTesting(false)
+            }
 
             if showHomework {
                 HomeworkPopup(onDismiss: { withAnimation(.lsSpring) { showHomework = false } })
@@ -207,17 +206,12 @@ struct AppTabContainer: View {
     }
 
     // MARK: - iPad Layout
-    // System TabView at top (Apple's preferred iPad pattern).
-    // Pill as bottom accessory — like Apple Music's Now Playing bar.
-    // Settings button in toolbar — always top-right.
 
     @ViewBuilder
     private var iPadLayout: some View {
         if #available(iOS 26, *) {
             iPadTabView
         } else {
-            // iPad on iOS 17-25: use the legacy ZStack layout
-            // (iOS 26 is the only version where tabViewBottomAccessory is available)
             iPhoneLayout
         }
     }
@@ -261,7 +255,6 @@ struct AppTabContainer: View {
         }
         .tabBarMinimizeBehavior(.onScrollDown)
         .tint(Color.lsBlue)
-        // Pill lives at the bottom — mirrors Apple Music's Now Playing bar
         .tabViewBottomAccessory {
             ScheduleHeaderPill(onPillTap: {
                 withAnimation(.lsSnappy) { selectedTab = .events }
@@ -269,7 +262,6 @@ struct AppTabContainer: View {
             .padding(.horizontal, LS.md)
             .padding(.vertical, LS.xs)
         }
-        // Settings button always top-right in the toolbar
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 SettingsButton(showSettings: $showSettings)

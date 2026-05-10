@@ -4,6 +4,10 @@
 //
 
 import SwiftUI
+#if DEBUG
+import UserNotifications
+import ActivityKit
+#endif
 
 struct SettingsSheetView: View {
     @Bindable var settings: UserSettings
@@ -42,6 +46,9 @@ struct SettingsSheetView: View {
                     periodsSection
                     notificationsSection   // includes Live Activity
                     asbSection             // moved to bottom — power user feature
+                    #if DEBUG
+                    debugSection
+                    #endif
                 }
                 .padding(.horizontal, LS.md)
                 .padding(.top, LS.md)
@@ -291,6 +298,103 @@ struct SettingsSheetView: View {
             .animation(.lsSnappy, value: settings.isASBMember)
         }
     }
+
+    #if DEBUG
+    private var debugSection: some View {
+        VStack(alignment: .leading, spacing: LS.sm) {
+            sectionLabel("Debug")
+            VStack(spacing: 0) {
+                Button {
+                    HapticEngine.shared.tap()
+                    let attributes = ScheduleActivityAttributes(
+                        periodColorHex: "#3A6FD8",
+                        schoolName: "LaSalle"
+                    )
+                    let state = ScheduleActivityAttributes.ContentState(
+                        currentPeriodName: "Chemistry",
+                        secondsRemaining: 1800,
+                        periodDurationSeconds: 3000,
+                        nextPeriodName: "Lunch",
+                        nextBellTime: "11:45 AM",
+                        isOffSchedule: false,
+                        headerText: "30 min left in Chemistry"
+                    )
+                    do {
+                        _ = try Activity.request(
+                            attributes: attributes,
+                            content: .init(state: state, staleDate: Date().addingTimeInterval(300)),
+                            pushType: nil
+                        )
+                        print("[LiveActivity] Debug start succeeded")
+                    } catch {
+                        print("[LiveActivity] Debug start failed: \(error)")
+                    }
+                } label: {
+                    HStack {
+                        Image(systemName: "bolt.fill")
+                            .foregroundStyle(Color.lsOrange)
+                        Text("Force Start Live Activity")
+                            .font(.lsHeadline)
+                            .foregroundStyle(Color.lsOrange)
+                        Spacer()
+                    }
+                    .padding(LS.md)
+                }
+
+                Divider().background(Color.lsTertiary.opacity(0.3))
+
+                Button {
+                    HapticEngine.shared.tap()
+                    Task {
+                        let content = UNMutableNotificationContent()
+                        content.title = "Morning Announcements"
+                        content.body  = "Time to post announcements on TeamReach!"
+                        content.sound = .default
+                        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 3, repeats: false)
+                        try? await UNUserNotificationCenter.current().add(
+                            UNNotificationRequest(identifier: "debug-announcement", content: content, trigger: trigger)
+                        )
+                    }
+                } label: {
+                    HStack {
+                        Image(systemName: "bell.fill")
+                            .foregroundStyle(Color.lsBlue)
+                        Text("Send Announcement Notification")
+                            .font(.lsHeadline)
+                            .foregroundStyle(Color.lsBlue)
+                        Spacer()
+                        Text("3s")
+                            .font(.lsLabel)
+                            .foregroundStyle(Color.lsTertiary)
+                    }
+                    .padding(LS.md)
+                }
+
+                Divider().background(Color.lsTertiary.opacity(0.3))
+
+                Button(role: .destructive) {
+                    HapticEngine.shared.tap()
+                    Task {
+                        for activity in Activity<ScheduleActivityAttributes>.activities {
+                            await activity.end(nil, dismissalPolicy: .immediate)
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(Color.lsDestructive)
+                        Text("End Live Activity")
+                            .font(.lsHeadline)
+                            .foregroundStyle(Color.lsDestructive)
+                        Spacer()
+                    }
+                    .padding(LS.md)
+                }
+            }
+            .lsCard()
+        }
+    }
+    #endif
 
     private func sectionLabel(_ text: String) -> some View {
         Text(text.uppercased())

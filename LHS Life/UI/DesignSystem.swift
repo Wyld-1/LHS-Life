@@ -91,6 +91,9 @@ enum LS {
     // Header height (includes safe area padding)
     static let headerHeight: CGFloat = 88
 
+    // Universal top inset — distance from screen top to where content begins.
+    static let contentTopInset: CGFloat = 120
+
     // Tab bar
     static let tabBarHeight: CGFloat = 56
 }

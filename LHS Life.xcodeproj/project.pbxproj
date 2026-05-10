@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		231F30652FB04A0F00F58221 /* LHS Life Icon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 231F30642FB04A0F00F58221 /* LHS Life Icon.icon */; };
 		23E395CD2FA53A6D00574B85 /* SwiftSoup in Frameworks */ = {isa = PBXBuildFile; productRef = 23E395CC2FA53A6D00574B85 /* SwiftSoup */; };
 		23E396072FA57AE300574B85 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 23E396062FA57AE200574B85 /* WidgetKit.framework */; };
 		23E396092FA57AE300574B85 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 23E396082FA57AE300574B85 /* SwiftUI.framework */; };
@@ -52,6 +53,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		231F30642FB04A0F00F58221 /* LHS Life Icon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = "LHS Life Icon.icon"; sourceTree = "<group>"; };
 		23E395A12FA5399800574B85 /* LHS Life.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "LHS Life.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		23E395AE2FA5399A00574B85 /* LHS LifeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "LHS LifeTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		23E395B82FA5399A00574B85 /* LHS LifeUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "LHS LifeUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -156,6 +158,7 @@
 				23E3960A2FA57AE300574B85 /* LaSalle Widgets */,
 				23E396052FA57AE200574B85 /* Frameworks */,
 				23E395A22FA5399800574B85 /* Products */,
+				231F30642FB04A0F00F58221 /* LHS Life Icon.icon */,
 			);
 			sourceTree = "<group>";
 		};
@@ -331,6 +334,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				231F30652FB04A0F00F58221 /* LHS Life Icon.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -531,7 +535,7 @@
 		23E395C32FA5399A00574B85 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = "LHS Life Icon";
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "";
 				CODE_SIGN_STYLE = Automatic;
@@ -570,7 +574,7 @@
 		23E395C42FA5399A00574B85 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = "LHS Life Icon";
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "";
 				CODE_SIGN_STYLE = Automatic;
@@ -703,6 +707,7 @@
 				INFOPLIST_FILE = "/Users/liamlefohn/Documents/LaSalle ASB/LHS Life/LHS Widgets/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "LHS Widgets";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -735,6 +740,7 @@
 				INFOPLIST_FILE = "/Users/liamlefohn/Documents/LaSalle ASB/LHS Life/LHS Widgets/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "LHS Widgets";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

@@ -24,6 +24,8 @@ final class EmbeddedWebDelegate: NSObject, WKNavigationDelegate {
         Task { @MainActor [weak self] in
             self?.state?.isLoading = false
             self?.state?.canGoBack = webView.canGoBack
+            // Inject email on Microsoft login page
+            self?.state?.injectEmailIfNeeded(into: webView)
         }
     }
     func webView(_ webView: WKWebView, didFail _: WKNavigation!, withError e: Error) {
@@ -127,6 +129,45 @@ final class EmbeddedWebState {
         isLoading = true
         wv.load(URLRequest(url: url))
     }
+
+    // MARK: - Microsoft email autofill
+
+    /// Detects the Microsoft login page and injects the stored school email,
+    /// then clicks Next so iOS Keychain can offer the saved password.
+    @MainActor
+    func injectEmailIfNeeded(into webView: WKWebView) {
+        guard let host = webView.url?.host,
+              host.contains("login.microsoftonline.com") || host.contains("login.microsoft.com")
+        else { return }
+
+        let email = UserSettings.shared.schoolEmail
+        guard !email.isEmpty else { return }
+
+        // Small delay so the page's own JS has finished rendering the input
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            let js = """
+                (function() {
+                    var input = document.querySelector('input[type="email"], input[name="loginfmt"], #i0116');
+                    if (input) {
+                        var nativeInput = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+                        nativeInput.set.call(input, '\(email)');
+                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                        input.dispatchEvent(new Event('change', { bubbles: true }));
+                        // Click Next after a short delay
+                        setTimeout(function() {
+                            var next = document.querySelector('#idSIButton9, input[type="submit"], button[type="submit"]');
+                            if (next) next.click();
+                        }, 300);
+                    }
+                })();
+            """
+            webView.evaluateJavaScript(js) { _, error in
+                if let error = error {
+                    print("[Autofill] JS error: \(error)")
+                }
+            }
+        }
+    }
 }
 
 // MARK: - View
@@ -142,9 +183,7 @@ struct EmbeddedWebView: View {
                         .frame(width: geo.size.width, height: geo.size.height)
                         .ignoresSafeArea()
                         .onAppear {
-                            let topInset    = 140.0
-                            let bottomInset = 0.0
-                            webState.applyInsets(top: topInset, bottom: bottomInset)
+                            webState.applyInsets(top: LS.contentTopInset, bottom: 0)
                         }
                 }
 
@@ -175,19 +214,6 @@ struct EmbeddedWebView: View {
                     }
                 }
 
-                LinearGradient(
-                    stops: [
-                        .init(color: .lsBackground, location: 0),
-                        .init(color: .lsBackground, location: 0.5),
-                        .init(color: .lsBackground.opacity(0), location: 1.0)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 160)
-                .frame(maxWidth: .infinity)
-                .ignoresSafeArea(edges: .top)
-                .allowsHitTesting(false)
             }
         }
         .background(Color.lsBackground)

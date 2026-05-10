@@ -2,14 +2,11 @@
 //  LHS_WidgetsLiveActivity.swift
 //  LHS Widgets
 //
-//  Dynamic Island:
-//    Compact leading  — lhs-lightning logo in period color
-//    Compact trailing — bell icon + next bell time
-//    Minimal          — circular progress arc
-//    Expanded         — period name, bell + time, progress bar, next period
-//
-//  Lock screen banner — period name, bell + next bell time, thick progress
-//                       bar, next period line. Mirrors the app header.
+//  UI matches LHS Life design: lightning logo, rounded fonts, dark background.
+//  ContentState fields match the working LHS Live schema:
+//    currentPeriodName, secondsRemaining, periodDurationSeconds,
+//    nextPeriodName, nextBellTime, isOffSchedule, headerText
+//  Progress computed from integer seconds — no Dates needed.
 //
 
 import ActivityKit
@@ -22,13 +19,13 @@ struct LaSalle_WidgetsLiveActivity: Widget {
             LockScreenView(attributes: context.attributes, state: context.state)
         } dynamicIsland: { context in
             DynamicIsland {
-
-                // MARK: Expanded — leading: period color + period name
                 DynamicIslandExpandedRegion(.leading) {
                     HStack(spacing: 6) {
-                        Circle()
+                        Image("lhs-lightning")
+                            .resizable()
+                            .renderingMode(.template)
                             .foregroundStyle(Color(hex: context.attributes.periodColorHex))
-                            .frame(width: 12, height: 12)
+                            .frame(width: 14, height: 14)
                         Text(context.state.currentPeriodName)
                             .font(.system(size: 15, weight: .semibold, design: .rounded))
                             .foregroundStyle(.white)
@@ -37,7 +34,6 @@ struct LaSalle_WidgetsLiveActivity: Widget {
                     .padding(.leading, 4)
                 }
 
-                // MARK: Expanded — trailing: bell + next bell time
                 DynamicIslandExpandedRegion(.trailing) {
                     HStack(spacing: 4) {
                         Image(systemName: "bell.fill")
@@ -52,7 +48,6 @@ struct LaSalle_WidgetsLiveActivity: Widget {
                     .padding(.trailing, 4)
                 }
 
-                // MARK: Expanded — bottom: next period + progress bar
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(spacing: 6) {
                         if let next = context.state.nextPeriodName {
@@ -60,29 +55,17 @@ struct LaSalle_WidgetsLiveActivity: Widget {
                                 Text("Next: \(next)")
                                     .font(.system(size: 12, weight: .medium, design: .rounded))
                                     .foregroundStyle(.white.opacity(0.6))
+                                    .lineLimit(1)
+                                Spacer()
                             }
                         }
-                        
-                        Spacer()
-                        
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                Capsule()
-                                    .fill(.white.opacity(0.15))
-                                    .frame(height: 6)
-                                Capsule()
-                                    .fill(Color(hex: context.attributes.periodColorHex))
-                                    .frame(width: geo.size.width * context.state.progress, height: 6)
-                            }
-                        }
-                        .frame(height: 6)
+                        ProgressBar(progress: context.state.progress, color: Color(hex: context.attributes.periodColorHex))
                     }
                     .padding(.horizontal, 4)
                     .padding(.bottom, 4)
                 }
 
             } compactLeading: {
-                // LaSalle lightning logo in period color
                 Image("lhs-lightning")
                     .resizable()
                     .renderingMode(.template)
@@ -91,7 +74,6 @@ struct LaSalle_WidgetsLiveActivity: Widget {
                     .padding(.leading, 2)
 
             } compactTrailing: {
-                // Bell + next bell time
                 HStack(spacing: 3) {
                     Image(systemName: "bell.fill")
                         .font(.system(size: 9, weight: .semibold))
@@ -105,7 +87,6 @@ struct LaSalle_WidgetsLiveActivity: Widget {
                 .padding(.trailing, 2)
 
             } minimal: {
-                // Circular progress arc with logo inside
                 ZStack {
                     Circle()
                         .stroke(.white.opacity(0.2), lineWidth: 2)
@@ -126,27 +107,27 @@ struct LaSalle_WidgetsLiveActivity: Widget {
     }
 }
 
-// MARK: - Lock Screen / Banner View
-// Mirrors the app header: period, bell time, progress, next period.
+// MARK: - Lock Screen View
 
 private struct LockScreenView: View {
     let attributes: ScheduleActivityAttributes
     let state: ScheduleActivityAttributes.ContentState
 
     var body: some View {
+        let color = Color(hex: attributes.periodColorHex)
         VStack(spacing: 10) {
-
-            // Top row: logo + period name | bell + time
             HStack(alignment: .center) {
                 HStack(spacing: 8) {
                     Image("lhs-lightning")
                         .resizable()
                         .renderingMode(.template)
-                        .foregroundStyle(Color(hex: attributes.periodColorHex))
+                        .foregroundStyle(color)
                         .frame(width: 18, height: 18)
                     Text(state.currentPeriodName)
                         .font(.system(size: 16, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
                 Spacer()
                 if let bellTime = state.nextBellTime {
@@ -161,25 +142,14 @@ private struct LockScreenView: View {
                 }
             }
 
-            // Progress bar — thicker than Dynamic Island version
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(.white.opacity(0.15))
-                        .frame(height: 8)
-                    Capsule()
-                        .fill(Color(hex: attributes.periodColorHex))
-                        .frame(width: geo.size.width * state.progress, height: 8)
-                }
-            }
-            .frame(height: 8)
+            ProgressBar(progress: state.progress, color: color, height: 8)
 
-            // Next period
             if let next = state.nextPeriodName {
                 HStack {
                     Text("Next: \(next)")
                         .font(.system(size: 13, weight: .medium, design: .rounded))
                         .foregroundStyle(.white.opacity(0.6))
+                        .lineLimit(1)
                     Spacer()
                 }
             }
@@ -187,6 +157,29 @@ private struct LockScreenView: View {
         .padding(16)
         .activityBackgroundTint(Color(hex: "#0D1220"))
         .activitySystemActionForegroundColor(.white)
+    }
+}
+
+// MARK: - Progress Bar
+// Driven by progress computed from integer seconds in ContentState.
+
+private struct ProgressBar: View {
+    let progress: Double
+    var color: Color
+    var height: CGFloat = 6
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.white.opacity(0.15))
+                    .frame(height: height)
+                Capsule()
+                    .fill(color)
+                    .frame(width: geo.size.width * progress, height: height)
+            }
+        }
+        .frame(height: height)
     }
 }
 
@@ -215,16 +208,16 @@ extension ScheduleActivityAttributes {
 extension ScheduleActivityAttributes.ContentState {
     fileprivate static var inClass: ScheduleActivityAttributes.ContentState {
         .init(currentPeriodName: "Chemistry",
-              secondsRemaining: 1847,
+              secondsRemaining: 1800,
               periodDurationSeconds: 3000,
               nextPeriodName: "Lunch",
-              nextBellTime: "10:50 AM",
+              nextBellTime: "11:45 AM",
               isOffSchedule: false,
-              headerText: "30m left in Chemistry")
+              headerText: "30 min left in Chemistry")
     }
 }
 
-#Preview("Notification", as: .content, using: ScheduleActivityAttributes.preview) {
+#Preview("In Class", as: .content, using: ScheduleActivityAttributes.preview) {
     LaSalle_WidgetsLiveActivity()
 } contentStates: {
     ScheduleActivityAttributes.ContentState.inClass

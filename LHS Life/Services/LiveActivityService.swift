@@ -2,13 +2,8 @@
 //  LiveActivityService.swift
 //  LHS Life
 //
-//  Manages the lifecycle of the schedule Live Activity.
-//  Update intervals are dynamic:
-//    inSession      → every 5 minutes (bell time is stable mid-period)
-//    betweenPeriods → every 30 seconds (transitions matter)
-//    beforeSchool   → every 30 seconds
-//  staleDate is set to the next period transition so the system knows
-//  exactly when to prompt a refresh.
+//  Starting/stopping mechanism copied exactly from LHS Live (working on iOS 26.5).
+//  Content builder adapted for LHS Life's Date-based ContentState schema.
 //
 
 import Foundation
@@ -27,7 +22,6 @@ final class LiveActivityService {
     // MARK: - Public API
 
     func update(state: ScheduleEngine.ScheduleState, settings: UserSettings) {
-        // Get today's schedule type for .abnormalOnly evaluation
         let dayKey = DateFormatter.isoDay.string(from: Date())
         let scheduleType = SharedStore.readBellSchedules()[dayKey]?.scheduleType
 
@@ -58,10 +52,9 @@ final class LiveActivityService {
 
     private func dynamicUpdateInterval(for state: ScheduleEngine.ScheduleState) -> TimeInterval {
         switch state.dayState {
-        case .inSession:            return 300  // 5 min — bell time unchanged mid-period
-        case .betweenPeriods,
-             .beforeSchool:         return 30   // 30s — passing time is short
-        default:                    return 300
+        case .inSession:                     return 300  // 5 min mid-period
+        case .betweenPeriods, .beforeSchool: return 30   // 30s at transitions
+        default:                             return 300
         }
     }
 
@@ -96,6 +89,7 @@ final class LiveActivityService {
             )
             currentActivity = activity
             lastUpdateTime  = Date()
+            print("[LiveActivity] Started — id: \(activity.id)")
         } catch {
             print("[LiveActivity] Failed to start: \(error)")
         }
@@ -116,6 +110,7 @@ final class LiveActivityService {
         await activity.end(nil, dismissalPolicy: .immediate)
         currentActivity = nil
         lastUpdateTime  = .distantPast
+        print("[LiveActivity] Ended")
     }
 
     // MARK: - Content Builder
@@ -125,9 +120,9 @@ final class LiveActivityService {
         settings: UserSettings
     ) -> ScheduleActivityAttributes.ContentState {
 
-        let currentName  = state.currentSlot?.displayName ?? "—"
-        let nextName     = state.nextSlot?.displayName
-        let headerText   = ScheduleEngine.headerPrimaryText(for: state)
+        let currentName = state.currentSlot?.displayName ?? "—"
+        let nextName    = state.nextSlot?.displayName
+        let headerText  = ScheduleEngine.headerPrimaryText(for: state)
 
         let nextBellTime: String?
         if let current = state.currentSlot {
@@ -158,13 +153,13 @@ final class LiveActivityService {
                  || state.dayState == .pathwaysDay
 
         return ScheduleActivityAttributes.ContentState(
-            currentPeriodName: currentName,
-            secondsRemaining: secondsRemaining,
+            currentPeriodName:    currentName,
+            secondsRemaining:     secondsRemaining,
             periodDurationSeconds: durationSeconds,
-            nextPeriodName: nextName,
-            nextBellTime: nextBellTime,
-            isOffSchedule: isOff,
-            headerText: headerText
+            nextPeriodName:       nextName,
+            nextBellTime:         nextBellTime,
+            isOffSchedule:        isOff,
+            headerText:           headerText
         )
     }
 }

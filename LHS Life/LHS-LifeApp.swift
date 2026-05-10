@@ -2,6 +2,8 @@
 //  LHS-LifeApp.swift
 //  LHS Life
 //
+//  App entry point — matched to LHS Live's working structure exactly.
+//
 
 import SwiftUI
 import UserNotifications
@@ -14,15 +16,10 @@ struct LaSalle_ScheduleApp: App {
     @State private var settings = UserSettings.shared
 
     init() {
-        Task { @MainActor in
-            HapticEngine.shared.prepare()
-        }
+        Task { @MainActor in HapticEngine.shared.prepare() }
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
-        // Register notification categories (abnormal schedule action button)
         NotificationService.registerCategories()
-        Task {
-            _ = await NotificationService.requestAuthorization()
-        }
+        Task { _ = await NotificationService.requestAuthorization() }
     }
 
     var body: some Scene {
@@ -30,7 +27,14 @@ struct LaSalle_ScheduleApp: App {
             ContentView()
                 .environment(store)
                 .environment(settings)
-                .task { await store.loadAll() }
+                .task {
+                    guard settings.accessApproved else { return }
+                    await store.loadAll()
+                }
+                .onChange(of: settings.accessApproved) { _, approved in
+                    guard approved else { return }
+                    Task { await store.loadAll() }
+                }
         }
     }
 }
@@ -50,17 +54,8 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
                                  didReceive response: UNNotificationResponse,
                                  withCompletionHandler handler: @escaping () -> Void) {
 
-        // Abnormal schedule — "Show Today's Schedule" action enables LA for today
         if response.actionIdentifier == NotificationService.enableLiveActivityActionID {
-            Task { @MainActor in
-                UserSettings.shared.enableLiveActivityForToday()
-            }
-        }
-
-        // TeamReach deep link from ASB announcement
-        if let urlString = response.notification.request.content.userInfo["url"] as? String,
-           let url = URL(string: urlString) {
-            UIApplication.shared.open(url)
+            Task { @MainActor in UserSettings.shared.enableLiveActivityForToday() }
         }
 
         handler()

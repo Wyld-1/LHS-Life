@@ -134,14 +134,44 @@ struct AccessGuardView: View {
 
     private func attempt() {
         let trimmed = email.trimmingCharacters(in: .whitespaces).lowercased()
-        guard trimmed.hasSuffix(Self.allowedDomain), trimmed.count > Self.allowedDomain.count else {
+        guard trimmed.hasSuffix(Self.allowedDomain),
+              trimmed.count > Self.allowedDomain.count else {
             reject()
             return
         }
-        // Valid — approve and persist immediately
+
+        // Parse grad year from email prefix.
+        // Format: [initial][lastname][2-digit-year]@lasalleyakima.org
+        // e.g. llefohn27 → 2027
+        let prefix = String(trimmed.prefix(trimmed.count - Self.allowedDomain.count))
+        if let gradYear = extractGradYear(from: prefix) {
+            settings.graduationYear = gradYear
+        } else {
+            settings.graduationYear = 0
+        }
+
         HapticEngine.shared.success()
+        settings.schoolEmail = trimmed
         settings.accessApproved = true
         settings.save()
+    }
+
+    /// Extracts a 4-digit grad year from the email local part.
+    /// Rolls forward by century until the year is not in the past.
+    /// Y3K compatible. You're welcome.
+    private func extractGradYear(from prefix: String) -> Int? {
+        let digits = prefix.reversed().prefix(while: { $0.isNumber })
+        guard digits.count >= 2 else { return nil }
+        let twoDigits = String(digits.prefix(2).reversed())
+        guard let twoDigitInt = Int(twoDigits) else { return nil }
+
+        let currentYear = Calendar.current.component(.year, from: Date())
+        var century = (currentYear / 100) * 100
+        while true {
+            let year = century + twoDigitInt
+            if year >= currentYear { return year }
+            century += 100
+        }
     }
 
     private func reject() {

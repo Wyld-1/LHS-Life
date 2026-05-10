@@ -16,7 +16,7 @@ struct HomeworkPopup: View {
     let onDismiss: () -> Void
 
     @State private var title             = ""
-    @State private var selectedPeriodID  = 1
+    @State private var selectedPeriodID: Int? = 1
     @State private var dueDate: Date?    = nil
     @State private var priority          = ReminderPriority.none
     @State private var showInlinePicker  = false
@@ -29,7 +29,8 @@ struct HomeworkPopup: View {
     }
 
     private var selectedConfig: PeriodConfig? {
-        settings.config(for: selectedPeriodID)
+        guard let id = selectedPeriodID else { return nil }
+        return settings.config(for: id)
     }
 
     var body: some View {
@@ -56,7 +57,7 @@ struct HomeworkPopup: View {
             if let num = bestPeriodID, settings.config(for: num)?.isEnabled == true {
                 selectedPeriodID = num
             } else {
-                selectedPeriodID = enabledPeriods.first?.id ?? 1
+                selectedPeriodID = enabledPeriods.first?.id
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { titleFocused = true }
             Task { if !reminders.isAuthorized { _ = await reminders.requestAccess() } }
@@ -170,9 +171,24 @@ struct HomeworkPopup: View {
 
     private var classMenu: some View {
         Menu {
-            Picker("Class", selection: $selectedPeriodID) {
-                ForEach(enabledPeriods) { config in
-                    Text(config.displayName).tag(config.id)
+            // None option at top
+            Button {
+                selectedPeriodID = nil
+                HapticEngine.shared.tick()
+            } label: {
+                Label("None", systemImage: selectedPeriodID == nil ? "checkmark" : "minus")
+            }
+            Divider()
+            ForEach(enabledPeriods) { config in
+                Button {
+                    selectedPeriodID = config.id
+                    HapticEngine.shared.tick()
+                } label: {
+                    if selectedPeriodID == config.id {
+                        Label(config.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(config.displayName)
+                    }
                 }
             }
         } label: {
@@ -182,6 +198,14 @@ struct HomeworkPopup: View {
                         .fill(Color.paletteColor(for: config))
                         .frame(width: 9, height: 9)
                     Text(config.displayName)
+                        .font(.lsCaption)
+                        .foregroundStyle(Color.lsPrimary)
+                        .lineLimit(1)
+                } else {
+                    Circle()
+                        .fill(Color.lsTertiary)
+                        .frame(width: 9, height: 9)
+                    Text("None")
                         .font(.lsCaption)
                         .foregroundStyle(Color.lsPrimary)
                         .lineLimit(1)
@@ -198,10 +222,6 @@ struct HomeworkPopup: View {
             .clipShape(Capsule())
         }
         .tint(Color.lsPrimary)
-        .onChange(of: selectedPeriodID) { _, _ in
-            titleFocused = false
-            HapticEngine.shared.tick()
-        }
     }
 
     // MARK: - Priority Button
@@ -286,7 +306,7 @@ struct HomeworkPopup: View {
         guard !trimmed.isEmpty else { return }
         isSaving = true
         errorMessage = nil
-        let className = selectedConfig?.displayName ?? "Homework"
+        let className = selectedConfig?.displayName ?? "General"
         do {
             try await reminders.addAssignment(
                 title: trimmed,
