@@ -38,7 +38,7 @@ It's all the familiar apps you're used to, now all in one place.
 ### ✏️ Customization
 
 Within LHS Life, you are free to name and color your periods, disable the ones you don't have (0 period, 8th period, etc.), and set your notification preferences.
-LHS Life also alows students on ASB to enable Student Store and morning announcement reminders.
+LHS Life also allows students on ASB to enable Student Store and morning announcement reminders.
 
 ## How do I get LHS Life?
 LHS Life is planned to launch for the **2026–2027** school year.
