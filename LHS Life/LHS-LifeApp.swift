@@ -30,10 +30,22 @@ struct LaSalle_ScheduleApp: App {
                 .task {
                     guard settings.accessApproved else { return }
                     await store.loadAll()
+                    let dayKey = DateFormatter.isoDay.string(from: Date())
+                    LiveActivityService.shared.startIfNeeded(
+                        schedule: store.bellSchedules[dayKey],
+                        settings: settings
+                    )
                 }
                 .onChange(of: settings.accessApproved) { _, approved in
                     guard approved else { return }
-                    Task { await store.loadAll() }
+                    Task {
+                        await store.loadAll()
+                        let dayKey = DateFormatter.isoDay.string(from: Date())
+                        LiveActivityService.shared.startIfNeeded(
+                            schedule: store.bellSchedules[dayKey],
+                            settings: settings
+                        )
+                    }
                 }
         }
     }

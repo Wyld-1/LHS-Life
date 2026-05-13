@@ -92,7 +92,7 @@ enum LS {
     static let headerHeight: CGFloat = 88
 
     // Universal top inset — distance from screen top to where content begins.
-    static let contentTopInset: CGFloat = 120
+    static let contentTopInset: CGFloat = 124
 
     // Tab bar
     static let tabBarHeight: CGFloat = 56

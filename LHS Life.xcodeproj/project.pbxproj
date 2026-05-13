@@ -68,7 +68,13 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Assets.xcassets,
+				Models/BellSchedule.swift,
+				Models/PeriodConfig.swift,
 				Models/ScheduleActivityAttributes.swift,
+				Models/SchoolEvent.swift,
+				Models/UserSettings.swift,
+				Utilities/BellScheduleDetector.swift,
+				Utilities/DateHelpers.swift,
 			);
 			target = 23E396032FA57AE200574B85 /* LHS WidgetsExtension */;
 		};

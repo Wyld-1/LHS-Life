@@ -11,12 +11,14 @@ import ActivityKit
 
 struct SettingsSheetView: View {
     @Bindable var settings: UserSettings
+    @Environment(CalendarStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
     @State private var editingPeriodID: Int? = nil
     @FocusState private var gradYearFocused: Bool
     @State private var gradYearInput = ""
     @State private var isEditingGradYear = false
+    @State private var apModeEnabled = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -27,6 +29,7 @@ struct SettingsSheetView: View {
                 Spacer()
                 Button("Done") {
                     commitGradYear()
+                    settings.apModeEnabledToday = apModeEnabled
                     settings.save()
                     HapticEngine.shared.success()
                     dismiss()
@@ -42,6 +45,7 @@ struct SettingsSheetView: View {
 
             ScrollView {
                 LazyVStack(spacing: LS.lg, pinnedViews: []) {
+                    apExamBannerSection
                     gradYearSection
                     periodsSection
                     notificationsSection   // includes Live Activity
@@ -56,7 +60,48 @@ struct SettingsSheetView: View {
             }
         }
         .background(Color.lsSurface)
+        .onAppear { apModeEnabled = settings.apModeEnabledToday }
         .onDisappear { settings.save() }
+    }
+
+    // MARK: - AP Exam Banner (top of settings)
+
+    private var apExamState: APExamService.APExamState {
+        let dayKey = DateFormatter.isoDay.string(from: Date())
+        return APExamService.examState(
+            for: dayKey,
+            events: store.events(on: dayKey),
+            settings: settings
+        )
+    }
+
+    @ViewBuilder
+    private var apExamBannerSection: some View {
+        let dayKey = DateFormatter.isoDay.string(from: Date())
+        let examState = APExamService.examState(
+            for: dayKey,
+            events: store.events(on: dayKey),
+            settings: settings
+        )
+        switch examState {
+        case .mine(let name, _, _, let config):
+            let color = config.map { Color.paletteColor(for: $0) } ?? Color.lsBlue
+            APExamBanner(
+                examName: name,
+                isSilenced: apModeEnabled,
+                accentColor: color,
+                onToggle: { HapticEngine.shared.tap(); apModeEnabled.toggle() }
+            )
+        case .someoneElses(let name, _):
+            APExamBanner(
+                examName: name,
+                isSilenced: apModeEnabled,
+                accentColor: Color.lsBlue,
+                onToggle: { HapticEngine.shared.tap(); apModeEnabled.toggle() }
+            )
+        case .none:
+            EmptyView()
+        }
     }
 
     // MARK: - Grad Year
@@ -306,23 +351,26 @@ struct SettingsSheetView: View {
             VStack(spacing: 0) {
                 Button {
                     HapticEngine.shared.tap()
+                    let now = Date()
                     let attributes = ScheduleActivityAttributes(
-                        periodColorHex: "#3A6FD8",
-                        schoolName: "LaSalle"
-                    )
-                    let state = ScheduleActivityAttributes.ContentState(
-                        currentPeriodName: "Chemistry",
-                        secondsRemaining: 1800,
-                        periodDurationSeconds: 3000,
-                        nextPeriodName: "Lunch",
-                        nextBellTime: "11:45 AM",
-                        isOffSchedule: false,
-                        headerText: "30 min left in Chemistry"
+                        schoolName: "LaSalle",
+                        schedule: [
+                            .init(periodNumber: 1, fallbackName: "Period 1",
+                                  colorHex: "#3A6FD8",
+                                  startDate: now.addingTimeInterval(-1200),
+                                  endDate: now.addingTimeInterval(1800),
+                                  endTimeString: "11:45 AM"),
+                            .init(periodNumber: nil, fallbackName: "Lunch",
+                                  colorHex: "#94A3B8",
+                                  startDate: now.addingTimeInterval(1800),
+                                  endDate: now.addingTimeInterval(5400),
+                                  endTimeString: "12:35 PM"),
+                        ]
                     )
                     do {
                         _ = try Activity.request(
                             attributes: attributes,
-                            content: .init(state: state, staleDate: Date().addingTimeInterval(300)),
+                            content: .init(state: .init(), staleDate: now.addingTimeInterval(5400)),
                             pushType: nil
                         )
                         print("[LiveActivity] Debug start succeeded")
@@ -544,6 +592,7 @@ private struct ColorPickerPopup: View {
 
 #Preview {
     SettingsSheetView(settings: UserSettings.shared)
+        .environment(CalendarStore())
 }
 
 // MARK: - Pre-warm

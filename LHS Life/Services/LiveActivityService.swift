@@ -2,8 +2,14 @@
 //  LiveActivityService.swift
 //  LHS Life
 //
-//  Starting/stopping mechanism copied exactly from LHS Live (working on iOS 26.5).
-//  Content builder adapted for LHS Life's Date-based ContentState schema.
+//  Starts, maintains, and ends the schedule Live Activity.
+//
+//  The entire day's schedule is written into the static ActivityAttributes
+//  at start time. The widget computes what to display using context.date
+//  and a TimelineView — no updates are ever pushed after start.
+//
+//  The app calls update() from the pill timer only to check whether
+//  the school day has ended and the activity should be dismissed.
 //
 
 import Foundation
@@ -17,149 +23,104 @@ final class LiveActivityService {
     private init() {}
 
     private var currentActivity: Activity<ScheduleActivityAttributes>?
-    private var lastUpdateTime: Date = .distantPast
 
     // MARK: - Public API
 
-    func update(state: ScheduleEngine.ScheduleState, settings: UserSettings) {
-        let dayKey = DateFormatter.isoDay.string(from: Date())
-        let scheduleType = SharedStore.readBellSchedules()[dayKey]?.scheduleType
-
-        guard settings.liveActivityEffectivelyEnabled(scheduleType: scheduleType) else {
-            Task { await end() }
-            return
-        }
-
-        switch state.dayState {
-        case .inSession, .betweenPeriods, .beforeSchool:
-            if currentActivity == nil {
-                start(state: state, settings: settings)
-            } else {
-                let interval = dynamicUpdateInterval(for: state)
-                let now = Date()
-                guard now.timeIntervalSince(lastUpdateTime) >= interval else { return }
-                lastUpdateTime = now
-                let content = buildContentState(from: state, settings: settings)
-                let stale = staleDateForNextTransition(state: state)
-                Task { await updateContent(content, staleDate: stale) }
-            }
-        case .afterSchool, .noSchedule, .holiday, .pathwaysDay:
-            Task { await end() }
-        }
-    }
-
-    // MARK: - Dynamic interval
-
-    private func dynamicUpdateInterval(for state: ScheduleEngine.ScheduleState) -> TimeInterval {
-        switch state.dayState {
-        case .inSession:                     return 300  // 5 min mid-period
-        case .betweenPeriods, .beforeSchool: return 30   // 30s at transitions
-        default:                             return 300
-        }
-    }
-
-    private func staleDateForNextTransition(state: ScheduleEngine.ScheduleState) -> Date {
-        if let slot = state.currentSlot { return slot.endDate }
-        if let next = state.nextSlot    { return next.startDate }
-        return Date().addingTimeInterval(300)
-    }
-
-    // MARK: - Start
-
-    private func start(state: ScheduleEngine.ScheduleState, settings: UserSettings) {
+    /// Call once after schedule data loads. Starts the activity for the full day.
+    func startIfNeeded(schedule: BellSchedule?, settings: UserSettings) {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        guard currentActivity == nil else { return }
 
-        let slot     = state.currentSlot ?? state.nextSlot
-        let colorHex = slot.flatMap { s in
-            s.config.map { ColorPalette.color(at: $0.colorIndex).hex }
-        } ?? "#3A6FD8"
+        let dayKey = DateFormatter.isoDay.string(from: Date())
+        let scheduleType = schedule?.scheduleType
+        guard settings.liveActivityEffectivelyEnabled(scheduleType: scheduleType) else { return }
+
+        guard let schedule = schedule else { return }
+
+        // Build the full day schedule — all periods with resolved colors
+        let scheduledPeriods = buildSchedule(from: schedule, settings: settings)
+        guard !scheduledPeriods.isEmpty else { return }
+
+        // Last bell is the stale date — activity dims naturally after school ends
+        let lastBell = scheduledPeriods.last?.endDate ?? Date().addingTimeInterval(3600)
 
         let attributes = ScheduleActivityAttributes(
-            periodColorHex: colorHex,
-            schoolName: "LaSalle"
+            schoolName: "LaSalle",
+            schedule: scheduledPeriods
         )
-        let content = buildContentState(from: state, settings: settings)
-        let stale   = staleDateForNextTransition(state: state)
 
         do {
             let activity = try Activity.request(
                 attributes: attributes,
-                content: .init(state: content, staleDate: stale),
+                content: .init(state: .init(), staleDate: lastBell),
                 pushType: nil
             )
             currentActivity = activity
-            lastUpdateTime  = Date()
-            print("[LiveActivity] Started — id: \(activity.id)")
+            print("[LiveActivity] Started — id: \(activity.id), \(scheduledPeriods.count) periods")
         } catch {
             print("[LiveActivity] Failed to start: \(error)")
         }
     }
 
-    // MARK: - Update
-
-    private func updateContent(_ content: ScheduleActivityAttributes.ContentState,
-                                staleDate: Date) async {
-        guard let activity = currentActivity else { return }
-        await activity.update(.init(state: content, staleDate: staleDate))
+    /// Called from the pill timer. Only used to end the activity after school.
+    func endIfSchoolOver(state: ScheduleEngine.ScheduleState) {
+        switch state.dayState {
+        case .afterSchool, .holiday, .pathwaysDay:
+            Task { await end() }
+        default:
+            break
+        }
     }
 
-    // MARK: - End
-
+    /// End the activity immediately.
     func end() async {
         guard let activity = currentActivity else { return }
-        await activity.end(nil, dismissalPolicy: .immediate)
+        await activity.end(
+            .init(state: .init(isEnded: true), staleDate: nil),
+            dismissalPolicy: .immediate
+        )
         currentActivity = nil
-        lastUpdateTime  = .distantPast
         print("[LiveActivity] Ended")
     }
 
-    // MARK: - Content Builder
+    // MARK: - Schedule Builder
 
-    private func buildContentState(
-        from state: ScheduleEngine.ScheduleState,
+    private func buildSchedule(
+        from schedule: BellSchedule,
         settings: UserSettings
-    ) -> ScheduleActivityAttributes.ContentState {
+    ) -> [ScheduleActivityAttributes.ScheduledPeriod] {
 
-        let currentName = state.currentSlot?.displayName ?? "—"
-        let nextName    = state.nextSlot?.displayName
-        let headerText  = ScheduleEngine.headerPrimaryText(for: state)
+        schedule.periods.compactMap { period -> ScheduleActivityAttributes.ScheduledPeriod? in
+            guard let start = period.startDate(on: schedule.date),
+                  let end   = period.endDate(on: schedule.date),
+                  end > Date()  // skip periods already over
+            else { return nil }
 
-        let nextBellTime: String?
-        if let current = state.currentSlot {
-            nextBellTime = ScheduleEngine.timeString(current.endDate)
-        } else if let next = state.nextSlot {
-            nextBellTime = ScheduleEngine.timeString(next.startDate)
-        } else {
-            nextBellTime = nil
+            let periodNumber = extractPeriodNumber(from: period.name)
+            let config       = periodNumber.flatMap { settings.config(for: $0) }
+
+            let colorHex: String
+            if let config = config {
+                colorHex = ColorPalette.color(at: config.colorIndex).hex
+            } else {
+                colorHex = "#94A3B8"  // slate gray for breaks, lunch, advisory
+            }
+
+            return ScheduleActivityAttributes.ScheduledPeriod(
+                periodNumber:  periodNumber,
+                fallbackName:  period.name,
+                colorHex:      colorHex,
+                startDate:     start,
+                endDate:       end,
+                endTimeString: ScheduleEngine.timeString(end)
+            )
         }
+        .sorted { $0.startDate < $1.startDate }
+    }
 
-        let secondsRemaining: Int
-        let durationSeconds: Int
-
-        if let slot = state.currentSlot {
-            secondsRemaining = max(0, Int(slot.timeRemaining))
-            durationSeconds  = max(1, Int(slot.duration))
-        } else if let next = state.nextSlot {
-            secondsRemaining = max(0, Int(next.startDate.timeIntervalSince(Date())))
-            durationSeconds  = max(1, secondsRemaining)
-        } else {
-            secondsRemaining = 0
-            durationSeconds  = 1
-        }
-
-        let isOff = state.dayState == .afterSchool
-                 || state.dayState == .noSchedule
-                 || state.dayState == .holiday
-                 || state.dayState == .pathwaysDay
-
-        return ScheduleActivityAttributes.ContentState(
-            currentPeriodName:    currentName,
-            secondsRemaining:     secondsRemaining,
-            periodDurationSeconds: durationSeconds,
-            nextPeriodName:       nextName,
-            nextBellTime:         nextBellTime,
-            isOffSchedule:        isOff,
-            headerText:           headerText
-        )
+    private func extractPeriodNumber(from name: String) -> Int? {
+        let parts = name.split(separator: " ")
+        guard parts.count == 2, parts[0].lowercased() == "period" else { return nil }
+        return Int(parts[1])
     }
 }

@@ -94,6 +94,37 @@ final class UserSettings {
     /// Three-state mode per weekday (Mon=0…Fri=4)
     var asbWorkDays: [ASBDayMode]  // 5 elements
 
+    // MARK: - AP Exam
+
+    /// dayKey for which the student has manually silenced notifications for an AP exam.
+    @ObservationIgnored private var apSilencedKey: String = ""
+    /// dayKey for which the settings badge has been cleared (user opened settings).
+    @ObservationIgnored private var apBadgeClearedKey: String = ""
+
+    var apModeEnabledToday: Bool {
+        get { apSilencedKey == DateFormatter.isoDay.string(from: Date()) }
+        set {
+            let today = DateFormatter.isoDay.string(from: Date())
+            apSilencedKey = newValue ? today : ""
+            store.set(newValue ? today : "", forKey: Keys.apSilencedKey)
+        }
+    }
+
+    var apBadgeCleared: Bool {
+        get { apBadgeClearedKey == DateFormatter.isoDay.string(from: Date()) }
+        set {
+            let today = DateFormatter.isoDay.string(from: Date())
+            apBadgeClearedKey = newValue ? today : ""
+            store.set(newValue ? today : "", forKey: Keys.apBadgeClearedKey)
+        }
+    }
+
+    /// True if AP Mode is on AND the user's base Live Activity setting allows it.
+    func apModeActive(scheduleType: ScheduleType?) -> Bool {
+        guard apModeEnabledToday else { return false }
+        return liveActivityEffectivelyEnabled(scheduleType: scheduleType)
+    }
+
     // MARK: - Init
 
     init() {
@@ -135,6 +166,10 @@ final class UserSettings {
         let savedKey = d.string(forKey: Keys.liveActivityTodayKey) ?? ""
         self.liveActivityEnabledToday = savedKey == todayKey && d.bool(forKey: Keys.liveActivityToday)
         self.liveActivityTodayKey = todayKey
+
+        // AP exam silencing — restore persisted dayKeys
+        self.apSilencedKey     = d.string(forKey: Keys.apSilencedKey)     ?? ""
+        self.apBadgeClearedKey = d.string(forKey: Keys.apBadgeClearedKey) ?? ""
     }
 
     // MARK: - Live Activity effective state
@@ -217,6 +252,8 @@ final class UserSettings {
         static let abnormalNotifs        = "abnormal_schedule_notifications"  // legacy, unused
         static let liveActivityToday    = "live_activity_today"
         static let liveActivityTodayKey = "live_activity_today_key"
+        static let apSilencedKey        = "ap_exam_silenced_key"
+        static let apBadgeClearedKey    = "ap_badge_cleared_key"
         static let paletteVersion       = "palette_version"
         static let asbMember            = "asb_member"
         static let asbWorkDays          = "asb_work_days"
