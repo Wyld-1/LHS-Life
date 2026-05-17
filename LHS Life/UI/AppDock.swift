@@ -207,7 +207,8 @@ private struct LegacyDockButton: View {
                     .font(.lsLabel)
                     .foregroundStyle(isSelected ? Color.lsBlue : Color.lsSecondary)
             }
-            .frame(width: 56)
+            .shadow(color: .black.opacity(0.4), radius: 2)
+            .frame(width: 64)
             .padding(.vertical, LS.xs)
         }
         .buttonStyle(.plain)

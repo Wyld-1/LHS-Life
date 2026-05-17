@@ -2,12 +2,12 @@
 //  LHS-LifeApp.swift
 //  LHS Life
 //
-//  App entry point — matched to LHS Live's working structure exactly.
-//
 
 import SwiftUI
 import UserNotifications
 import ActivityKit
+import BackgroundTasks
+import UIKit
 
 @main
 struct LaSalle_ScheduleApp: App {
@@ -16,6 +16,9 @@ struct LaSalle_ScheduleApp: App {
     @State private var settings = UserSettings.shared
 
     init() {
+        // BGProcessingTask handler MUST be registered before first scene connects
+        BellTransitionService.register()
+
         Task { @MainActor in HapticEngine.shared.prepare() }
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
         NotificationService.registerCategories()
@@ -47,6 +50,14 @@ struct LaSalle_ScheduleApp: App {
                         )
                     }
                 }
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+                    guard settings.accessApproved else { return }
+                    let dayKey = DateFormatter.isoDay.string(from: Date())
+                    LiveActivityService.shared.updateNow(
+                        schedule: store.bellSchedules[dayKey],
+                        settings: settings
+                    )
+                }
         }
     }
 }
@@ -65,11 +76,9 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                  didReceive response: UNNotificationResponse,
                                  withCompletionHandler handler: @escaping () -> Void) {
-
         if response.actionIdentifier == NotificationService.enableLiveActivityActionID {
             Task { @MainActor in UserSettings.shared.enableLiveActivityForToday() }
         }
-
         handler()
     }
 }

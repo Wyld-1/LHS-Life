@@ -4,7 +4,7 @@
 <dict>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
-		<string>lasalle.schedule.liveActivityRefresh</string>
+		<string>lasalle.bell.transition</string>
 	</array>
 	<key>UIBackgroundModes</key>
 	<array>

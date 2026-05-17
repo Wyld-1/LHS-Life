@@ -4,10 +4,12 @@
 //
 //  Shared between the app target and the widget extension target.
 //
-//  Design: the full day schedule is written into static attributes at start.
-//  ContentState carries nothing meaningful — the widget computes everything
-//  from attributes.schedule and context.date via TimelineView.
-//  No updates are ever needed after the activity starts.
+//  Design:
+//  — Static attributes carry the full day schedule, written once at start.
+//  — ContentState carries the CURRENT period's display data, pushed at each
+//    bell transition by a BGProcessingTask the app schedules at launch.
+//  — The widget uses ContentState for text/color and ProgressView(timerInterval:)
+//    for the live progress bar — no render budget consumed.
 //
 
 import ActivityKit
@@ -15,40 +17,60 @@ import Foundation
 
 struct ScheduleActivityAttributes: ActivityAttributes {
 
-    // MARK: - Static (written once at start, never changes)
+    // MARK: - Static (written once at start)
 
     var schoolName: String
 
-    /// Every period in today's schedule, in order.
-    /// The widget uses this + context.date to know what to display at any moment.
+    /// Full day schedule — used by the widget to know all transitions.
     var schedule: [ScheduledPeriod]
 
     // MARK: - Scheduled Period
 
     struct ScheduledPeriod: Codable, Hashable {
-        /// Period number (1–8). Nil for Break, Lunch, Advisory etc.
         var periodNumber: Int?
-        /// Display name fallback if user has no config (e.g. "Lunch", "Break")
-        var fallbackName: String
-        /// Hex color string — resolved from user's PeriodConfig at start time.
-        /// Gray (#94A3B8) for non-period slots.
+        var displayName: String
         var colorHex: String
-        /// Absolute start of this slot.
         var startDate: Date
-        /// Absolute end of this slot.
         var endDate: Date
-
-        /// Formatted end time string, e.g. "10:50 AM". Pre-computed at start.
         var endTimeString: String
     }
 
     // MARK: - ContentState
-    //
-    // Intentionally minimal. The widget derives everything from attributes.schedule
-    // and context.date. ContentState only carries the isEnded flag so the app
-    // can signal after-school cleanup without the widget needing to know the time.
+    // Pushed at each bell transition by a BGProcessingTask.
+    // Widget renders directly from these values.
 
     public struct ContentState: Codable, Hashable {
-        var isEnded: Bool = false
+        /// Display name of the current period — "Chemistry", "Lunch", etc.
+        var currentPeriodName: String
+        /// Hex color for the current period's accent
+        var colorHex: String
+        /// Absolute start of current period — for ProgressView(timerInterval:)
+        var periodStartDate: Date
+        /// Absolute end of current period — for ProgressView(timerInterval:)
+        var periodEndDate: Date
+        /// Display name of next period, nil if last period
+        var nextPeriodName: String?
+        /// Formatted next bell time string, e.g. "10:50 AM"
+        var nextBellTime: String?
+        /// True when the app signals end of day
+        var isEnded: Bool
+
+        init(
+            currentPeriodName: String = "",
+            colorHex: String = "#94A3B8",
+            periodStartDate: Date = Date(),
+            periodEndDate: Date = Date().addingTimeInterval(3600),
+            nextPeriodName: String? = nil,
+            nextBellTime: String? = nil,
+            isEnded: Bool = false
+        ) {
+            self.currentPeriodName = currentPeriodName
+            self.colorHex          = colorHex
+            self.periodStartDate   = periodStartDate
+            self.periodEndDate     = periodEndDate
+            self.nextPeriodName    = nextPeriodName
+            self.nextBellTime      = nextBellTime
+            self.isEnded           = isEnded
+        }
     }
 }

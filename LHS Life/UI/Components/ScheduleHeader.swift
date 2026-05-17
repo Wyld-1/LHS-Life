@@ -39,7 +39,9 @@ struct SettingsButton: View {
                     .padding(12)
                     // iOS 17–25 fallback — glass applied via background
                     .background {
-                        if #available(iOS 26, *) { Color.clear } else {
+                        if #available(iOS 26, *) {
+                            Color.clear
+                        } else {
                             Circle()
                                 .fill(.ultraThinMaterial)
                                 .overlay { Circle().strokeBorder(Color.white.opacity(0.07), lineWidth: 0.5) }
@@ -148,9 +150,6 @@ struct ScheduleHeaderPill: View {
         .padding(.horizontal, LS.md)
         .padding(.vertical, LS.sm)
         .overlay(alignment: .leading) {
-            // Progress fill — hidden in AP Mode
-            // Gray for betweenPeriods (passing time), class color for inSession,
-            // gray for breaks/lunch (no config on slot)
             if !settings.apModeEnabledToday {
                 if state.dayState == .inSession, let slot = state.currentSlot {
                     GeometryReader { geo in
@@ -170,6 +169,7 @@ struct ScheduleHeaderPill: View {
                 }
             }
         }
+        .clipShape(Capsule())
         // iOS 17–25 fallback background
         .background {
             if #available(iOS 26, *) { Color.clear } else {

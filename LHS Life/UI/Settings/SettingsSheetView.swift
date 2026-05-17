@@ -351,52 +351,10 @@ struct SettingsSheetView: View {
             VStack(spacing: 0) {
                 Button {
                     HapticEngine.shared.tap()
-                    let now = Date()
-                    let attributes = ScheduleActivityAttributes(
-                        schoolName: "LaSalle",
-                        schedule: [
-                            .init(periodNumber: 1, fallbackName: "Period 1",
-                                  colorHex: "#3A6FD8",
-                                  startDate: now.addingTimeInterval(-1200),
-                                  endDate: now.addingTimeInterval(1800),
-                                  endTimeString: "11:45 AM"),
-                            .init(periodNumber: nil, fallbackName: "Lunch",
-                                  colorHex: "#94A3B8",
-                                  startDate: now.addingTimeInterval(1800),
-                                  endDate: now.addingTimeInterval(5400),
-                                  endTimeString: "12:35 PM"),
-                        ]
-                    )
-                    do {
-                        _ = try Activity.request(
-                            attributes: attributes,
-                            content: .init(state: .init(), staleDate: now.addingTimeInterval(5400)),
-                            pushType: nil
-                        )
-                        print("[LiveActivity] Debug start succeeded")
-                    } catch {
-                        print("[LiveActivity] Debug start failed: \(error)")
-                    }
-                } label: {
-                    HStack {
-                        Image(systemName: "bolt.fill")
-                            .foregroundStyle(Color.lsOrange)
-                        Text("Force Start Live Activity")
-                            .font(.lsHeadline)
-                            .foregroundStyle(Color.lsOrange)
-                        Spacer()
-                    }
-                    .padding(LS.md)
-                }
-
-                Divider().background(Color.lsTertiary.opacity(0.3))
-
-                Button {
-                    HapticEngine.shared.tap()
                     Task {
                         let content = UNMutableNotificationContent()
                         content.title = "Morning Announcements"
-                        content.body  = "Time to post announcements on TeamReach!"
+                        content.body  = "> This is a DEBUG test"
                         content.sound = .default
                         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 3, repeats: false)
                         try? await UNUserNotificationCenter.current().add(
@@ -405,13 +363,97 @@ struct SettingsSheetView: View {
                     }
                 } label: {
                     HStack {
-                        Image(systemName: "bell.fill")
+                        Image(systemName: "bell.circle.fill")
                             .foregroundStyle(Color.lsBlue)
                         Text("Send Announcement Notification")
                             .font(.lsHeadline)
                             .foregroundStyle(Color.lsBlue)
                         Spacer()
                         Text("3s")
+                            .font(.lsLabel)
+                            .foregroundStyle(Color.lsTertiary)
+                    }
+                    .padding(LS.md)
+                }
+                Divider().background(Color.lsTertiary.opacity(0.3))
+                
+                Button {
+                    HapticEngine.shared.tap()
+                    let now = Date()
+                    let periods: [ScheduleActivityAttributes.ScheduledPeriod] = [
+                        .init(periodNumber: 1, displayName: "English",
+                              colorHex: "#FF6B6B",
+                              startDate: now.addingTimeInterval(-1200),
+                              endDate: now.addingTimeInterval(1800),
+                              endTimeString: "In 30 min"),
+                        .init(periodNumber: nil, displayName: "Break",
+                              colorHex: "#94A3B8",
+                              startDate: now.addingTimeInterval(1800),
+                              endDate: now.addingTimeInterval(2400),
+                              endTimeString: "In 10 min"),
+                        .init(periodNumber: 2, displayName: "Chemistry",
+                              colorHex: "#F5B800",
+                              startDate: now.addingTimeInterval(2400),
+                              endDate: now.addingTimeInterval(6000),
+                              endTimeString: "In 60 min"),
+                    ]
+                    let state = ScheduleActivityAttributes.ContentState(
+                        currentPeriodName: periods[0].displayName,
+                        colorHex:          periods[0].colorHex,
+                        periodStartDate:   periods[0].startDate,
+                        periodEndDate:     periods[0].endDate,
+                        nextPeriodName:    periods[1].displayName,
+                        nextBellTime:      periods[0].endTimeString,
+                        isEnded:           false
+                    )
+                    CachedSchedule.save(periods)
+                    do {
+                        _ = try Activity.request(
+                            attributes: ScheduleActivityAttributes(schoolName: "LaSalle", schedule: periods),
+                            content: .init(state: state, staleDate: now.addingTimeInterval(6000)),
+                            pushType: nil
+                        )
+                        BellTransitionService.scheduleTransitions(for: periods.filter { $0.startDate > now })
+                        print("[Debug] Dummy Live Activity started")
+                    } catch {
+                        print("[Debug] Dummy start failed: \(error)")
+                    }
+                } label: {
+                    HStack {
+                        Image(systemName: "bolt.circle.fill")
+                            .foregroundStyle(Color.lsOrange)
+                        Text("Force Start Live Activity")
+                            .font(.lsHeadline)
+                            .foregroundStyle(Color.lsOrange)
+                        Spacer()
+                        Text("Dummy")
+                            .font(.lsLabel)
+                            .foregroundStyle(Color.lsTertiary)
+                    }
+                    .padding(LS.md)
+                }
+
+                Divider().background(Color.lsTertiary.opacity(0.3))
+
+                Button {
+                    HapticEngine.shared.tap()
+                    let now      = Date()
+                    let dayKey   = DateFormatter.isoDay.string(from: now)
+                    let schedule = store.bellSchedules[dayKey]
+                    LiveActivityService.shared.startIfNeeded(
+                        schedule: schedule,
+                        settings: settings
+                    )
+                    print("[Debug] Real start attempted")
+                } label: {
+                    HStack {
+                        Image(systemName: "bolt.circle.fill")
+                            .foregroundStyle(Color.lsGold)
+                        Text("Force Start Live Activity")
+                            .font(.lsHeadline)
+                            .foregroundStyle(Color.lsGold)
+                        Spacer()
+                        Text("Real")
                             .font(.lsLabel)
                             .foregroundStyle(Color.lsTertiary)
                     }

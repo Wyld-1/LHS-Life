@@ -31,7 +31,7 @@ enum AppTab: Int, CaseIterable {
 
     var iconName: String {
         switch self {
-        case .events:       return "bell.fill"
+        case .events:       return "calendar"
         case .lunch:        return "fork.knife"
         case .powerschool:  return "powerschool-logo"
         case .schoology:    return "schoology-logo"
@@ -61,6 +61,7 @@ struct AppTabContainer: View {
     @State private var showSettings = false
     @State private var showHomework = false
     @State private var isLaunching  = true
+    @State private var calendarUI   = CalendarUIState()
 
     @State private var lunchState = EmbeddedWebState(
         url: URL(string: "https://lhs.plan.tech/lunch/")!,
@@ -142,6 +143,7 @@ struct AppTabContainer: View {
                     }
                 }
             )
+            .environment(calendarUI)
 
             VStack {
                 ScheduleHeader(showSettings: $showSettings, onPillTap: {
@@ -154,12 +156,17 @@ struct AppTabContainer: View {
                 HStack(alignment: .bottom) {
                     Spacer()
                     VStack(spacing: LS.sm) {
-                        if selectedTab == .powerschool {
-                            WebNavButtons(webState: powerschoolState,
-                                          onHomeTap: { powerschoolState.reload() })
+                        if selectedTab == .events {
+                            FloatingNavButtons(role: .calendar(
+                                onToday: { calendarUI.goToToday() },
+                                isOnToday: Calendar.current.isDateInToday(calendarUI.selectedDate) && calendarUI.viewMode == .day,
+                                zoomLabel: calendarUI.zoomOutLabel,
+                                onZoom: { calendarUI.zoomOutAction() }
+                            ))
+                        } else if selectedTab == .powerschool {
+                            FloatingNavButtons(role: .web(state: powerschoolState, onHome: { powerschoolState.reload() }))
                         } else if selectedTab == .schoology {
-                            WebNavButtons(webState: schoologyState,
-                                          onHomeTap: { schoologyState.reload() })
+                            FloatingNavButtons(role: .web(state: schoologyState, onHome: { schoologyState.reload() }))
                         }
                         if #unavailable(iOS 26) {
                             HomeworkFAB {
@@ -219,7 +226,7 @@ struct AppTabContainer: View {
     @available(iOS 26, *)
     private var iPadTabView: some View {
         TabView(selection: $selectedTab) {
-            Tab("Events", systemImage: "bell.fill", value: AppTab.events) {
+            Tab("Events", systemImage: "calendar", value: AppTab.events) {
                 EventsTabView()
             }
             Tab("Order", systemImage: "fork.knife", value: AppTab.lunch) {
@@ -228,8 +235,7 @@ struct AppTabContainer: View {
             Tab(value: AppTab.powerschool) {
                 PowerSchoolTabView(webState: powerschoolState)
                     .overlay(alignment: .bottomTrailing) {
-                        WebNavButtons(webState: powerschoolState,
-                                      onHomeTap: { powerschoolState.reload() })
+                        FloatingNavButtons(role: .web(state: powerschoolState, onHome: { powerschoolState.reload() }))
                         .padding(.trailing, LS.md)
                         .padding(.bottom, LS.xxl)
                     }
@@ -239,8 +245,7 @@ struct AppTabContainer: View {
             Tab(value: AppTab.schoology) {
                 SchoologyTabView(webState: schoologyState)
                     .overlay(alignment: .bottomTrailing) {
-                        WebNavButtons(webState: schoologyState,
-                                      onHomeTap: { schoologyState.reload() })
+                        FloatingNavButtons(role: .web(state: schoologyState, onHome: { schoologyState.reload() }))
                         .padding(.trailing, LS.md)
                         .padding(.bottom, LS.xxl)
                     }

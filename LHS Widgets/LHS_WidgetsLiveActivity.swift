@@ -2,14 +2,6 @@
 //  LHS_WidgetsLiveActivity.swift
 //  LHS Widgets
 //
-//  The full day schedule lives in ActivityAttributes, written once at start.
-//  TimelineView fires a re-render at each period transition. The widget
-//  computes what to display from context.date and attributes.schedule —
-//  no ContentState updates are ever needed.
-//
-//  UserSettings is read from the App Group at render time so custom class
-//  names always reflect the student's current configuration.
-//
 
 import ActivityKit
 import WidgetKit
@@ -20,27 +12,33 @@ import SwiftUI
 struct LaSalle_WidgetsLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: ScheduleActivityAttributes.self) { context in
-            LockScreenView(attributes: context.attributes)
+            LockScreenView(attributes: context.attributes, state: context.state)
         } dynamicIsland: { context in
             let transitions = transitionDates(from: context.attributes.schedule)
+            let schedule    = context.attributes.schedule
+            let state       = context.state
+
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     TimelineView(.explicit(transitions)) { tl in
-                        let slot = resolveSlot(at: tl.date, schedule: context.attributes.schedule)
+                        let slot = resolveSlot(at: tl.date, schedule: schedule, state: state)
                         HStack(spacing: 6) {
                             Image("lhs-lightning")
-                                .resizable().renderingMode(.template)
+                                .resizable()
+                                .renderingMode(.template)
                                 .foregroundStyle(Color(hex: slot?.colorHex ?? "#3A6FD8"))
                                 .frame(width: 14, height: 14)
                             Text(slot?.displayName ?? "—")
                                 .font(.system(size: 15, weight: .semibold, design: .rounded))
                                 .foregroundStyle(.white).lineLimit(1)
-                        }.padding(.leading, 4)
+                        }
+                        .padding(.leading, 4)
                     }
                 }
+
                 DynamicIslandExpandedRegion(.trailing) {
                     TimelineView(.explicit(transitions)) { tl in
-                        let slot = resolveSlot(at: tl.date, schedule: context.attributes.schedule)
+                        let slot = resolveSlot(at: tl.date, schedule: schedule, state: state)
                         if let endTime = slot?.endTimeString {
                             HStack(spacing: 4) {
                                 Image(systemName: "bell.fill")
@@ -53,9 +51,10 @@ struct LaSalle_WidgetsLiveActivity: Widget {
                         }
                     }
                 }
+
                 DynamicIslandExpandedRegion(.bottom) {
                     TimelineView(.explicit(transitions)) { tl in
-                        let slot = resolveSlot(at: tl.date, schedule: context.attributes.schedule)
+                        let slot  = resolveSlot(at: tl.date, schedule: schedule, state: state)
                         let color = Color(hex: slot?.colorHex ?? "#3A6FD8")
                         VStack(spacing: 6) {
                             if let next = slot?.nextDisplayName {
@@ -69,107 +68,103 @@ struct LaSalle_WidgetsLiveActivity: Widget {
                             if let slot = slot {
                                 LiveProgressBar(start: slot.startDate, end: slot.endDate, color: color)
                             }
-                        }.padding(.horizontal, 4).padding(.bottom, 4)
+                        }
+                        .padding(.horizontal, 4)
                     }
                 }
+
             } compactLeading: {
                 TimelineView(.explicit(transitions)) { tl in
-                    let slot = resolveSlot(at: tl.date, schedule: context.attributes.schedule)
-                    Image("lhs-lightning")
-                        .resizable().renderingMode(.template)
-                        .foregroundStyle(Color(hex: slot?.colorHex ?? "#3A6FD8"))
-                        .frame(width: 15, height: 15).padding(.leading, 2)
+                    let slot  = resolveSlot(at: tl.date, schedule: schedule, state: state)
+                    let color = Color(hex: slot?.colorHex ?? "#3A6FD8")
+                    ZStack {
+                        if let slot = slot {
+                            LiveProgressArc(start: slot.startDate, end: slot.endDate, color: color)
+                        }
+                        Image("lhs-lightning")
+                            .resizable()
+                            .renderingMode(.template)
+                            .foregroundStyle(color).frame(width: 8, height: 8)
+                    }
+                    .padding(2)
                 }
+
             } compactTrailing: {
                 TimelineView(.explicit(transitions)) { tl in
-                    let slot = resolveSlot(at: tl.date, schedule: context.attributes.schedule)
+                    let slot = resolveSlot(at: tl.date, schedule: schedule, state: state)
                     if let endTime = slot?.endTimeString {
                         Text(endTime)
                             .font(.system(size: 11, weight: .bold, design: .rounded))
                             .foregroundStyle(.white).padding(.trailing, 2)
                     }
                 }
+
             } minimal: {
                 TimelineView(.explicit(transitions)) { tl in
-                    let slot = resolveSlot(at: tl.date, schedule: context.attributes.schedule)
+                    let slot  = resolveSlot(at: tl.date, schedule: schedule, state: state)
                     let color = Color(hex: slot?.colorHex ?? "#3A6FD8")
                     ZStack {
-                        Circle().stroke(.white.opacity(0.2), lineWidth: 2)
                         if let slot = slot {
                             LiveProgressArc(start: slot.startDate, end: slot.endDate, color: color)
                         }
                         Image("lhs-lightning")
-                            .resizable().renderingMode(.template)
+                            .resizable()
+                            .renderingMode(.template)
                             .foregroundStyle(color).frame(width: 8, height: 8)
-                    }.padding(2)
+                    }
+                    .padding(2)
                 }
             }
-            .keylineTint(Color(hex: resolveSlot(at: Date(), schedule: context.attributes.schedule)?.colorHex ?? "#3A6FD8"))
+            .keylineTint(Color(hex: resolveSlot(at: Date(), schedule: schedule, state: state)?.colorHex ?? "#3A6FD8"))
         }
     }
 }
+
+// MARK: - Slot resolver
 
 private struct ActiveSlotInfo {
     let displayName: String
     let colorHex: String
     let startDate: Date
     let endDate: Date
-    let endTimeString: String
+    let endTimeString: String   // formatted bell time e.g. "10:50 AM" — shown on trailing
     let nextDisplayName: String?
 }
 
+/// ContentState (pushed by BGProcessingTask) is primary source.
+/// Falls back to static schedule before first push arrives.
 private func resolveSlot(
     at date: Date,
-    schedule: [ScheduleActivityAttributes.ScheduledPeriod]
+    schedule: [ScheduleActivityAttributes.ScheduledPeriod],
+    state: ScheduleActivityAttributes.ContentState
 ) -> ActiveSlotInfo? {
+    if !state.currentPeriodName.isEmpty && !state.isEnded {
+        return ActiveSlotInfo(
+            displayName:     state.currentPeriodName,
+            colorHex:        state.colorHex,
+            startDate:       state.periodStartDate,
+            endDate:         state.periodEndDate,
+            endTimeString:   state.nextBellTime ?? "",
+            nextDisplayName: state.nextPeriodName
+        )
+    }
+    // Fallback from static schedule
     guard !schedule.isEmpty else { return nil }
-
-    let settings = UserSettings.shared
-
-    // Find current slot
     guard let current = schedule.first(where: { date >= $0.startDate && date < $0.endDate })
-            ?? schedule.first(where: { date < $0.startDate })  // before school
+                     ?? schedule.first(where: { date < $0.startDate })
     else { return nil }
-
-    // Resolve display name from UserSettings if we have a period number
-    let displayName: String
-    if let num = current.periodNumber,
-       let config = settings.config(for: num) {
-        displayName = config.displayName
-    } else {
-        displayName = current.fallbackName
-    }
-
-    // Next slot
-    let nextSlot = schedule.first(where: { $0.startDate >= current.endDate })
-    let nextDisplayName: String?
-    if let next = nextSlot {
-        if let num = next.periodNumber,
-           let config = settings.config(for: num) {
-            nextDisplayName = config.displayName
-        } else {
-            nextDisplayName = next.fallbackName
-        }
-    } else {
-        nextDisplayName = nil
-    }
-
+    let next = schedule.first(where: { $0.startDate >= current.endDate })
     return ActiveSlotInfo(
-        displayName:     displayName,
+        displayName:     current.displayName,
         colorHex:        current.colorHex,
         startDate:       current.startDate,
         endDate:         current.endDate,
         endTimeString:   current.endTimeString,
-        nextDisplayName: nextDisplayName
+        nextDisplayName: next?.displayName
     )
 }
 
-// MARK: - Transition dates for TimelineView
-// One entry per period start so the widget re-renders at each bell.
-
-private func transitionDates(
-    from schedule: [ScheduleActivityAttributes.ScheduledPeriod]
-) -> [Date] {
+private func transitionDates(from schedule: [ScheduleActivityAttributes.ScheduledPeriod]) -> [Date] {
     schedule.map { $0.startDate }
 }
 
@@ -177,16 +172,12 @@ private func transitionDates(
 
 private struct LockScreenView: View {
     let attributes: ScheduleActivityAttributes
+    let state: ScheduleActivityAttributes.ContentState
 
     var body: some View {
-        TimelineView(.explicit(transitionDates(from: attributes.schedule))) { context in
-            if let slot = resolveSlot(at: context.date, schedule: attributes.schedule) {
+        TimelineView(.explicit(transitionDates(from: attributes.schedule))) { tl in
+            if let slot = resolveSlot(at: tl.date, schedule: attributes.schedule, state: state) {
                 LockScreenContent(slot: slot)
-            } else {
-                Text("No schedule")
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .padding(16)
             }
         }
     }
@@ -199,6 +190,7 @@ private struct LockScreenContent: View {
         let color = Color(hex: slot.colorHex)
         VStack(spacing: 10) {
             HStack(alignment: .center) {
+                // Left: lightning + current period + next period
                 HStack(spacing: 8) {
                     Image("lhs-lightning")
                         .resizable()
@@ -219,6 +211,7 @@ private struct LockScreenContent: View {
                     }
                 }
                 Spacer()
+                // Right: next bell time
                 VStack(alignment: .trailing, spacing: 1) {
                     Text(slot.endTimeString)
                         .font(.system(size: 16, weight: .semibold, design: .rounded))
@@ -229,7 +222,6 @@ private struct LockScreenContent: View {
                 }
             }
 
-            // Progress bar — live every frame
             LiveProgressBar(start: slot.startDate, end: slot.endDate, color: color)
         }
         .padding(16)
@@ -239,7 +231,8 @@ private struct LockScreenContent: View {
 }
 
 // MARK: - Live Progress Bar
-// TimelineView(.animation) redraws every frame. Progress computed from Date().
+// ProgressView(timerInterval:) is interpolated natively by iOS —
+// no render budget consumed, works all day locked.
 
 private struct LiveProgressBar: View {
     let start: Date
@@ -247,22 +240,14 @@ private struct LiveProgressBar: View {
     let color: Color
 
     var body: some View {
-        TimelineView(.animation) { _ in
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.15)).frame(height: 6)
-                    Capsule().fill(color)
-                        .frame(width: geo.size.width * progress, height: 6)
-                }
-            }
-            .frame(height: 6)
+        ProgressView(timerInterval: start...end, countsDown: false) {
+            EmptyView()
+        } currentValueLabel: {
+            EmptyView()
         }
-    }
-
-    private var progress: Double {
-        let total = end.timeIntervalSince(start)
-        guard total > 0 else { return 0 }
-        return min(1, max(0, Date().timeIntervalSince(start) / total))
+        .progressViewStyle(.linear)
+        .tint(color)
+        .scaleEffect(x: 1, y: 1.5, anchor: .center)
     }
 }
 
@@ -273,19 +258,15 @@ private struct LiveProgressArc: View {
     let end: Date
     let color: Color
 
-    private var progress: Double {
-        let total = end.timeIntervalSince(start)
-        guard total > 0 else { return 0 }
-        return min(1, max(0, Date().timeIntervalSince(start) / total))
-    }
-
     var body: some View {
-        TimelineView(.animation) { _ in
-            Circle()
-                .trim(from: 0, to: progress)
-                .stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                .rotationEffect(.degrees(-90))
+        ProgressView(timerInterval: start...end, countsDown: false) {
+            EmptyView()
+        } currentValueLabel: {
+            EmptyView()
         }
+        .progressViewStyle(.circular)
+        .tint(color)
+        .frame(width: 18, height: 18)
     }
 }
 
@@ -311,18 +292,15 @@ extension ScheduleActivityAttributes {
         return ScheduleActivityAttributes(
             schoolName: "LaSalle",
             schedule: [
-                .init(periodNumber: 1, fallbackName: "Period 1", colorHex: "#FF6B6B",
+                .init(periodNumber: 1, displayName: "English", colorHex: "#FF6B6B",
                       startDate: now.addingTimeInterval(-1200),
-                      endDate: now.addingTimeInterval(1800),
-                      endTimeString: "8:50 AM"),
-                .init(periodNumber: 2, fallbackName: "Period 2", colorHex: "#3A6FD8",
+                      endDate: now.addingTimeInterval(1800), endTimeString: "8:50 AM"),
+                .init(periodNumber: 2, displayName: "Chemistry", colorHex: "#3A6FD8",
                       startDate: now.addingTimeInterval(1800),
-                      endDate: now.addingTimeInterval(5400),
-                      endTimeString: "9:45 AM"),
-                .init(periodNumber: nil, fallbackName: "Break", colorHex: "#94A3B8",
+                      endDate: now.addingTimeInterval(5400), endTimeString: "9:45 AM"),
+                .init(periodNumber: nil, displayName: "Break", colorHex: "#94A3B8",
                       startDate: now.addingTimeInterval(5400),
-                      endDate: now.addingTimeInterval(6000),
-                      endTimeString: "10:00 AM"),
+                      endDate: now.addingTimeInterval(6000), endTimeString: "10:00 AM"),
             ]
         )
     }

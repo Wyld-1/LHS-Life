@@ -9,14 +9,66 @@
 
 import Foundation
 import Observation
+import SwiftUI
+
+// MARK: - CalendarUIState
+
+enum CalendarViewMode { case day, month, year }
+
+@MainActor
+@Observable
+final class CalendarUIState {
+    var viewMode: CalendarViewMode = .day
+    var selectedDate: Date = Calendar.current.startOfDay(for: Date())
+    var scrollToNow: Bool = false   // toggled by goToToday() to trigger DayView scroll
+    private let cal = Calendar.current
+
+    func goToToday() {
+        selectedDate = cal.startOfDay(for: Date())
+        scrollToNow.toggle()  // toggle so repeated taps always fire
+        withAnimation(.lsSnappy) { viewMode = .day }
+    }
+    func zoomOut() {
+        withAnimation(.lsSnappy) {
+            switch viewMode {
+            case .day:   viewMode = .month
+            case .month: viewMode = .year
+            case .year:  break
+            }
+        }
+    }
+    func zoomIn(to date: Date) {
+        selectedDate = cal.startOfDay(for: date)
+        withAnimation(.lsSnappy) {
+            switch viewMode {
+            case .year:  viewMode = .month
+            case .month: viewMode = .day
+            case .day:   break
+            }
+        }
+    }
+    var zoomOutLabel: String? {
+        switch viewMode {
+        case .day:   return "Month"
+        case .month: return "Year"
+        case .year:  return "Day"
+        }
+    }
+    var zoomOutAction: () -> Void {
+        switch viewMode {
+        case .day, .month: return { self.zoomOut() }
+        case .year:        return { withAnimation(.lsSnappy) { self.viewMode = .day } }
+        }
+    }
+}
+
+// MARK: - CalendarStore
 
 @MainActor
 @Observable
 final class CalendarStore {
 
     // MARK: - State
-    // No @Published needed — @Observable tracks all stored properties automatically.
-
     private(set) var events: [SchoolEvent] = []
     private(set) var bellSchedules: [String: BellSchedule] = [:]
     private(set) var isLoading: Bool = false
@@ -24,22 +76,17 @@ final class CalendarStore {
     private(set) var error: AppError? = nil
 
     // MARK: - Memoized today state
-
     private var cachedTodayKey: String = ""
     private var cachedTodayIsHoliday: Bool = false
     private var cachedTodayIsPathways: Bool = false
 
     // MARK: - Dependencies
-
     private let iCalService: ICalService
     private let bellParser: BellScheduleParser
     private let cache: CacheService
-    // settings is passed in but not stored as @Observable dependency —
-    // ScheduleEngine reads it at call time, no observation chain needed here.
     private let settings: UserSettings
 
     // MARK: - Init
-
     init(
         iCalService: ICalService = ICalService(),
         bellParser: BellScheduleParser = BellScheduleParser(),
@@ -53,11 +100,8 @@ final class CalendarStore {
     }
 
     // MARK: - Public API
-
     func loadAll() async {
-        if let cached = cache.loadEvents() {
-            applyEvents(cached)
-        }
+        if let cached = cache.loadEvents() { applyEvents(cached) }
         await refresh()
     }
 
@@ -83,13 +127,16 @@ final class CalendarStore {
     }
 
     // MARK: - Queries
-
     func events(on dayKey: String) -> [SchoolEvent] {
         events.filter { $0.dayKey == dayKey }.sorted { $0.startDate < $1.startDate }
     }
+    func bellSchedule(for dayKey: String) -> BellSchedule? { bellSchedules[dayKey] }
 
-    func bellSchedule(for dayKey: String) -> BellSchedule? {
-        bellSchedules[dayKey]
+    func summary(for dayKey: String) -> DaySummary {
+        let schedule = bellSchedules[dayKey]
+        let dayEvents = events(on: dayKey)
+        let cats = Set(dayEvents.filter { !$0.isAllDay && $0.category != .bellSchedule }.map { $0.category })
+        return DaySummary(scheduleType: schedule?.scheduleType, eventCategories: cats)
     }
 
     func events(year: Int, month: Int) -> [SchoolEvent] {
@@ -99,20 +146,15 @@ final class CalendarStore {
         }
     }
 
-    /// Memoized today state. The expensive scan only runs once per calendar day
-    /// or when events are refreshed. The 1-second header timer pays near-zero cost.
     func todayState(at date: Date = Date()) -> ScheduleEngine.ScheduleState {
         let dayKey = DateFormatter.isoDay.string(from: date)
-
         if dayKey != cachedTodayKey {
-            // New day or first call — compute and cache the flags
             cachedTodayIsHoliday  = events.contains { $0.dayKey == dayKey && $0.category == .holiday }
             cachedTodayIsPathways = PathwaysService.isPathwaysDay(
                 on: dayKey, events: events, graduationYear: settings.graduationYear
             )
             cachedTodayKey = dayKey
         }
-
         return ScheduleEngine.state(
             for: date,
             schedule: bellSchedules[dayKey],
@@ -123,7 +165,6 @@ final class CalendarStore {
     }
 
     // MARK: - Private
-
     private func applyEvents(_ fetched: [SchoolEvent]) {
         events = fetched.sorted { $0.startDate < $1.startDate }
         var schedules: [String: BellSchedule] = [:]
@@ -133,8 +174,48 @@ final class CalendarStore {
             }
         }
         bellSchedules = schedules
-        cachedTodayKey = ""  // bust cache on fresh data
+        cachedTodayKey = ""
         SharedStore.write(events: events, bellSchedules: bellSchedules)
+    }
+}
+
+// MARK: - DaySummary
+
+struct DaySummary {
+    let scheduleType: ScheduleType?
+    let eventCategories: Set<EventCategory>
+    var isEmpty: Bool { scheduleType == nil && eventCategories.isEmpty }
+    var pillColors: [Color] {
+        var colors: [Color] = []
+        if let type = scheduleType { colors.append(type.pillColor) }
+        for cat in eventCategories.sorted(by: { $0.rawValue < $1.rawValue }) { colors.append(cat.pillColor) }
+        return colors
+    }
+}
+
+extension ScheduleType {
+    var pillColor: Color {
+        switch self {
+        case .regular:      return Color.lsTertiary
+        case .block:        return Color.lsBlue
+        case .lateStart:    return Color.lsOrange
+        case .earlyRelease: return Color.lsGold
+        case .assembly:     return Color.lsSuccess
+        case .custom, .unknown: return Color.lsSecondary
+        }
+    }
+}
+
+extension EventCategory {
+    var pillColor: Color {
+        switch self {
+        case .bellSchedule: return Color.lsTertiary
+        case .athletic:     return Color.lsGold
+        case .academic:     return Color.lsSuccess
+        case .liturgy:      return Color.lsBlue
+        case .holiday:      return Color.lsOrange
+        case .other:        return Color.lsSecondary
+        }
     }
 }
 

@@ -254,23 +254,38 @@ struct HomeworkPopup: View {
         .buttonStyle(.plain)
     }
 
+    // MARK: - Date Menu helpers
+
+    private func tomorrowDayNumber() -> Int {
+        Calendar.current.component(.day, from: nextDay())
+    }
+    private func nextMondayDayNumber() -> Int {
+        Calendar.current.component(.day, from: nextMonday())
+    }
+
     // MARK: - Date Menu
 
     private var dateMenu: some View {
         Menu {
-            Button("Tomorrow") {
+            Button {
                 dueDate = nextDay()
                 showInlinePicker = false
                 HapticEngine.shared.tick()
+            } label: {
+                Label("Tomorrow", systemImage: "\(tomorrowDayNumber()).calendar")
             }
-            Button("Next Monday") {
+            Button {
                 dueDate = nextMonday()
                 showInlinePicker = false
                 HapticEngine.shared.tick()
+            } label: {
+                Label("Next Monday", systemImage: "\(nextMondayDayNumber()).calendar")
             }
-            Button("Custom") {
+            Button {
                 titleFocused = false
                 withAnimation(.lsSnappy) { showInlinePicker.toggle() }
+            } label: {
+                Label("Custom", systemImage: "ellipsis")
             }
             if dueDate != nil {
                 Divider()
