@@ -22,11 +22,21 @@ enum BellScheduleDetector {
         return bellKeywords.contains { combined.contains($0) }
     }
 
+    /// Title-only check — used for category assignment to avoid miscategorizing
+    /// events that merely embed a schedule table in their description.
+    static func looksLikeBellScheduleTitle(_ title: String) -> Bool {
+        let t = title.lowercased()
+        return bellKeywords.contains { t.contains($0) }
+    }
+
     // MARK: - Category Inference
 
     static func category(title: String, description: String?) -> EventCategory {
         let t = title.lowercased()
-        if looksLikeBellSchedule(title: title, description: description) { return .bellSchedule }
+        // Check bell schedule ONLY on title — not description.
+        // Some events (e.g. Professional Dress Day) embed a bell schedule table
+        // in their description but are not themselves schedule events.
+        if looksLikeBellScheduleTitle(title) { return .bellSchedule }
         if t.contains("game") || t.contains("match") || t.contains("tournament")
             || t.contains("athletic") || t.contains("sport")
             || t.contains("golf") || t.contains("tennis") || t.contains("swim")

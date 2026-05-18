@@ -57,7 +57,7 @@ private struct SystemTabDock: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            Tab("Events", systemImage: "bell.fill", value: AppTab.events) {
+            Tab("Events", systemImage: "calendar", value: AppTab.events) {
                 EventsTabView()
             }
             Tab("Order", systemImage: "fork.knife", value: AppTab.lunch) {

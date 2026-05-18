@@ -102,7 +102,7 @@ private struct DayView: View {
                 WeekStrip(selectedDate: Binding(
                     get: { uiState.selectedDate },
                     set: { uiState.selectedDate = $0 }
-                ), onLabelTap: {})
+                ))
                     .padding(.bottom, LS.xs)
 
                 // All-day strip — collapses when empty
@@ -111,15 +111,24 @@ private struct DayView: View {
                 ScrollViewReader { proxy in
                 ScrollView(.vertical, showsIndicators: false) {
                     let anchorY = max(0, Grid.y(for: Date(), on: Date()) - Grid.ppm * 60)
+                    let eventAnchorY: CGFloat = {
+                        guard let event = uiState.scrollToEvent else { return 0 }
+                        return max(0, Grid.y(for: event.startDate, on: event.startDate) - Grid.ppm * 60)
+                    }()
                     VStack(spacing: 0) {
-                        // Anchor sits at the right Y in the layout flow.
-                        // scrollTo targets its frame top, putting the
-                        // red bar ~1 hour below the viewport top edge.
                         Color.clear
                             .frame(width: 1, height: anchorY)
                         Color.clear
                             .frame(width: 1, height: 1)
                             .id("now-anchor")
+                        // Event anchor — repositions when scrollToEvent changes
+                        if let event = uiState.scrollToEvent {
+                            Color.clear
+                                .frame(width: 1, height: max(0, eventAnchorY - anchorY))
+                            Color.clear
+                                .frame(width: 1, height: 1)
+                                .id("event-anchor")
+                        }
                         Spacer(minLength: 0)
                     }
                     .frame(width: geo.size.width,
@@ -162,8 +171,9 @@ private struct DayView: View {
                                 ))
                             }
                         }
+                        .padding(.top, LS.md)
                         .frame(width: geo.size.width,
-                               height: Grid.totalHeight + LS.tabBarHeight,
+                               height: Grid.totalHeight + LS.tabBarHeight - LS.md,
                                alignment: .topLeading)
                     }
                 }
@@ -173,6 +183,15 @@ private struct DayView: View {
                 .onChange(of: uiState.scrollToNow) { _, _ in
                     withAnimation(.lsSnappy) {
                         proxy.scrollTo("now-anchor", anchor: .top)
+                    }
+                }
+                .onChange(of: uiState.scrollToEvent) { _, event in
+                    guard event != nil else { return }
+                    // Small delay so selectedDate has time to snap the horizontal scroll
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        withAnimation(.lsSnappy) {
+                            proxy.scrollTo("event-anchor", anchor: .top)
+                        }
                     }
                 }
                 } // ScrollViewReader
@@ -580,7 +599,6 @@ private struct AllDayStrip: View {
 
 struct WeekStrip: View {
     @Binding var selectedDate: Date
-    let onLabelTap: () -> Void
 
     private let cal = Calendar.current
     @State private var weekOffset: Int = 0
@@ -627,20 +645,12 @@ struct WeekStrip: View {
 
     var body: some View {
         VStack(spacing: LS.sm) {
-            Button(action: onLabelTap) {
-                HStack(spacing: 4) {
-                    Text(weekLabel(for: weekOffset))
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color.lsSecondary)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color.lsTertiary)
-                    Spacer()
-                }
+            Text(weekLabel(for: weekOffset))
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundStyle(Color.lsSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, LS.md)
-            }
-            .buttonStyle(.plain)
-            .animation(.lsSnappy, value: weekOffset)
+                .animation(.lsSnappy, value: weekOffset)
 
             TabView(selection: $weekOffset) {
                 ForEach(-52...52, id: \.self) { offset in

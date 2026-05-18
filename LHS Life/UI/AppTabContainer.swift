@@ -146,9 +146,14 @@ struct AppTabContainer: View {
             .environment(calendarUI)
 
             VStack {
-                ScheduleHeader(showSettings: $showSettings, onPillTap: {
-                    withAnimation(.lsSnappy) { selectedTab = .events }
-                })
+                ScheduleHeader(
+                    showSettings: $showSettings,
+                    onPillTap: { withAnimation(.lsSnappy) { selectedTab = .events } },
+                    onEventTap: { event in
+                        withAnimation(.lsSnappy) { selectedTab = .events }
+                        calendarUI.navigateTo(event: event)
+                    }
+                )
                 .padding(.horizontal, LS.md)
 
                 Spacer()
@@ -261,9 +266,13 @@ struct AppTabContainer: View {
         .tabBarMinimizeBehavior(.onScrollDown)
         .tint(Color.lsBlue)
         .tabViewBottomAccessory {
-            ScheduleHeaderPill(onPillTap: {
-                withAnimation(.lsSnappy) { selectedTab = .events }
-            })
+            ScheduleHeaderPill(
+                onPillTap: { withAnimation(.lsSnappy) { selectedTab = .events } },
+                onEventTap: { event in
+                    withAnimation(.lsSnappy) { selectedTab = .events }
+                    calendarUI.navigateTo(event: event)
+                }
+            )
             .padding(.horizontal, LS.md)
             .padding(.vertical, LS.xs)
         }

@@ -1,36 +1,216 @@
 //
-//  BellScheduleParser.swift
-//  LaSalle Schedule
+//  BellScheduleParser+FinalExamParser.swift
+//  LHS Life
 //
-//  Parses bell schedule data from a CalendarWiz iCal event description.
-//
-//  Expected format in DESCRIPTION field:
-//
-//    Regular Schedule | Monday, Tuesday, Friday
-//    Regular Schedule (1-7)
-//    First Bell @ 7:55AM | 50 minute classes
-//    Period\nBegin\nEnd\nTotal          ← column headers (one token per line)
-//    0\n6:45\n7:45\n60                  ← data rows (one value per line)
-//    1\n8:00\n8:50\n50
-//    Break\n9:45\n9:55\n10
-//    ...
+//  BellScheduleParser — parses regular/block/etc schedules from plain-text DESCRIPTION.
+//  FinalExamParser    — parses the multi-column HTML finals table from X-ALT-DESC.
 //
 
 import Foundation
+
+enum FinalExamParser {
+
+    // MARK: - Entry Point
+
+    /// Parses ALL day columns from the finals HTML table, returning one BellSchedule per day.
+    /// Each iCal event embeds the full multi-day table — we extract every column
+    /// so a single event (e.g. Wed’s “Final Exams 1&2”) also populates Tue, Thu, Fri.
+    static func parseAll(html: String, event: SchoolEvent, graduationYear: Int? = nil) -> [BellSchedule] {
+        let rows = extractRows(from: html)
+        guard rows.count >= 3 else { return [] }
+        let headerRow = rows[0]
+        var results: [BellSchedule] = []
+
+        for (colIndex, headerCell) in headerRow.enumerated() {
+            guard let date = dateFromHeader(headerCell) else { continue }
+
+            if let gradYear = graduationYear {
+                let label     = headerCell.lowercased()
+                let isSenior  = PathwaysService.schoolYear(for: date) + 1 == gradYear
+                let hasFrosh  = label.contains("frosh") || label.contains("fresh")
+                let hasJunior = label.contains("junior")
+                let hasSenior = label.contains("senior")
+                if hasSenior && !hasFrosh && !hasJunior && !isSenior { continue }
+                if (hasFrosh || hasJunior) && !hasSenior && isSenior { continue }
+            }
+
+            var periods: [Period] = []
+            for row in rows.dropFirst(2) {
+                let (timeStr, periodName) = extractPeriod(from: row, dayColIndex: colIndex)
+                guard let name = periodName, !name.isEmpty,
+                      !isNoise(name),
+                      let (start, end) = parseTimeRange(timeStr)
+                else { continue }
+                periods.append(Period(
+                    id: "\(event.id)-col\(colIndex)-\(periods.count)",
+                    name: normalizeName(name),
+                    startTime: start,
+                    endTime: end
+                ))
+            }
+            guard !periods.isEmpty else { continue }
+
+            let dayKey = DateFormatter.isoDay.string(from: date)
+            results.append(BellSchedule(
+                id: "\(event.id)-\(dayKey)",
+                date: date,
+                scheduleType: .finals,
+                periods: periods,
+                sourceEventID: event.id
+            ))
+        }
+        return results
+    }
+
+    /// Extracts a concrete Date from a header cell like “Tues., May 26 Seniors”.
+    /// Returns nil for empty, whitespace-only, or time-only cells.
+    private static func dateFromHeader(_ cell: String) -> Date? {
+        let lower = cell.lowercased()
+        let monthMap: [String: Int] = [
+            "jan":1,"feb":2,"mar":3,"apr":4,"may":5,"jun":6,
+            "jul":7,"aug":8,"sep":9,"oct":10,"nov":11,"dec":12
+        ]
+        guard let month = monthMap.first(where: { lower.contains($0.key) })?.value else { return nil }
+        let words = cell.components(separatedBy: CharacterSet(charactersIn: " .,\t\n"))
+        guard let day = words.compactMap({ Int($0) }).first else { return nil }
+        let year = Calendar.current.component(.year, from: Date())
+        var comps = DateComponents()
+        comps.year = year; comps.month = month; comps.day = day
+        comps.hour = 0; comps.minute = 0; comps.second = 0
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        return cal.date(from: comps)
+    }
+
+    // MARK: - HTML Table Extraction
+
+    /// Returns array of rows, each row is array of cell text strings.
+    private static func extractRows(from html: String) -> [[String]] {
+        // Split on <tr> tags
+        let rowPattern = #"(?i)<tr[^>]*>(.*?)</tr>"#
+        let cellPattern = #"(?i)<t[dh][^>]*>(.*?)</t[dh]>"#
+
+        guard let rowRegex = try? NSRegularExpression(pattern: rowPattern, options: [.dotMatchesLineSeparators]),
+              let cellRegex = try? NSRegularExpression(pattern: cellPattern, options: [.dotMatchesLineSeparators])
+        else { return [] }
+
+        let nsHtml = html as NSString
+        let rowMatches = rowRegex.matches(in: html, range: NSRange(html.startIndex..., in: html))
+
+        return rowMatches.map { rowMatch in
+            let rowContent = nsHtml.substring(with: rowMatch.range(at: 1))
+            let cellMatches = cellRegex.matches(in: rowContent, range: NSRange(rowContent.startIndex..., in: rowContent))
+            return cellMatches.map { cellMatch in
+                let cellContent = (rowContent as NSString).substring(with: cellMatch.range(at: 1))
+                return stripHTML(cellContent).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+    }
+
+    /// Strip HTML tags and decode entities.
+    private static func stripHTML(_ html: String) -> String {
+        var s = html
+            .replacingOccurrences(of: #"<[^>]+>"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "\\;", with: ";")
+            .replacingOccurrences(of: "\\,", with: ",")
+        // Collapse whitespace
+        while s.contains("  ") { s = s.replacingOccurrences(of: "  ", with: " ") }
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - Period Extraction
+
+    /// Given a table row and the target day column index, return (timeStr, periodName).
+    /// The time column for a given day column is:
+    ///   - day col 1 (Tuesday)  → time col 0
+    ///   - day col 3+ (Wed–Fri) → time col 2
+    private static func extractPeriod(from row: [String], dayColIndex: Int) -> (String, String?) {
+        let timeColIndex = dayColIndex <= 1 ? 0 : 2
+        let timeStr = row.indices.contains(timeColIndex) ? row[timeColIndex] : ""
+        let period  = row.indices.contains(dayColIndex)  ? row[dayColIndex]  : nil
+        return (timeStr, period)
+    }
+
+    // MARK: - Time Range Parsing
+
+    /// Parses "8:00-9:25" → (start: DateComponents, end: DateComponents)
+    private static func parseTimeRange(_ raw: String) -> (DateComponents, DateComponents)? {
+        // Handle both – (en dash) and - (hyphen)
+        let parts = raw
+            .replacingOccurrences(of: "\u{2013}", with: "-")
+            .split(separator: "-", maxSplits: 1)
+            .map { String($0).trimmingCharacters(in: .whitespaces) }
+        guard parts.count == 2,
+              let start = parseTime(parts[0]),
+              let end   = parseTime(parts[1])
+        else { return nil }
+        return (start, end)
+    }
+
+    private static func parseTime(_ raw: String) -> DateComponents? {
+        var s = raw.trimmingCharacters(in: .whitespaces)
+        var isPM: Bool? = nil
+        if s.uppercased().hasSuffix("AM") { isPM = false; s = String(s.dropLast(2)) }
+        if s.uppercased().hasSuffix("PM") { isPM = true;  s = String(s.dropLast(2)) }
+
+        let p = s.split(separator: ":").compactMap { Int($0) }
+        guard p.count == 2 else { return nil }
+        var hour = p[0], minute = p[1]
+
+        if let pm = isPM {
+            if pm  && hour < 12 { hour += 12 }
+            if !pm && hour == 12 { hour = 0 }
+        } else {
+            if hour < 6 { hour += 12 }  // school runs 6am–4pm
+        }
+        var comps = DateComponents()
+        comps.hour = hour; comps.minute = minute
+        return comps
+    }
+
+    // MARK: - Helpers
+
+    private static func isNoise(_ s: String) -> Bool {
+        let lower = s.lowercased()
+        return lower.isEmpty
+            || lower == "&nbsp;"
+            || lower.contains("warning bell")
+            || lower.contains("senior dismissal")
+            || lower.contains("senior present")
+            || lower.contains("dismissal")
+    }
+
+    private static func normalizeName(_ raw: String) -> String {
+        let lower = raw.lowercased()
+        if lower == "break"  { return "Break" }
+        if lower == "lunch"  { return "Lunch" }
+        // "Period 1", "Period 2", etc. pass through as-is
+        return raw
+    }
+}
+
+// MARK: - BellScheduleParser
 
 final class BellScheduleParser {
 
     // MARK: - Entry Point
 
-    func parse(from event: SchoolEvent) -> BellSchedule? {
-        guard let description = event.description, !description.isEmpty else { return nil }
-        return parseDescription(description, event: event)
+    func parse(from event: SchoolEvent, graduationYear: Int? = nil) -> [BellSchedule] {
+        let titleOrDesc = (event.title + " " + (event.description ?? "")).lowercased()
+        let looksLikeFinals = event.title.lowercased().contains("final")
+            || titleOrDesc.contains("final exam schedule")
+        if let html = event.htmlDescription, looksLikeFinals {
+            let schedules = FinalExamParser.parseAll(html: html, event: event, graduationYear: graduationYear)
+            if !schedules.isEmpty { return schedules }
+        }
+        if let schedule = parseSingle(from: event) { return [schedule] }
+        return []
     }
 
-    // MARK: - Description Parser
-
-    private func parseDescription(_ text: String, event: SchoolEvent) -> BellSchedule? {
-        // Normalize: split into non-empty trimmed lines
+    private func parseSingle(from event: SchoolEvent) -> BellSchedule? {
+        guard let text = event.description, !text.isEmpty else { return nil }
         let lines = text
             .components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -126,12 +306,13 @@ final class BellScheduleParser {
 
     private func inferScheduleType(from lines: [String]) -> ScheduleType {
         let combined = lines.joined(separator: " ").lowercased()
-        if combined.contains("late start")                            { return .lateStart }
+        if combined.contains("final exam") || combined.contains("finals") { return .finals }
+        if combined.contains("late start")                                 { return .lateStart }
         if combined.contains("early release") ||
-           combined.contains("early dismissal")                       { return .earlyRelease }
-        if combined.contains("block")                                 { return .block }
-        if combined.contains("assembly")                              { return .assembly }
-        if combined.contains("regular")                               { return .regular }
+           combined.contains("early dismissal")                            { return .earlyRelease }
+        if combined.contains("block")                                      { return .block }
+        if combined.contains("assembly")                                   { return .assembly }
+        if combined.contains("regular")                                    { return .regular }
         return .unknown
     }
 

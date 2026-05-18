@@ -94,6 +94,7 @@ struct ScheduleHeaderPill: View {
     @Environment(UserSettings.self) private var settings
 
     var onPillTap: (() -> Void)? = nil
+    var onEventTap: ((SchoolEvent) -> Void)? = nil
 
     @State private var now: Date = Date()
     @State private var timer: Timer? = nil
@@ -181,9 +182,13 @@ struct ScheduleHeaderPill: View {
         }
         .contentShape(Capsule())
         .onTapGesture {
-            guard onPillTap != nil else { return }
-            HapticEngine.shared.tap()
-            onPillTap?()
+            if let event = tappableEvent, let onEventTap {
+                HapticEngine.shared.tap()
+                onEventTap(event)
+            } else if onPillTap != nil {
+                HapticEngine.shared.tap()
+                onPillTap?()
+            }
         }
         .modifier(CapsuleGlassModifier())
         .onAppear  { startTimer() }
@@ -334,6 +339,53 @@ struct ScheduleHeaderPill: View {
             .map { upcomingEventText($0) }
     }
 
+    /// The SchoolEvent referenced in the secondary text, if any.
+    /// Used to route pill taps directly to that event in the calendar.
+    private var tappableEvent: SchoolEvent? {
+        let cal = Calendar.current
+        let weekday = cal.component(.weekday, from: now)
+        switch state.dayState {
+        case .afterSchool, .noSchedule:
+            switch weekday {
+            case 6:  return saturdayEvent
+            case 7:  return saturdayOrSundayEvent
+            case 1:  return sundayEvent
+            default: return tomorrowEvent
+            }
+        case .holiday:
+            let dayKey = DateFormatter.isoDay.string(from: now)
+            return store.events(on: dayKey).first { $0.category == .holiday }
+        default: return nil
+        }
+    }
+
+    private var tomorrowEvent: SchoolEvent? {
+        let cal = Calendar.current
+        guard let tomorrow = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
+        return store.events(on: DateFormatter.isoDay.string(from: tomorrow))
+            .first { $0.category != .bellSchedule }
+    }
+    private var saturdayEvent: SchoolEvent? {
+        let cal = Calendar.current
+        guard let saturday = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
+        return store.events(on: DateFormatter.isoDay.string(from: saturday))
+            .first { $0.category != .bellSchedule }
+    }
+    private var saturdayOrSundayEvent: SchoolEvent? {
+        let cal = Calendar.current
+        let todayKey = DateFormatter.isoDay.string(from: now)
+        if let event = store.events(on: todayKey).first(where: { $0.category != .bellSchedule && $0.startDate > now }) { return event }
+        guard let sunday = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
+        return store.events(on: DateFormatter.isoDay.string(from: sunday)).first { $0.category != .bellSchedule }
+    }
+    private var sundayEvent: SchoolEvent? {
+        let cal = Calendar.current
+        let todayKey = DateFormatter.isoDay.string(from: now)
+        if let event = store.events(on: todayKey).first(where: { $0.category != .bellSchedule && $0.startDate > now }) { return event }
+        guard let monday = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
+        return store.events(on: DateFormatter.isoDay.string(from: monday)).first { $0.category != .bellSchedule }
+    }
+
     private func upcomingEventText(_ event: SchoolEvent) -> String {
         let cal = Calendar.current
         let dayLabel: String
@@ -383,6 +435,7 @@ struct ScheduleHeaderPill: View {
 struct ScheduleHeader: View {
     @Binding var showSettings: Bool
     var onPillTap: (() -> Void)? = nil
+    var onEventTap: ((SchoolEvent) -> Void)? = nil
 
     @Environment(UserSettings.self) private var settings
     @Environment(CalendarStore.self) private var store
@@ -414,14 +467,14 @@ struct ScheduleHeader: View {
                 // Each child applies .glassEffect with its own shape via ViewModifier above.
                 GlassEffectContainer(spacing: LS.sm) {
                     HStack(spacing: LS.sm) {
-                        ScheduleHeaderPill(onPillTap: onPillTap)
+                        ScheduleHeaderPill(onPillTap: onPillTap, onEventTap: onEventTap)
                             .frame(maxWidth: .infinity)
                         SettingsButton(showSettings: $showSettings, showBadge: showBadge)
                     }
                 }
             } else {
                 HStack(spacing: LS.sm) {
-                    ScheduleHeaderPill(onPillTap: onPillTap)
+                    ScheduleHeaderPill(onPillTap: onPillTap, onEventTap: onEventTap)
                         .frame(maxWidth: .infinity)
                     SettingsButton(showSettings: $showSettings, showBadge: showBadge)
                 }

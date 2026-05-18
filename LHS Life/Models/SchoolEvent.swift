@@ -15,7 +15,8 @@ struct SchoolEvent: Identifiable, Hashable, Codable {
     let endDate: Date
     let isAllDay: Bool
     let location: String?
-    let description: String? // Raw iCal DESCRIPTION — may contain plain text or an image URL
+    let description: String?     // Raw iCal DESCRIPTION
+    let htmlDescription: String?  // X-ALT-DESC — HTML, present on finals and some other events
     let url: URL?            // OPTIONAL: CalendarWiz popup URL for the event
     let category: EventCategory
 

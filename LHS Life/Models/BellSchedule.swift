@@ -26,12 +26,13 @@ struct BellSchedule: Identifiable, Hashable, Codable {
 /// The flavor of schedule for the day.
 enum ScheduleType: String, Codable, CaseIterable {
     case regular       = "Regular"
-    case block         = "Block"         // A/B or 1/2 block rotation
+    case block         = "Block"
     case lateStart     = "Late Start"
     case earlyRelease  = "Early Release"
     case assembly      = "Assembly"
-    case custom        = "Custom"        // Anything else with named periods
-    case unknown       = "Unknown"       // Parsed but type unclear
+    case finals        = "Finals"
+    case custom        = "Custom"
+    case unknown       = "Unknown"
 }
 
 // MARK: - Period

@@ -81,10 +81,11 @@ enum ICalParser {
 
         let dtEnd = block["DTEND"].flatMap { parseDate($0) } ?? dtStart
         let isAllDay = block["DTSTART"].map { !$0.contains("T") } ?? false
-        let description = block["DESCRIPTION"].map { unescape($0) }
-        let location    = block["LOCATION"].map    { unescape($0) }
-        let urlString   = block["URL"]
-        let url         = urlString.flatMap { URL(string: $0) }
+        let description     = block["DESCRIPTION"].map    { unescape($0) }
+        let htmlDescription = block["X-ALT-DESC"].map     { unescape($0) }
+        let location        = block["LOCATION"].map        { unescape($0) }
+        let urlString       = block["URL"]
+        let url             = urlString.flatMap { URL(string: $0) }
 
         return SchoolEvent(
             id: uid,
@@ -94,6 +95,7 @@ enum ICalParser {
             isAllDay: isAllDay,
             location: location,
             description: description,
+            htmlDescription: htmlDescription,
             url: url,
             category: BellScheduleDetector.category(title: title, description: description)
         )

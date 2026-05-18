@@ -20,7 +20,19 @@ enum CalendarViewMode { case day, month, year }
 final class CalendarUIState {
     var viewMode: CalendarViewMode = .day
     var selectedDate: Date = Calendar.current.startOfDay(for: Date())
-    var scrollToNow: Bool = false   // toggled by goToToday() to trigger DayView scroll
+    var scrollToNow: Bool = false
+    var scrollToEvent: SchoolEvent? = nil
+
+    func navigateTo(event: SchoolEvent) {
+        selectedDate = Calendar.current.startOfDay(for: event.startDate)
+        scrollToEvent = nil  // reset first so onChange fires even for the same event
+        withAnimation(.lsSnappy) { viewMode = .day }
+        // Brief delay so nil propagates before setting the new value
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            scrollToEvent = event
+        }
+    }
     private let cal = Calendar.current
 
     func goToToday() {
@@ -169,7 +181,10 @@ final class CalendarStore {
         events = fetched.sorted { $0.startDate < $1.startDate }
         var schedules: [String: BellSchedule] = [:]
         for event in events where event.hasBellSchedule {
-            if let schedule = bellParser.parse(from: event) {
+            for schedule in bellParser.parse(from: event, graduationYear: settings.graduationYear) {
+                if let existing = schedules[schedule.dayKey],
+                   existing.scheduleType == .finals,
+                   schedule.scheduleType != .finals { continue }
                 schedules[schedule.dayKey] = schedule
             }
         }
@@ -196,11 +211,12 @@ struct DaySummary {
 extension ScheduleType {
     var pillColor: Color {
         switch self {
-        case .regular:      return Color.lsTertiary
-        case .block:        return Color.lsBlue
-        case .lateStart:    return Color.lsOrange
-        case .earlyRelease: return Color.lsGold
-        case .assembly:     return Color.lsSuccess
+        case .regular:          return Color.lsTertiary
+        case .block:            return Color.lsBlue
+        case .lateStart:        return Color.lsOrange
+        case .earlyRelease:     return Color.lsGold
+        case .assembly:         return Color.lsSuccess
+        case .finals:           return Color.lsDestructive
         case .custom, .unknown: return Color.lsSecondary
         }
     }
