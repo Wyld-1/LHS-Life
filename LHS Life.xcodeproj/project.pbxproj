@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		231F30652FB04A0F00F58221 /* LHS Life Icon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 231F30642FB04A0F00F58221 /* LHS Life Icon.icon */; };
-		23E395CD2FA53A6D00574B85 /* SwiftSoup in Frameworks */ = {isa = PBXBuildFile; productRef = 23E395CC2FA53A6D00574B85 /* SwiftSoup */; };
 		23E396072FA57AE300574B85 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 23E396062FA57AE200574B85 /* WidgetKit.framework */; };
 		23E396092FA57AE300574B85 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 23E396082FA57AE300574B85 /* SwiftUI.framework */; };
 		23E3961A2FA57AE500574B85 /* LHS WidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 23E396042FA57AE200574B85 /* LHS WidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -124,7 +123,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				23E395CD2FA53A6D00574B85 /* SwiftSoup in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -210,7 +208,6 @@
 			);
 			name = "LHS Life";
 			packageProductDependencies = (
-				23E395CC2FA53A6D00574B85 /* SwiftSoup */,
 			);
 			productName = "LaSalle Schedule";
 			productReference = 23E395A12FA5399800574B85 /* LHS Life.app */;
@@ -320,7 +317,6 @@
 			mainGroup = 23E395982FA5399800574B85;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				23E395CB2FA53A6D00574B85 /* XCRemoteSwiftPackageReference "SwiftSoup" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 23E395A22FA5399800574B85 /* Products */;
@@ -815,25 +811,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
-/* Begin XCRemoteSwiftPackageReference section */
-		23E395CB2FA53A6D00574B85 /* XCRemoteSwiftPackageReference "SwiftSoup" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/scinfu/SwiftSoup";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.13.4;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		23E395CC2FA53A6D00574B85 /* SwiftSoup */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 23E395CB2FA53A6D00574B85 /* XCRemoteSwiftPackageReference "SwiftSoup" */;
-			productName = SwiftSoup;
-		};
-/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 23E395992FA5399800574B85 /* Project object */;
 }
