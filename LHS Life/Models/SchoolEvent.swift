@@ -38,12 +38,13 @@ struct SchoolEvent: Identifiable, Hashable, Codable {
 /// Broad category buckets. CalendarWiz doesn't expose category IDs in the public iCal feed,
 /// so we derive this from title/description heuristics at parse time.
 enum EventCategory: String, Codable, CaseIterable {
-    case bellSchedule  = "Bell Schedule"
-    case athletic      = "Athletic"
-    case academic      = "Academic"
-    case liturgy       = "Liturgy"
-    case holiday       = "Holiday"
-    case other         = "Other"
+    case bellSchedule    = "Bell Schedule"
+    case athletic        = "Athletic"
+    case academic        = "Academic"
+    case liturgy         = "Liturgy"
+    case holiday         = "Holiday"
+    case professionalDress = "Professional Dress"
+    case other           = "Other"
 }
 
 // MARK: - DateFormatter convenience

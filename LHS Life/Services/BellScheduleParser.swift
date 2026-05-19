@@ -10,6 +10,28 @@ import Foundation
 
 enum FinalExamParser {
 
+    // MARK: - Regular Schedule Factory
+
+    /// Standard La Salle regular schedule periods.
+    /// Used as a fallback when a student has no finals on a seniors-only finals day.
+    static func regularPeriods(for date: Date, sourceID: String) -> [Period] {
+        func t(_ h: Int, _ m: Int) -> DateComponents {
+            var c = DateComponents(); c.hour = h; c.minute = m; return c
+        }
+        return [
+            Period(id: "\(sourceID)-reg-0",     name: "Period 0", startTime: t(6,45),  endTime: t(7,45)),
+            Period(id: "\(sourceID)-reg-1",     name: "Period 1", startTime: t(8,0),   endTime: t(8,50)),
+            Period(id: "\(sourceID)-reg-2",     name: "Period 2", startTime: t(8,55),  endTime: t(9,45)),
+            Period(id: "\(sourceID)-reg-break", name: "Break",    startTime: t(9,45),  endTime: t(9,55)),
+            Period(id: "\(sourceID)-reg-3",     name: "Period 3", startTime: t(10,0),  endTime: t(10,50)),
+            Period(id: "\(sourceID)-reg-4",     name: "Period 4", startTime: t(10,55), endTime: t(11,45)),
+            Period(id: "\(sourceID)-reg-lunch", name: "Lunch",    startTime: t(11,45), endTime: t(12,15)),
+            Period(id: "\(sourceID)-reg-5",     name: "Period 5", startTime: t(12,20), endTime: t(13,10)),
+            Period(id: "\(sourceID)-reg-6",     name: "Period 6", startTime: t(13,15), endTime: t(14,5)),
+            Period(id: "\(sourceID)-reg-7",     name: "Period 7", startTime: t(14,10), endTime: t(15,0)),
+        ]
+    }
+
     // MARK: - Entry Point
 
     /// Parses ALL day columns from the finals HTML table, returning one BellSchedule per day.
@@ -30,8 +52,23 @@ enum FinalExamParser {
                 let hasFrosh  = label.contains("frosh") || label.contains("fresh")
                 let hasJunior = label.contains("junior")
                 let hasSenior = label.contains("senior")
-                if hasSenior && !hasFrosh && !hasJunior && !isSenior { continue }
-                if (hasFrosh || hasJunior) && !hasSenior && isSenior { continue }
+                let isSeniorsOnly = hasSenior && !hasFrosh && !hasJunior
+
+                if isSeniorsOnly && !isSenior {
+                    // Non-senior on a seniors-only day: synthesize a regular schedule
+                    let dayKey = DateFormatter.isoDay.string(from: date)
+                    results.append(BellSchedule(
+                        id: "regular-\(dayKey)",
+                        date: date,
+                        scheduleType: .regular,
+                        periods: FinalExamParser.regularPeriods(for: date, sourceID: event.id),
+                        sourceEventID: event.id
+                    ))
+                    continue
+                }
+                if (hasFrosh || hasJunior) && !hasSenior && isSenior {
+                    continue  // Senior on a frosh-junior day: skip
+                }
             }
 
             var periods: [Period] = []

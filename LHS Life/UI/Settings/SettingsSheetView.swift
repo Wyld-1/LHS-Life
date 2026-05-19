@@ -408,11 +408,12 @@ struct SettingsSheetView: View {
                     )
                     CachedSchedule.save(periods)
                     do {
-                        _ = try Activity.request(
+                        let activity = try Activity.request(
                             attributes: ScheduleActivityAttributes(schoolName: "LaSalle", schedule: periods),
                             content: .init(state: state, staleDate: now.addingTimeInterval(6000)),
-                            pushType: nil
+                            pushType: .token
                         )
+                        PushTokenService.observeTokenUpdates(for: activity)
                         BellTransitionService.scheduleTransitions(for: periods.filter { $0.startDate > now })
                         print("[Debug] Dummy Live Activity started")
                     } catch {

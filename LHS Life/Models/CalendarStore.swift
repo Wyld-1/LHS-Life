@@ -188,6 +188,30 @@ final class CalendarStore {
                 schedules[schedule.dayKey] = schedule
             }
         }
+        // Post-processing: Pro Dress floor rule.
+        // If a day has a Professional Dress event but no schedule was parsed,
+        // school is in session — apply a regular schedule as the floor.
+        // Exception: Pathways Day students have no regular schedule.
+        let proDressDays = fetched
+            .filter { $0.category == .professionalDress }
+            .map { DateFormatter.isoDay.string(from: $0.startDate) }
+        for dayKey in proDressDays where schedules[dayKey] == nil {
+            let isPathways = PathwaysService.isPathwaysDay(
+                on: dayKey, events: fetched, graduationYear: settings.graduationYear
+            )
+            guard !isPathways else { continue }
+            let date = fetched
+                .first { DateFormatter.isoDay.string(from: $0.startDate) == dayKey }
+                .map { $0.startDate } ?? Date()
+            schedules[dayKey] = BellSchedule(
+                id: "regular-\(dayKey)",
+                date: date,
+                scheduleType: .regular,
+                periods: FinalExamParser.regularPeriods(for: date, sourceID: "floor"),
+                sourceEventID: "floor"
+            )
+        }
+
         bellSchedules = schedules
         cachedTodayKey = ""
         SharedStore.write(events: events, bellSchedules: bellSchedules)
@@ -225,12 +249,13 @@ extension ScheduleType {
 extension EventCategory {
     var pillColor: Color {
         switch self {
-        case .bellSchedule: return Color.lsTertiary
-        case .athletic:     return Color.lsGold
-        case .academic:     return Color.lsSuccess
-        case .liturgy:      return Color.lsBlue
-        case .holiday:      return Color.lsOrange
-        case .other:        return Color.lsSecondary
+        case .bellSchedule:     return Color.lsTertiary
+        case .athletic:         return Color.lsGold
+        case .academic:         return Color.lsSuccess
+        case .liturgy:          return Color.lsBlue
+        case .holiday:          return Color.lsOrange
+        case .professionalDress: return Color.lsGold
+        case .other:            return Color.lsSecondary
         }
     }
 }

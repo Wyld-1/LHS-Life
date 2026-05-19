@@ -65,10 +65,13 @@ final class LiveActivityService {
             let activity = try Activity.request(
                 attributes: attributes,
                 content:    .init(state: state, staleDate: lastBell),
-                pushType:   nil
+                pushType:   .token
             )
             currentActivity = activity
             print("[LiveActivity] Started — id: \(activity.id), \(periods.count) periods")
+
+            // Observe push token updates and register with Cloudflare Worker
+            PushTokenService.observeTokenUpdates(for: activity)
 
             let upcoming = periods.filter { $0.startDate > Date() }
             BellTransitionService.scheduleTransitions(for: upcoming)
@@ -101,6 +104,9 @@ final class LiveActivityService {
     func endIfSchoolOver(state: ScheduleEngine.ScheduleState) {
         switch state.dayState {
         case .afterSchool, .holiday, .pathwaysDay:
+            guard currentActivity != nil ||
+                  !Activity<ScheduleActivityAttributes>.activities.isEmpty
+            else { return }
             Task { await end() }
         default:
             break

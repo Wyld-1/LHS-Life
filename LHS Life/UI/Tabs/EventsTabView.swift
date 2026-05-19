@@ -512,11 +512,12 @@ private struct EventBlock: View {
     }
     private var color: Color {
         switch event.category {
-        case .athletic: return Color.lsGold
-        case .liturgy:  return Color.lsBlue
-        case .academic: return Color.lsSuccess
-        case .holiday:  return Color.lsOrange
-        default:        return Color.lsSecondary
+        case .athletic:          return Color.lsGold
+        case .liturgy:           return Color.lsBlue
+        case .academic:          return Color.lsSuccess
+        case .holiday:           return Color.lsOrange
+        case .professionalDress: return Color.lsGold
+        default:                 return Color.lsSecondary
         }
     }
 
@@ -559,11 +560,12 @@ private struct AllDayStrip: View {
 
     private func color(for event: SchoolEvent) -> Color {
         switch event.category {
-        case .athletic: return Color.lsGold
-        case .liturgy:  return Color.lsBlue
-        case .academic: return Color.lsSuccess
-        case .holiday:  return Color.lsOrange
-        default:        return Color.lsSecondary
+        case .athletic:          return Color.lsGold
+        case .liturgy:           return Color.lsBlue
+        case .academic:          return Color.lsSuccess
+        case .holiday:           return Color.lsOrange
+        case .professionalDress: return Color.lsGold
+        default:                 return Color.lsSecondary
         }
     }
 
@@ -1121,7 +1123,6 @@ private struct MiniMonthView: View {
                     ForEach(Array(week.enumerated()), id: \.offset) { _, day in
                         if let day {
                             let isToday = cal.isDate(day, inSameDayAs: today)
-                            let summary = store.summary(for: DateFormatter.isoDay.string(from: day))
                             ZStack {
                                 if isToday {
                                     Circle()
@@ -1131,15 +1132,6 @@ private struct MiniMonthView: View {
                                 Text("\(cal.component(.day, from: day))")
                                     .font(.system(size: 8, weight: isToday ? .bold : .regular, design: .rounded))
                                     .foregroundStyle(isToday ? .white : Color.lsPrimary)
-                                // dot indicator at bottom of cell
-                                if !summary.isEmpty {
-                                    VStack {
-                                        Spacer()
-                                        Circle()
-                                            .fill(summary.pillColors.first ?? Color.lsTertiary)
-                                            .frame(width: 3, height: 3)
-                                    }
-                                }
                             }
                             .frame(width: daySize, height: daySize)
                             .contentShape(Rectangle())

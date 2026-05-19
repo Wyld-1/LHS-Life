@@ -44,6 +44,8 @@ enum BellScheduleDetector {
             || t.contains("soccer") || t.contains("football") || t.contains("volleyball")
             || t.contains("track") || t.contains("cross country") || t.contains("wrestling")
             || t.contains("lacrosse") || t.contains("vs.") || t.contains(" vs ") { return .athletic }
+        if t.contains("professional dress") || t.contains("formal dress")
+            || t.contains("dress uniform") || t.contains("professional attire") { return .professionalDress }
         if t.contains("mass") || t.contains("liturgy") || t.contains("prayer")
             || t.contains("retreat") || t.contains("service") { return .liturgy }
         if t.contains("exam") || t.contains("test") || t.contains("finals")
