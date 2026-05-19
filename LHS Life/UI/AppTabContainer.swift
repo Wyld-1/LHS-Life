@@ -233,6 +233,7 @@ struct AppTabContainer: View {
         TabView(selection: $selectedTab) {
             Tab("Events", systemImage: "calendar", value: AppTab.events) {
                 EventsTabView()
+                    .environment(calendarUI)
             }
             Tab("Order", systemImage: "fork.knife", value: AppTab.lunch) {
                 LunchTabView(webState: lunchState)

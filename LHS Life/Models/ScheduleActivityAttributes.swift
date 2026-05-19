@@ -40,37 +40,15 @@ struct ScheduleActivityAttributes: ActivityAttributes {
     // Widget renders directly from these values.
 
     public struct ContentState: Codable, Hashable {
-        /// Display name of the current period — "Chemistry", "Lunch", etc.
-        var currentPeriodName: String
-        /// Hex color for the current period's accent
-        var colorHex: String
-        /// Absolute start of current period — for ProgressView(timerInterval:)
-        var periodStartDate: Date
-        /// Absolute end of current period — for ProgressView(timerInterval:)
-        var periodEndDate: Date
-        /// Display name of next period, nil if last period
-        var nextPeriodName: String?
-        /// Formatted next bell time string, e.g. "10:50 AM"
-        var nextBellTime: String?
+        /// Minutes since midnight identifying which slot just started.
+        /// Widget matches this against attributes.schedule to resolve name/color/dates.
+        var slotStartMinutes: Int
         /// True when the app signals end of day
         var isEnded: Bool
 
-        init(
-            currentPeriodName: String = "",
-            colorHex: String = "#94A3B8",
-            periodStartDate: Date = Date(),
-            periodEndDate: Date = Date().addingTimeInterval(3600),
-            nextPeriodName: String? = nil,
-            nextBellTime: String? = nil,
-            isEnded: Bool = false
-        ) {
-            self.currentPeriodName = currentPeriodName
-            self.colorHex          = colorHex
-            self.periodStartDate   = periodStartDate
-            self.periodEndDate     = periodEndDate
-            self.nextPeriodName    = nextPeriodName
-            self.nextBellTime      = nextBellTime
-            self.isEnded           = isEnded
+        init(slotStartMinutes: Int = 0, isEnded: Bool = false) {
+            self.slotStartMinutes = slotStartMinutes
+            self.isEnded          = isEnded
         }
     }
 }

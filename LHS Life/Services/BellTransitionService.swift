@@ -16,7 +16,7 @@ import ActivityKit
 
 enum BellTransitionService {
 
-    static let taskIdentifier = "lasalle.bell.transition"
+    static let taskIdentifier = "com.lasalle.lhslife.bell.transition"
 
     // MARK: - Registration
     // Call once at app launch, before the first scene connects.
@@ -118,7 +118,7 @@ enum BellTransitionService {
             scheduleNext(in: remaining)
 
             task.setTaskCompleted(success: true)
-            print("[BellTransition] Updated activity — \(contentState.currentPeriodName), next: \(contentState.nextPeriodName ?? "none")")
+            print("[BellTransition] Updated activity — slot: \(contentState.slotStartMinutes) min")
         }
     }
 
@@ -133,7 +133,7 @@ enum BellTransitionService {
 
         let content = ActivityContent(
             state: contentState,
-            staleDate: contentState.periodEndDate
+            staleDate: nil
         )
 
         await activity.update(content)
@@ -147,7 +147,7 @@ enum BellTransitionService {
 
 enum CachedSchedule {
     private static let key      = "cached_bell_schedule"
-    private static let defaults = UserDefaults(suiteName: "group.lasalle.widgetinfo")
+    private static let defaults = UserDefaults(suiteName: UserSettings.appGroupID)
 
     static func save(_ periods: [ScheduleActivityAttributes.ScheduledPeriod]) {
         guard let data = try? JSONEncoder().encode(periods) else { return }

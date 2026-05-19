@@ -542,7 +542,7 @@
 				CODE_SIGN_ENTITLEMENTS = "LHS Life/LHS Life.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = PQW4KRLW78;
+				DEVELOPMENT_TEAM = NM24PZL726;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "LHS-Life-Info.plist";
@@ -561,7 +561,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = wildcat.lasalle.lhslife;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lasalle.lhslife;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -581,7 +581,7 @@
 				CODE_SIGN_ENTITLEMENTS = "LHS Life/LHS Life.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = PQW4KRLW78;
+				DEVELOPMENT_TEAM = NM24PZL726;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "LHS-Life-Info.plist";
@@ -600,7 +600,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = wildcat.lasalle.lhslife;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lasalle.lhslife;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -704,7 +704,7 @@
 				CODE_SIGN_ENTITLEMENTS = "LHS WidgetsExtension.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = PQW4KRLW78;
+				DEVELOPMENT_TEAM = NM24PZL726;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "/Users/liamlefohn/Documents/LaSalle ASB/LHS Life/LHS Widgets/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "LHS Widgets";
@@ -717,7 +717,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "wildcat.lasalle.lhslife.lhs-widgets";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.lasalle.lhslife.lhs-widgets";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -737,7 +737,7 @@
 				CODE_SIGN_ENTITLEMENTS = "LHS WidgetsExtension.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = PQW4KRLW78;
+				DEVELOPMENT_TEAM = NM24PZL726;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "/Users/liamlefohn/Documents/LaSalle ASB/LHS Life/LHS Widgets/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "LHS Widgets";
@@ -750,7 +750,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "wildcat.lasalle.lhslife.lhs-widgets";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.lasalle.lhslife.lhs-widgets";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

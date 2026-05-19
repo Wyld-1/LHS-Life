@@ -71,7 +71,7 @@ enum ASBDayMode: Int, Codable, CaseIterable {
 @Observable
 final class UserSettings {
 
-    static let appGroupID = "group.lasalle.widgetinfo"
+    static let appGroupID = "group.lhslife.widgetinfo"
     @ObservationIgnored private let store: UserDefaults
     static let shared = UserSettings()
 

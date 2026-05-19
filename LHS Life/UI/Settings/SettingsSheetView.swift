@@ -397,14 +397,12 @@ struct SettingsSheetView: View {
                               endDate: now.addingTimeInterval(6000),
                               endTimeString: "In 60 min"),
                     ]
+                    let cal = Calendar.current
+                    let h = cal.component(.hour,   from: periods[0].startDate)
+                    let m = cal.component(.minute, from: periods[0].startDate)
                     let state = ScheduleActivityAttributes.ContentState(
-                        currentPeriodName: periods[0].displayName,
-                        colorHex:          periods[0].colorHex,
-                        periodStartDate:   periods[0].startDate,
-                        periodEndDate:     periods[0].endDate,
-                        nextPeriodName:    periods[1].displayName,
-                        nextBellTime:      periods[0].endTimeString,
-                        isEnded:           false
+                        slotStartMinutes: h * 60 + m,
+                        isEnded: false
                     )
                     CachedSchedule.save(periods)
                     do {

@@ -56,7 +56,15 @@ final class LiveActivityService {
 
         CachedSchedule.save(periods)
 
-        guard let state = buildContentState(from: periods) else { return }
+        let cal      = Calendar.current
+        let firstSlot = periods.first(where: { Date() >= $0.startDate && Date() < $0.endDate })
+                     ?? periods.first(where: { $0.startDate > Date() })
+        let h = firstSlot.map { cal.component(.hour,   from: $0.startDate) } ?? 0
+        let m = firstSlot.map { cal.component(.minute, from: $0.startDate) } ?? 0
+        let state    = ScheduleActivityAttributes.ContentState(
+            slotStartMinutes: h * 60 + m,
+            isEnded: false
+        )
         let lastBell = periods.last?.endDate ?? Date().addingTimeInterval(3600)
 
         let attributes = ScheduleActivityAttributes(schoolName: "LaSalle", schedule: periods)
@@ -95,7 +103,7 @@ final class LiveActivityService {
 
         Task {
             await activity.update(.init(state: state, staleDate: periods.last?.endDate))
-            print("[LiveActivity] Foreground update — now showing: \(state.currentPeriodName)")
+            print("[LiveActivity] Foreground update — slot: \(state.slotStartMinutes) min")
         }
     }
 
@@ -133,40 +141,20 @@ final class LiveActivityService {
         from periods: [ScheduleActivityAttributes.ScheduledPeriod]
     ) -> ScheduleActivityAttributes.ContentState? {
         let now = Date()
+        let cal = Calendar.current
 
-        let activePeriod = periods.first(where: { now >= $0.startDate && now < $0.endDate })
-        let nextPeriod   = periods.first(where: { $0.startDate > now })
+        // Find the active or next upcoming period
+        let current = periods.first(where: { now >= $0.startDate && now < $0.endDate })
+                   ?? periods.first(where: { $0.startDate > now })
 
-        let current: ScheduleActivityAttributes.ScheduledPeriod
-        let next:    ScheduleActivityAttributes.ScheduledPeriod?
+        guard let current else { return nil }
 
-        if let active = activePeriod {
-            let idx = periods.firstIndex(where: { $0.startDate == active.startDate }) ?? 0
-            current = active
-            next    = idx + 1 < periods.count ? periods[idx + 1] : nil
-        } else if let upcoming = nextPeriod {
-            // Before school or between periods — synthetic "Soon" slot
-            current = ScheduleActivityAttributes.ScheduledPeriod(
-                periodNumber:  nil,
-                displayName:   "Soon",
-                colorHex:      "#94A3B8",
-                startDate:     now,
-                endDate:       upcoming.startDate,
-                endTimeString: upcoming.startDate.formatted(date: .omitted, time: .shortened)
-            )
-            next = upcoming
-        } else {
-            return nil  // nothing left today
-        }
-
+        // slotStartMinutes identifies the slot — worker and widget both use this
+        let h = cal.component(.hour,   from: current.startDate)
+        let m = cal.component(.minute, from: current.startDate)
         return ScheduleActivityAttributes.ContentState(
-            currentPeriodName: current.displayName,
-            colorHex:          current.colorHex,
-            periodStartDate:   current.startDate,
-            periodEndDate:     current.endDate,
-            nextPeriodName:    next?.displayName,
-            nextBellTime:      current.endTimeString,
-            isEnded:           false
+            slotStartMinutes: h * 60 + m,
+            isEnded: false
         )
     }
 

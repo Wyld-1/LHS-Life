@@ -131,29 +131,39 @@ private struct ActiveSlotInfo {
     let nextDisplayName: String?
 }
 
-/// ContentState (pushed by BGProcessingTask) is primary source.
-/// Falls back to static schedule before first push arrives.
+/// Resolves the active slot from attributes.schedule using state.slotStartMinutes.
+/// The worker pushes slotStartMinutes — widget looks it up locally for name/color/dates.
+/// Falls back to time-based resolution before first push arrives.
 private func resolveSlot(
     at date: Date,
     schedule: [ScheduleActivityAttributes.ScheduledPeriod],
     state: ScheduleActivityAttributes.ContentState
 ) -> ActiveSlotInfo? {
-    if !state.currentPeriodName.isEmpty && !state.isEnded {
-        return ActiveSlotInfo(
-            displayName:     state.currentPeriodName,
-            colorHex:        state.colorHex,
-            startDate:       state.periodStartDate,
-            endDate:         state.periodEndDate,
-            endTimeString:   state.nextBellTime ?? "",
-            nextDisplayName: state.nextPeriodName
-        )
-    }
-    // Fallback from static schedule
     guard !schedule.isEmpty else { return nil }
-    guard let current = schedule.first(where: { date >= $0.startDate && date < $0.endDate })
-                     ?? schedule.first(where: { date < $0.startDate })
-    else { return nil }
-    let next = schedule.first(where: { $0.startDate >= current.endDate })
+
+    // Primary: find slot by slotStartMinutes pushed from server/BGTask
+    let cal = Calendar.current
+    let pushedSlot: ScheduleActivityAttributes.ScheduledPeriod?
+    if state.slotStartMinutes > 0 {
+        pushedSlot = schedule.first {
+            let h = cal.component(.hour,   from: $0.startDate)
+            let m = cal.component(.minute, from: $0.startDate)
+            return h * 60 + m == state.slotStartMinutes
+        }
+    } else {
+        pushedSlot = nil
+    }
+
+    // Fallback: find by current time
+    let current = pushedSlot
+                ?? schedule.first(where: { date >= $0.startDate && date < $0.endDate })
+                ?? schedule.first(where: { date < $0.startDate })
+
+    guard let current else { return nil }
+
+    let idx  = schedule.firstIndex(where: { $0.startDate == current.startDate }) ?? 0
+    let next = idx + 1 < schedule.count ? schedule[idx + 1] : nil
+
     return ActiveSlotInfo(
         displayName:     current.displayName,
         colorHex:        current.colorHex,
