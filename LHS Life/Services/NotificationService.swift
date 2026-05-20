@@ -210,6 +210,84 @@ enum NotificationService {
                                                      content: content, trigger: trigger))
     }
 
+    // MARK: - Live Activity Start Reminder
+
+    /// Schedules a "School starts soon" notification 30 min before the first
+    /// enabled period on regular school days, for users with liveActivityMode == .everyDay.
+    /// .abnormalOnly users already get the abnormal schedule notification.
+    /// .off users don't have live activities so the nudge is pointless.
+    static func scheduleLiveActivityReminderNotifications(
+        settings: UserSettings,
+        store: CalendarStore
+    ) async {
+        // Remove old reminders
+        let existing = await center.pendingNotificationRequests()
+        let ids = existing.filter { $0.identifier.hasPrefix("lareminder-") }.map { $0.identifier }
+        center.removePendingNotificationRequests(withIdentifiers: ids)
+
+        guard settings.liveActivityMode == .everyDay, await isAuthorized else { return }
+
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+
+        for dayOffset in 0..<14 {
+            guard let date = cal.date(byAdding: .day, value: dayOffset, to: today) else { continue }
+            let weekday = cal.component(.weekday, from: date)
+            guard weekday >= 2, weekday <= 6 else { continue } // Mon–Fri only
+
+            let dayKey = DateFormatter.isoDay.string(from: date)
+            guard let schedule = store.bellSchedule(for: dayKey) else { continue }
+
+            // Only on regular days — abnormal days are covered by the abnormal notification
+            guard schedule.scheduleType == .regular else { continue }
+
+            // Skip Pathways Days
+            let isPathways = PathwaysService.isPathwaysDay(
+                on: dayKey, events: store.events, graduationYear: settings.graduationYear
+            )
+            if isPathways { continue }
+
+            // Find the first period the user has enabled
+            let firstEnabled = schedule.periods.first(where: { period in
+                guard let num = extractPeriodNumber(from: period.name) else { return false }
+                return settings.config(for: num)?.isEnabled ?? true
+            })
+            guard let firstPeriod = firstEnabled,
+                  let startDate = firstPeriod.startDate(on: date),
+                  let fireDate = cal.date(byAdding: .minute, value: -30, to: startDate),
+                  fireDate > Date()
+            else { continue }
+
+            let timeStr = NotificationService.timeString(startDate)
+            let content = UNMutableNotificationContent()
+            content.title = "School starts at \(timeStr)"
+            content.body  = "Tap to pin the bell schedule to your island."
+            content.sound = .default
+            content.categoryIdentifier = abnormalScheduleCategoryID // reuse — same action
+
+            let comps = cal.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
+            let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+            try? await center.add(UNNotificationRequest(
+                identifier: "lareminder-\(dayKey)",
+                content: content,
+                trigger: trigger
+            ))
+        }
+    }
+
+    private static func extractPeriodNumber(from name: String) -> Int? {
+        let parts = name.split(separator: " ")
+        guard parts.count == 2, parts[0].lowercased() == "period", let n = Int(parts[1]) else { return nil }
+        return n
+    }
+
+    private static func timeString(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "h:mm a"
+        f.amSymbol = "AM"; f.pmSymbol = "PM"
+        return f.string(from: date)
+    }
+
     // MARK: - Abnormal Schedule Notifications
 
     /// Schedules a morning notification for any upcoming day with a non-regular schedule.

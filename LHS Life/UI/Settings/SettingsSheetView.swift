@@ -407,7 +407,11 @@ struct SettingsSheetView: View {
                     CachedSchedule.save(periods)
                     do {
                         let activity = try Activity.request(
-                            attributes: ScheduleActivityAttributes(schoolName: "LaSalle", schedule: periods),
+                            attributes: ScheduleActivityAttributes(
+                                schoolName: "LaSalle",
+                                scheduleTypeName: "Regular Schedule",
+                                schedule: periods
+                            ),
                             content: .init(state: state, staleDate: now.addingTimeInterval(6000)),
                             pushType: .token
                         )

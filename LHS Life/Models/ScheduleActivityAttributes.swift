@@ -20,6 +20,7 @@ struct ScheduleActivityAttributes: ActivityAttributes {
     // MARK: - Static (written once at start)
 
     var schoolName: String
+    var scheduleTypeName: String   // e.g. "Block Schedule", "Regular Schedule"
 
     /// Full day schedule — used by the widget to know all transitions.
     var schedule: [ScheduledPeriod]

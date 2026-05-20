@@ -14,20 +14,27 @@ struct LaSalle_WidgetsLiveActivity: Widget {
         ActivityConfiguration(for: ScheduleActivityAttributes.self) { context in
             LockScreenView(attributes: context.attributes, state: context.state)
         } dynamicIsland: { context in
-            let transitions = transitionDates(from: context.attributes.schedule)
-            let schedule    = context.attributes.schedule
-            let state       = context.state
+            let transitions      = transitionDates(from: context.attributes.schedule)
+            let schedule         = context.attributes.schedule
+            let state            = context.state
+            let scheduleTypeName = context.attributes.scheduleTypeName
 
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     TimelineView(.explicit(transitions)) { tl in
-                        let slot = resolveSlot(at: tl.date, schedule: schedule, state: state)
+                        let slot = resolveSlot(at: tl.date, schedule: schedule, state: state, scheduleTypeName: scheduleTypeName)
                         HStack(spacing: 6) {
-                            Image("lhs-lightning")
-                                .resizable()
-                                .renderingMode(.template)
-                                .foregroundStyle(Color(hex: slot?.colorHex ?? "#3A6FD8"))
-                                .frame(width: 14, height: 14)
+                            if slot?.isPassing == true {
+                                Image(systemName: "clock")
+                                    .foregroundStyle(Color(hex: slot?.colorHex ?? "#3A6FD8"))
+                                    .font(.system(size: 14, weight: .semibold))
+                            } else {
+                                Image("lhs-lightning")
+                                    .resizable()
+                                    .renderingMode(.template)
+                                    .foregroundStyle(Color(hex: slot?.colorHex ?? "#3A6FD8"))
+                                    .frame(width: 14, height: 14)
+                            }
                             Text(slot?.displayName ?? "—")
                                 .font(.system(size: 15, weight: .semibold, design: .rounded))
                                 .foregroundStyle(.white).lineLimit(1)
@@ -38,7 +45,7 @@ struct LaSalle_WidgetsLiveActivity: Widget {
 
                 DynamicIslandExpandedRegion(.trailing) {
                     TimelineView(.explicit(transitions)) { tl in
-                        let slot = resolveSlot(at: tl.date, schedule: schedule, state: state)
+                        let slot = resolveSlot(at: tl.date, schedule: schedule, state: state, scheduleTypeName: scheduleTypeName)
                         if let endTime = slot?.endTimeString {
                             HStack(spacing: 4) {
                                 Image(systemName: "bell.fill")
@@ -54,19 +61,30 @@ struct LaSalle_WidgetsLiveActivity: Widget {
 
                 DynamicIslandExpandedRegion(.bottom) {
                     TimelineView(.explicit(transitions)) { tl in
-                        let slot  = resolveSlot(at: tl.date, schedule: schedule, state: state)
+                        let slot  = resolveSlot(at: tl.date, schedule: schedule, state: state, scheduleTypeName: scheduleTypeName)
                         let color = Color(hex: slot?.colorHex ?? "#3A6FD8")
                         VStack(spacing: 6) {
-                            if let next = slot?.nextDisplayName {
-                                HStack {
-                                    Text("Next: \(next)")
-                                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                                        .foregroundStyle(.white.opacity(0.6)).lineLimit(1)
-                                    Spacer()
-                                }
-                            }
                             if let slot = slot {
-                                LiveProgressBar(start: slot.startDate, end: slot.endDate, color: color)
+                                if slot.isPassing, let until = slot.nextEndTimeString {
+                                    HStack {
+                                        Text("Until \(until)")
+                                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                                            .foregroundStyle(.white.opacity(0.6)).lineLimit(1)
+                                        Spacer()
+                                    }
+                                } else if let next = slot.nextDisplayName {
+                                    HStack {
+                                        Text("Next: \(next)")
+                                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                                            .foregroundStyle(.white.opacity(0.6)).lineLimit(1)
+                                        Spacer()
+                                    }
+                                }
+                                if slot.isPassing, let passStart = slot.passingStartDate {
+                                    LiveProgressBar(start: passStart, end: slot.startDate, color: color)
+                                } else {
+                                    LiveProgressBar(start: slot.startDate, end: slot.endDate, color: color)
+                                }
                             }
                         }
                         .padding(.horizontal, 4)
@@ -75,7 +93,7 @@ struct LaSalle_WidgetsLiveActivity: Widget {
 
             } compactLeading: {
                 TimelineView(.explicit(transitions)) { tl in
-                    let slot  = resolveSlot(at: tl.date, schedule: schedule, state: state)
+                    let slot  = resolveSlot(at: tl.date, schedule: schedule, state: state, scheduleTypeName: scheduleTypeName)
                     let color = Color(hex: slot?.colorHex ?? "#3A6FD8")
                     ZStack {
                         if let slot = slot {
@@ -91,7 +109,7 @@ struct LaSalle_WidgetsLiveActivity: Widget {
 
             } compactTrailing: {
                 TimelineView(.explicit(transitions)) { tl in
-                    let slot = resolveSlot(at: tl.date, schedule: schedule, state: state)
+                    let slot = resolveSlot(at: tl.date, schedule: schedule, state: state, scheduleTypeName: scheduleTypeName)
                     if let endTime = slot?.endTimeString {
                         Text(endTime)
                             .font(.system(size: 11, weight: .bold, design: .rounded))
@@ -101,7 +119,7 @@ struct LaSalle_WidgetsLiveActivity: Widget {
 
             } minimal: {
                 TimelineView(.explicit(transitions)) { tl in
-                    let slot  = resolveSlot(at: tl.date, schedule: schedule, state: state)
+                    let slot  = resolveSlot(at: tl.date, schedule: schedule, state: state, scheduleTypeName: scheduleTypeName)
                     let color = Color(hex: slot?.colorHex ?? "#3A6FD8")
                     ZStack {
                         if let slot = slot {
@@ -115,7 +133,7 @@ struct LaSalle_WidgetsLiveActivity: Widget {
                     .padding(2)
                 }
             }
-            .keylineTint(Color(hex: resolveSlot(at: Date(), schedule: schedule, state: state)?.colorHex ?? "#3A6FD8"))
+            .keylineTint(Color(hex: resolveSlot(at: Date(), schedule: schedule, state: state, scheduleTypeName: scheduleTypeName)?.colorHex ?? "#3A6FD8"))
         }
     }
 }
@@ -127,8 +145,14 @@ private struct ActiveSlotInfo {
     let colorHex: String
     let startDate: Date
     let endDate: Date
-    let endTimeString: String   // formatted bell time e.g. "10:50 AM" — shown on trailing
+    let endTimeString: String
+    let startTimeString: String
     let nextDisplayName: String?
+    let nextEndTimeString: String?
+    let isPassing: Bool
+    let passingStartDate: Date?
+    let isPreSchool: Bool
+    let scheduleTypeName: String   // shown as subtitle before school
 }
 
 /// Resolves the active slot from attributes.schedule using state.slotStartMinutes.
@@ -137,12 +161,14 @@ private struct ActiveSlotInfo {
 private func resolveSlot(
     at date: Date,
     schedule: [ScheduleActivityAttributes.ScheduledPeriod],
-    state: ScheduleActivityAttributes.ContentState
+    state: ScheduleActivityAttributes.ContentState,
+    scheduleTypeName: String
 ) -> ActiveSlotInfo? {
     guard !schedule.isEmpty else { return nil }
 
-    // Primary: find slot by slotStartMinutes pushed from server/BGTask
     let cal = Calendar.current
+
+    // Primary: find slot by slotStartMinutes pushed from server/BGTask
     let pushedSlot: ScheduleActivityAttributes.ScheduledPeriod?
     if state.slotStartMinutes > 0 {
         pushedSlot = schedule.first {
@@ -154,23 +180,46 @@ private func resolveSlot(
         pushedSlot = nil
     }
 
-    // Fallback: find by current time
-    let current = pushedSlot
-                ?? schedule.first(where: { date >= $0.startDate && date < $0.endDate })
-                ?? schedule.first(where: { date < $0.startDate })
+    // Time-based resolution
+    let activeSlot  = schedule.first(where: { date >= $0.startDate && date < $0.endDate })
+    let upcomingSlot = schedule.first(where: { date < $0.startDate })
 
+    // Determine state
+    let isPassing   = activeSlot == nil && pushedSlot == nil && upcomingSlot != nil
+                      && (schedule.last(where: { $0.endDate <= date }) != nil)
+    let isPreSchool = activeSlot == nil && pushedSlot == nil && upcomingSlot != nil
+                      && schedule.allSatisfy({ $0.startDate > date })
+
+    let current = pushedSlot ?? activeSlot ?? upcomingSlot
     guard let current else { return nil }
 
     let idx  = schedule.firstIndex(where: { $0.startDate == current.startDate }) ?? 0
     let next = idx + 1 < schedule.count ? schedule[idx + 1] : nil
 
+    // For passing: previous slot's end is the passing start
+    let prevSlot = idx > 0 ? schedule[idx - 1] : nil
+    let passingStartDate: Date? = isPassing ? prevSlot?.endDate : nil
+
+    func fmt(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "h:mm a"
+        f.amSymbol = "AM"; f.pmSymbol = "PM"
+        return f.string(from: d)
+    }
+
     return ActiveSlotInfo(
-        displayName:     current.displayName,
-        colorHex:        current.colorHex,
-        startDate:       current.startDate,
-        endDate:         current.endDate,
-        endTimeString:   current.endTimeString,
-        nextDisplayName: next?.displayName
+        displayName:      current.displayName,
+        colorHex:         current.colorHex,
+        startDate:        current.startDate,
+        endDate:          current.endDate,
+        endTimeString:    current.endTimeString,
+        startTimeString:  fmt(current.startDate),
+        nextDisplayName:  next?.displayName,
+        nextEndTimeString: next.map { fmt($0.endDate) },
+        isPassing:        isPassing,
+        passingStartDate: passingStartDate,
+        isPreSchool:      isPreSchool,
+        scheduleTypeName: scheduleTypeName
     )
 }
 
@@ -186,7 +235,7 @@ private struct LockScreenView: View {
 
     var body: some View {
         TimelineView(.explicit(transitionDates(from: attributes.schedule))) { tl in
-            if let slot = resolveSlot(at: tl.date, schedule: attributes.schedule, state: state) {
+            if let slot = resolveSlot(at: tl.date, schedule: attributes.schedule, state: state, scheduleTypeName: attributes.scheduleTypeName) {
                 LockScreenContent(slot: slot)
             }
         }
@@ -200,19 +249,36 @@ private struct LockScreenContent: View {
         let color = Color(hex: slot.colorHex)
         VStack(spacing: 10) {
             HStack(alignment: .center) {
-                // Left: lightning + current period + next period
+                // Left: lightning/clock + period name + subtitle
                 HStack(spacing: 8) {
-                    Image("lhs-lightning")
-                        .resizable()
-                        .renderingMode(.template)
-                        .foregroundStyle(color)
-                        .frame(width: 18, height: 18)
+                    if slot.isPassing {
+                        Image(systemName: "clock")
+                            .resizable()
+                            .foregroundStyle(color)
+                            .frame(width: 18, height: 18)
+                    } else {
+                        Image("lhs-lightning")
+                            .resizable()
+                            .renderingMode(.template)
+                            .foregroundStyle(color)
+                            .frame(width: 18, height: 18)
+                    }
                     VStack(alignment: .leading, spacing: 1) {
                         Text(slot.displayName)
                             .font(.system(size: 15, weight: .semibold, design: .rounded))
                             .foregroundStyle(.white)
                             .lineLimit(1)
-                        if let next = slot.nextDisplayName {
+                        if slot.isPassing, let until = slot.nextEndTimeString {
+                            Text("Until \(until)")
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.55))
+                                .lineLimit(1)
+                        } else if slot.isPreSchool {
+                            Text(slot.scheduleTypeName)
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.55))
+                                .lineLimit(1)
+                        } else if let next = slot.nextDisplayName {
                             Text("Next: \(next)")
                                 .font(.system(size: 11, weight: .medium, design: .rounded))
                                 .foregroundStyle(.white.opacity(0.55))
@@ -223,16 +289,20 @@ private struct LockScreenContent: View {
                 Spacer()
                 // Right: next bell time
                 VStack(alignment: .trailing, spacing: 1) {
-                    Text(slot.endTimeString)
+                    Text(slot.isPreSchool ? slot.startTimeString : slot.endTimeString)
                         .font(.system(size: 16, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white)
-                    Text("next bell")
+                    Text(slot.isPreSchool ? "school starts" : "next bell")
                         .font(.system(size: 10, weight: .medium, design: .rounded))
                         .foregroundStyle(.white.opacity(0.55))
                 }
             }
 
-            LiveProgressBar(start: slot.startDate, end: slot.endDate, color: color)
+            if slot.isPassing, let passStart = slot.passingStartDate {
+                LiveProgressBar(start: passStart, end: slot.startDate, color: color)
+            } else {
+                LiveProgressBar(start: slot.startDate, end: slot.endDate, color: color)
+            }
         }
         .padding(16)
         .activityBackgroundTint(Color(hex: "#0D1220"))
@@ -301,6 +371,7 @@ extension ScheduleActivityAttributes {
         let now = Date()
         return ScheduleActivityAttributes(
             schoolName: "LaSalle",
+            scheduleTypeName: "Regular Schedule",
             schedule: [
                 .init(periodNumber: 1, displayName: "English", colorHex: "#FF6B6B",
                       startDate: now.addingTimeInterval(-1200),

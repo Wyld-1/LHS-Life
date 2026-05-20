@@ -46,6 +46,8 @@ enum BellScheduleDetector {
             || t.contains("lacrosse") || t.contains("vs.") || t.contains(" vs ") { return .athletic }
         if t.contains("professional dress") || t.contains("formal dress")
             || t.contains("dress uniform") || t.contains("professional attire") { return .professionalDress }
+        // Liturgy check: only trigger on standalone liturgy events, not schedule titles
+        // that happen to contain "liturgy" or "mass" (those are caught by bellSchedule above).
         if t.contains("mass") || t.contains("liturgy") || t.contains("prayer")
             || t.contains("retreat") || t.contains("service") { return .liturgy }
         if t.contains("exam") || t.contains("test") || t.contains("finals")

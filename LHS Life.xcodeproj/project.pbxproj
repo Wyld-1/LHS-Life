@@ -53,6 +53,7 @@
 
 /* Begin PBXFileReference section */
 		231F30642FB04A0F00F58221 /* LHS Life Icon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = "LHS Life Icon.icon"; sourceTree = "<group>"; };
+		2335D8672FBE7E470054E1EC /* APNS Worker.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "APNS Worker.json"; sourceTree = "<group>"; };
 		23E395A12FA5399800574B85 /* LHS Life.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "LHS Life.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		23E395AE2FA5399A00574B85 /* LHS LifeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "LHS LifeTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		23E395B82FA5399A00574B85 /* LHS LifeUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "LHS LifeUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -163,6 +164,7 @@
 				23E396052FA57AE200574B85 /* Frameworks */,
 				23E395A22FA5399800574B85 /* Products */,
 				231F30642FB04A0F00F58221 /* LHS Life Icon.icon */,
+				2335D8672FBE7E470054E1EC /* APNS Worker.json */,
 			);
 			sourceTree = "<group>";
 		};

@@ -287,9 +287,18 @@ struct AppTabContainer: View {
             .tint(Color.lsBlue)
             // Settings button — top right
             .overlay(alignment: .topTrailing) {
-                SettingsButton(showSettings: $showSettings, showBadge: showBadge)
-                    .padding(.trailing, LS.md)
-                    .padding(.top, LS.sm)
+                SettingsButton(
+                    showSettings: Binding(
+                        get: { showSettings },
+                        set: { show in
+                            if show { settings.apBadgeCleared = true }
+                            showSettings = show
+                        }
+                    ),
+                    showBadge: showBadge
+                )
+                .padding(.trailing, LS.md)
+                .padding(.top, LS.sm)
             }
 
             // Header + homework button — bottom, mirroring iPhone's top header

@@ -132,6 +132,7 @@ final class CalendarStore {
                 await NotificationService.scheduleASBNotifications(settings: settings, store: self)
             }
             await NotificationService.scheduleAbnormalScheduleNotifications(settings: settings, store: self)
+            await NotificationService.scheduleLiveActivityReminderNotifications(settings: settings, store: self)
         } catch {
             self.error = AppError(underlying: error)
         }
@@ -235,13 +236,15 @@ struct DaySummary {
 extension ScheduleType {
     var pillColor: Color {
         switch self {
-        case .regular:          return Color.lsTertiary
-        case .block:            return Color.lsBlue
-        case .lateStart:        return Color.lsOrange
-        case .earlyRelease:     return Color.lsGold
-        case .assembly:         return Color.lsSuccess
-        case .finals:           return Color.lsDestructive
-        case .custom, .unknown: return Color.lsSecondary
+        case .regular:                                    return Color.lsTertiary
+        case .regularLiturgy:                             return Color.lsBlue
+        case .oddBlock, .evenBlock:                       return Color.lsBlue
+        case .oddBlockLiturgy, .evenBlockLiturgy:         return Color.lsBlue
+        case .lateStart:                                  return Color.lsOrange
+        case .earlyRelease, .earlyReleaseLiturgy:         return Color.lsGold
+        case .assembly:                                   return Color.lsSuccess
+        case .finals:                                     return Color.lsDestructive
+        case .custom, .unknown:                           return Color.lsSecondary
         }
     }
 }

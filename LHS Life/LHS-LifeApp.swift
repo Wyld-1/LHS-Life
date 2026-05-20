@@ -19,6 +19,9 @@ struct LaSalle_ScheduleApp: App {
         // BGProcessingTask handler MUST be registered before first scene connects
         BellTransitionService.register()
 
+        // Start iCloud settings sync — pulls remote prefs before first render
+        UserSettings.shared.startICloudSync()
+
         Task { @MainActor in HapticEngine.shared.prepare() }
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
         NotificationService.registerCategories()
@@ -49,14 +52,6 @@ struct LaSalle_ScheduleApp: App {
                             settings: settings
                         )
                     }
-                }
-                .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
-                    guard settings.accessApproved else { return }
-                    let dayKey = DateFormatter.isoDay.string(from: Date())
-                    LiveActivityService.shared.updateNow(
-                        schedule: store.bellSchedules[dayKey],
-                        settings: settings
-                    )
                 }
         }
     }

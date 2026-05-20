@@ -1,0 +1,620 @@
+/**
+ * LHS Life — Cloudflare Worker
+ *
+ * Pushes ActivityKit Live Activity updates to registered devices at each
+ * period transition throughout the LaSalle school day.
+ *
+ * Architecture:
+ *   - Cron fires every minute during school hours (Mon–Fri, 6 AM–4 PM PT)
+ *   - Worker fetches today's bell schedule from CalendarWiz iCal feed
+ *   - At each period transition, sends an APNs push to all registered devices
+ *   - At the last bell of the day, sends an APNs end push — dismisses the LA instantly
+ *   - Devices register their push token via POST /register
+ *   - Tokens stored in Workers KV under key: token:{deviceId}
+ *   - Dead tokens (410 Gone, 400 BadDeviceToken) are deleted automatically
+ *
+ * Environment variables (set in Cloudflare dashboard → Worker → Settings → Variables):
+ *   APNS_KEY_ID      — 10-char key ID from Apple Developer (e.g. "ABC1234567")
+ *   APNS_TEAM_ID     — 10-char team ID from Apple Developer (e.g. "XYZ9876543")
+ *   APNS_BUNDLE_ID   — App bundle ID (e.g. "com.lasalle.lhslife")
+ *   APNS_PRIVATE_KEY — Contents of your .p8 file (the whole thing, newlines included)
+ *   TOKENS           — KV namespace binding (set in wrangler.toml or dashboard)
+ *
+ * KV structure:
+ *   token:{deviceId}        → { pushToken: string, updatedAt: string }
+ *   schedule:{YYYY-MM-DD}   → parsed schedule JSON (cached for the day)
+ */
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: - Entry point
+// ─────────────────────────────────────────────────────────────────────────────
+
+export default {
+
+  // HTTP handler — device token registration
+  async fetch(request, env) {
+    const url = new URL(request.url);
+
+    if (request.method === "POST" && url.pathname === "/register") {
+      return handleRegister(request, env);
+    }
+
+    if (request.method === "DELETE" && url.pathname === "/unregister") {
+      return handleUnregister(request, env);
+    }
+
+    if (request.method === "GET" && url.pathname === "/health") {
+      return new Response("OK", { status: 200 });
+    }
+
+    return new Response("LHS Life Push Worker", { status: 200 });
+  },
+
+  // Cron handler — fires every minute, pushes at period transitions
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runPushCycle(env));
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: - Token registration
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function handleRegister(request, env) {
+  let body;
+  try { body = await request.json(); } catch {
+    return new Response("Bad JSON", { status: 400 });
+  }
+
+  const { deviceId, pushToken, environment } = body;
+  if (!deviceId || !pushToken) {
+    return new Response("Missing deviceId or pushToken", { status: 400 });
+  }
+
+  await env.TOKENS.put(`token:${deviceId}`, JSON.stringify({
+    pushToken,
+    environment: environment ?? "production",
+    updatedAt: new Date().toISOString(),
+  }));
+
+  console.log(`[Register] Device ${deviceId} registered`);
+  return new Response("OK", { status: 200 });
+}
+
+async function handleUnregister(request, env) {
+  let body;
+  try { body = await request.json(); } catch {
+    return new Response("Bad JSON", { status: 400 });
+  }
+
+  const { deviceId } = body;
+  if (!deviceId) return new Response("Missing deviceId", { status: 400 });
+
+  await env.TOKENS.delete(`token:${deviceId}`);
+  console.log(`[Unregister] Device ${deviceId} removed`);
+  return new Response("OK", { status: 200 });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: - Push cycle
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function runPushCycle(env) {
+  const nowPT = nowInPT();
+  const todayKey = formatDate(nowPT);
+  const currentMinutes = nowPT.hours * 60 + nowPT.minutes;
+
+  console.log(`[Cron] ${todayKey} ${String(nowPT.hours).padStart(2,'0')}:${String(nowPT.minutes).padStart(2,'0')} PT`);
+
+  // Only run Mon–Fri
+  const dow = nowPT.dow; // 0=Sun, 6=Sat
+  if (dow === 0 || dow === 6) {
+    console.log("[Cron] Weekend — skipping");
+    return;
+  }
+
+  // Get today's schedule (cached in KV)
+  const schedule = await getSchedule(todayKey, env);
+  if (!schedule || schedule.periods.length === 0) {
+    console.log("[Cron] No schedule found for today");
+    return;
+  }
+
+  // Find the period that just started (within the last 2 minutes)
+  const periodIndex = schedule.periods.findIndex(p => {
+    const diff = currentMinutes - p.startMinutes;
+    return diff >= 0 && diff < 2;
+  });
+
+  if (periodIndex === -1) {
+    console.log("[Cron] No transition this minute");
+    // Still check for a pending end push (handles the case where this cron
+    // fires exactly at the end minute with no concurrent period transition).
+    const pendingEnd = await env.TOKENS.get(`endpush:${todayKey}`);
+    if (pendingEnd && parseInt(pendingEnd) === currentMinutes) {
+      const tokens = await getAllTokens(env);
+      if (tokens.length > 0) {
+        const jwt = await getAPNsJWT(env);
+        console.log(`[Cron] Sending end-of-day dismissal push`);
+        await pushToAll(tokens, { slotStartMinutes: 0, isEnded: true }, true, jwt, env);
+      }
+      await env.TOKENS.delete(`endpush:${todayKey}`);
+    }
+    return;
+  }
+
+  const justStarted = schedule.periods[periodIndex];
+  const isLastPeriod = periodIndex === schedule.periods.length - 1;
+
+  console.log(`[Cron] Transition → ${justStarted.name} at ${justStarted.startStr}${isLastPeriod ? " (LAST — will send end push at bell)" : ""}`);
+
+  // Load all push tokens
+  const tokens = await getAllTokens(env);
+  if (tokens.length === 0) {
+    console.log("[Cron] No registered devices");
+    return;
+  }
+
+  console.log(`[Cron] Pushing to ${tokens.length} device(s)`);
+
+  // Get APNs JWT (cached for up to 45 minutes — Apple requires refresh < 60min)
+  const jwt = await getAPNsJWT(env);
+
+  if (isLastPeriod) {
+    // Last period of the day: send an update now, then flag for an end push
+    // at this period's end time so the LA is dismissed the moment school ends.
+    const contentState = {
+      slotStartMinutes: justStarted.startMinutes,
+      isEnded: false,
+    };
+
+    await pushToAll(tokens, contentState, false, jwt, env);
+
+    // nowPT.seconds is the sub-minute offset — used only for the log message.
+    const secondsUntilEnd = (justStarted.endMinutes - currentMinutes) * 60 - nowPT.seconds;
+    if (secondsUntilEnd > 0) {
+      console.log(`[Cron] Scheduling end push in ${secondsUntilEnd}s (at ${justStarted.endStr})`);
+      // Cloudflare doesn't support delayed execution natively, so we rely on
+      // the cron firing again at endMinutes and detecting the KV flag below.
+      await env.TOKENS.put(`endpush:${todayKey}`, String(justStarted.endMinutes), {
+        expirationTtl: 7200 // 2 hours — auto-cleanup
+      });
+    }
+  } else {
+    // Normal mid-day transition
+    const contentState = {
+      slotStartMinutes: justStarted.startMinutes,
+      isEnded: false,
+    };
+    await pushToAll(tokens, contentState, false, jwt, env);
+  }
+
+  // Check if this minute also matches a scheduled end push
+  const pendingEnd = await env.TOKENS.get(`endpush:${todayKey}`);
+  if (pendingEnd && parseInt(pendingEnd) === currentMinutes) {
+    console.log(`[Cron] Sending end-of-day dismissal push`);
+    await pushToAll(tokens, { slotStartMinutes: 0, isEnded: true }, true, jwt, env);
+    await env.TOKENS.delete(`endpush:${todayKey}`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: - Push helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function pushToAll(tokens, contentState, isEnd, jwt, env) {
+  const results = await Promise.allSettled(
+    tokens.map(({ deviceId, pushToken, environment }) => {
+      const pushFn = isEnd
+        ? sendAPNsEnd(pushToken, contentState, jwt, env, environment)
+        : sendAPNsUpdate(pushToken, contentState, jwt, env, environment);
+      return pushFn
+        .then(({ dead }) => ({ deviceId, ok: true, dead }))
+        .catch(err  => ({ deviceId, ok: false, err: err.message, dead: false }));
+    })
+  );
+
+  for (const r of results) {
+    if (r.status !== "fulfilled") continue;
+    const v = r.value;
+    if (!v.ok) {
+      console.log(`[APNs] ✗ ${v.deviceId}: ${v.err}`);
+    } else if (v.dead) {
+      console.log(`[APNs] 💀 ${v.deviceId} — dead token, removing`);
+      await env.TOKENS.delete(`token:${v.deviceId}`);
+    } else {
+      console.log(`[APNs] ✓ ${v.deviceId}`);
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: - Schedule fetch + parse
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function getSchedule(dayKey, env) {
+  // Check KV cache first
+  const cached = await env.TOKENS.get(`schedule:${dayKey}`, "json");
+  if (cached) return cached;
+
+  // Fetch fresh from CalendarWiz
+  const ICAL_URL = "https://www.calendarwiz.com/CalendarWiz_iCal.php?crd=lasalleyakima&ical_days_back=1&ical_days_ahead=7";
+  let icalText;
+  try {
+    const resp = await fetch(ICAL_URL);
+    icalText = await resp.text();
+  } catch (e) {
+    console.error("[Schedule] Fetch failed:", e.message);
+    return null;
+  }
+
+  // Parse all events
+  const events = parseICal(icalText);
+
+  // Find today's bell schedule event
+  const bellEvent = events.find(e =>
+    e.dtstart.startsWith(dayKey.replace(/-/g, "")) &&
+    e.description &&
+    e.description.toLowerCase().includes("period")
+  );
+
+  if (!bellEvent) {
+    console.log("[Schedule] No bell schedule event for", dayKey);
+    return null;
+  }
+
+  // Parse the bell schedule
+  const schedule = parseBellDescription(bellEvent.description, dayKey);
+  if (!schedule) return null;
+
+  // Cache for the day
+  await env.TOKENS.put(`schedule:${dayKey}`, JSON.stringify(schedule), {
+    expirationTtl: 86400 // 24 hours
+  });
+
+  return schedule;
+}
+
+// Parse iCal text into a list of event objects
+function parseICal(text) {
+  const events = [];
+  const lines = unfoldICal(text).split("\n");
+
+  let current = null;
+  for (const line of lines) {
+    if (line.startsWith("BEGIN:VEVENT")) {
+      current = {};
+    } else if (line.startsWith("END:VEVENT")) {
+      if (current) events.push(current);
+      current = null;
+    } else if (current) {
+      const colonIdx = line.indexOf(":");
+      if (colonIdx === -1) continue;
+      const key   = line.slice(0, colonIdx).split(";")[0].toUpperCase();
+      const value = line.slice(colonIdx + 1).replace(/\\n/g, "\n").replace(/\\,/g, ",");
+      current[key.toLowerCase()] = value;
+    }
+  }
+  return events;
+}
+
+// Unfold multi-line iCal values (lines continuing with a space/tab)
+function unfoldICal(text) {
+  return text.replace(/\r\n[ \t]/g, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+// Parse the DESCRIPTION field of a bell schedule event into periods.
+// Mirrors BellScheduleParser.swift exactly.
+function parseBellDescription(description, dayKey) {
+  const lines = description
+    .split("\n")
+    .map(l => l.trim())
+    .filter(Boolean);
+
+  const headerIdx = lines.findIndex(l => l.toLowerCase() === "period");
+  if (headerIdx === -1) return null;
+
+  const columnHeaders = ["begin", "end", "total", "min", "minutes"];
+  let dataStart = headerIdx + 1;
+  while (dataStart < lines.length && columnHeaders.includes(lines[dataStart].toLowerCase())) {
+    dataStart++;
+  }
+
+  const dataLines = lines.slice(dataStart);
+  const periods = [];
+
+  for (let i = 0; i + 3 < dataLines.length; i += 4) {
+    const name     = dataLines[i];
+    const startStr = dataLines[i + 1];
+    const endStr   = dataLines[i + 2];
+    // dataLines[i + 3] is duration — consumed but ignored
+
+    if (columnHeaders.includes(name.toLowerCase())) continue;
+
+    const startMins = parseTimeToMinutes(startStr);
+    const endMins   = parseTimeToMinutes(endStr);
+    if (startMins === null || endMins === null) continue;
+
+    periods.push({
+      name:         normalizeName(name),
+      startMinutes: startMins,
+      endMinutes:   endMins,
+      startStr:     minutesToTimeStr(startMins),
+      endStr:       minutesToTimeStr(endMins),
+    });
+  }
+
+  if (periods.length === 0) return null;
+  return { dayKey, periods };
+}
+
+function parseTimeToMinutes(raw) {
+  let s = raw.trim();
+  let isPM = null;
+  if (s.toUpperCase().endsWith("AM")) { isPM = false; s = s.slice(0, -2); }
+  if (s.toUpperCase().endsWith("PM")) { isPM = true;  s = s.slice(0, -2); }
+
+  const parts = s.split(":").map(Number);
+  if (parts.length !== 2 || isNaN(parts[0]) || isNaN(parts[1])) return null;
+
+  let [hour, minute] = parts;
+  if (isPM === true  && hour < 12) hour += 12;
+  if (isPM === false && hour === 12) hour = 0;
+  if (isPM === null  && hour < 6)  hour += 12; // school runs 6AM–4PM
+
+  return hour * 60 + minute;
+}
+
+function minutesToTimeStr(mins) {
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  const ampm = h < 12 ? "AM" : "PM";
+  const h12  = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${h12}:${m.toString().padStart(2, "0")} ${ampm}`;
+}
+
+function normalizeName(raw) {
+  const lower = raw.toLowerCase();
+  if (lower === "break")    return "Break";
+  if (lower === "lunch")    return "Lunch";
+  if (lower === "advisory") return "Advisory";
+  if (lower === "passing")  return "Passing";
+  if (/^\d+$/.test(raw))   return `Period ${raw}`;
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: - APNs push
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Sends a Live Activity update push (event: "update").
+ * Returns { dead: true } if the token is no longer valid.
+ * Throws on unexpected errors.
+ */
+async function sendAPNsUpdate(pushToken, contentState, jwt, env, environment = "production") {
+  const payload = {
+    aps: {
+      timestamp: Math.floor(Date.now() / 1000),
+      event: "update",
+      "content-state": contentState,
+      alert: {},
+    },
+  };
+  return sendAPNsPayload(pushToken, payload, jwt, env, environment);
+}
+
+/**
+ * Sends a Live Activity end push (event: "end").
+ * iOS immediately dismisses the Live Activity on all surfaces.
+ * Returns { dead: true } if the token is no longer valid.
+ * Throws on unexpected errors.
+ */
+async function sendAPNsEnd(pushToken, contentState, jwt, env, environment = "production") {
+  const payload = {
+    aps: {
+      timestamp: Math.floor(Date.now() / 1000),
+      event: "end",
+      "content-state": contentState,
+      "dismissal-date": Math.floor(Date.now() / 1000), // dismiss immediately
+      alert: {},
+    },
+  };
+  return sendAPNsPayload(pushToken, payload, jwt, env, environment);
+}
+
+/**
+ * Shared APNs HTTP/2 request.
+ * Returns { dead: bool }.
+ * Throws on non-dead errors.
+ */
+async function sendAPNsPayload(pushToken, payload, jwt, env, environment = "production") {
+  const bundleId = env.APNS_BUNDLE_ID;
+  // Route each token to the correct APNs endpoint based on the environment
+  // the app registered with. Debug/Xcode builds use sandbox tokens which are
+  // rejected by the production endpoint (400 BadDeviceToken).
+  const host = (environment === "sandbox")
+    ? "api.sandbox.push.apple.com"
+    : "api.push.apple.com";
+  const url = `https://${host}/3/device/${pushToken}`;
+
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      "authorization":  `bearer ${jwt}`,
+      "apns-topic":     `${bundleId}.push-type.liveactivity`,
+      "apns-push-type": "liveactivity",
+      "apns-priority":  "10",
+      "content-type":   "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  // 410 Gone — activity ended on device; token permanently dead
+  if (resp.status === 410) {
+    console.log(`[APNs] 410 Gone — activity ended on device`);
+    return { dead: true };
+  }
+
+  // 400 — check if it's a bad token or a payload issue
+  if (resp.status === 400) {
+    const body = await resp.text();
+    if (body.includes("BadDeviceToken") || body.includes("DeviceTokenNotForTopic")) {
+      console.log(`[APNs] 400 bad token — ${body}`);
+      return { dead: true };
+    }
+    throw new Error(`APNs 400: ${body}`);
+  }
+
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`APNs ${resp.status}: ${body}`);
+  }
+
+  return { dead: false };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: - APNs JWT
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Cache JWT in memory for up to 45 minutes (Apple requires refresh < 60 min)
+let jwtCache = { token: null, generatedAt: 0 };
+
+async function getAPNsJWT(env) {
+  const now = Math.floor(Date.now() / 1000);
+  if (jwtCache.token && now - jwtCache.generatedAt < 45 * 60) {
+    return jwtCache.token;
+  }
+
+  const token = await generateJWT(env.APNS_KEY_ID, env.APNS_TEAM_ID, env.APNS_PRIVATE_KEY);
+  jwtCache = { token, generatedAt: now };
+  return token;
+}
+
+async function generateJWT(keyId, teamId, privateKeyPem) {
+  const pemBody = privateKeyPem
+    .replace(/-----BEGIN PRIVATE KEY-----/, "")
+    .replace(/-----END PRIVATE KEY-----/, "")
+    .replace(/-----BEGIN EC PRIVATE KEY-----/, "")
+    .replace(/-----END EC PRIVATE KEY-----/, "")
+    .replace(/\s+/g, "");
+
+  const keyData = Uint8Array.from(atob(pemBody), c => c.charCodeAt(0));
+
+  const cryptoKey = await crypto.subtle.importKey(
+    "pkcs8",
+    keyData.buffer,
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["sign"]
+  );
+
+  const header  = { alg: "ES256", kid: keyId };
+  const payload = { iss: teamId, iat: Math.floor(Date.now() / 1000) };
+
+  const encode = obj => btoa(JSON.stringify(obj))
+    .replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+
+  const signingInput = `${encode(header)}.${encode(payload)}`;
+  const signingBytes = new TextEncoder().encode(signingInput);
+
+  const sigBuffer = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    cryptoKey,
+    signingBytes
+  );
+
+  const sig = btoa(String.fromCharCode(...new Uint8Array(sigBuffer)))
+    .replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+
+  return `${signingInput}.${sig}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: - KV helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function getAllTokens(env) {
+  const list = await env.TOKENS.list({ prefix: "token:" });
+  const tokens = [];
+
+  for (const key of list.keys) {
+    const value = await env.TOKENS.get(key.name, "json");
+    if (value?.pushToken) {
+      tokens.push({
+        deviceId:    key.name.replace("token:", ""),
+        pushToken:   value.pushToken,
+        environment: value.environment ?? "production",
+      });
+    }
+  }
+
+  return tokens;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: - Time utilities (Pacific Time)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Returns the current time broken into components in Pacific Time.
+ *
+ * BUG FIXED: The original implementation used:
+ *   new Date(year, month - 1, day, hour, minute, second)
+ * which calls the Date constructor with LOCAL time components — but Cloudflare
+ * Workers run in UTC, so those components were treated as UTC, producing a Date
+ * that was (UTC offset) hours wrong. On a PDT day (-7h), 8:00 AM PT was
+ * computed as 8:00 AM UTC = 1:00 AM PT. All period-transition comparisons
+ * were firing against the wrong minutes, causing missed or wrong-time pushes.
+ *
+ * Fix: derive everything from the raw UTC epoch using Intl.DateTimeFormat,
+ * then work purely with the extracted numeric values. We never construct a
+ * Date from local parts — only the epoch-safe new Date() is used.
+ *
+ * Returns: { year, month, day, hours, minutes, seconds, dow, iso }
+ *   dow — 0=Sunday … 6=Saturday (matches JS getDay() convention)
+ *   iso — "YYYY-MM-DD" in Pacific time (for KV keys / schedule lookup)
+ */
+function nowInPT() {
+  const now = new Date(); // UTC epoch — safe everywhere
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    year:    "numeric",
+    month:   "2-digit",
+    day:     "2-digit",
+    hour:    "2-digit",
+    minute:  "2-digit",
+    second:  "2-digit",
+    hour12:  false,
+    weekday: "short",
+  }).formatToParts(now);
+
+  const get = (type) => parts.find(p => p.type === type)?.value ?? "0";
+
+  const year    = parseInt(get("year"));
+  const month   = parseInt(get("month"));
+  const day     = parseInt(get("day"));
+  // hour12:false can return "24" at midnight — normalize to 0
+  const hours   = parseInt(get("hour")) % 24;
+  const minutes = parseInt(get("minute"));
+  const seconds = parseInt(get("second"));
+
+  // Derive day-of-week (0=Sun…6=Sat) from the 3-letter weekday abbreviation.
+  const weekdayStr = get("weekday").toLowerCase().slice(0, 3);
+  const dowMap = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+  const dow = dowMap[weekdayStr] ?? 0;
+
+  const iso = `${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+
+  return { year, month, day, hours, minutes, seconds, dow, iso };
+}
+
+/**
+ * Returns "YYYY-MM-DD" from a PT time struct returned by nowInPT().
+ * Kept as a separate function to mirror the original call sites.
+ */
+function formatDate(ptTime) {
+  return ptTime.iso;
+}

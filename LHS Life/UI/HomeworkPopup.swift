@@ -58,7 +58,9 @@ struct HomeworkPopup: View {
             if let num = bestPeriodID, settings.config(for: num)?.isEnabled == true {
                 selectedPeriodID = num
             } else {
-                selectedPeriodID = enabledPeriods.first?.id
+                // Default to None if no classes are configured — don't force
+                // the first arbitrary period on users who haven't set up classes.
+                selectedPeriodID = enabledPeriods.isEmpty ? nil : enabledPeriods.first?.id
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { titleFocused = true }
             Task { if !reminders.isAuthorized { _ = await reminders.requestAccess() } }
@@ -322,7 +324,8 @@ struct HomeworkPopup: View {
         guard !trimmed.isEmpty else { return }
         isSaving = true
         errorMessage = nil
-        let className = selectedConfig?.displayName ?? "General"
+        // Pass nil when no class is selected — no notes written on the reminder.
+        let className = selectedConfig?.displayName
         do {
             try await reminders.addAssignment(
                 title: trimmed,

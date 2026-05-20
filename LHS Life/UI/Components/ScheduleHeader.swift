@@ -276,7 +276,10 @@ struct ScheduleHeaderPill: View {
             guard let next = state.nextSlot else { return nil }
             return "Until \(ScheduleEngine.timeString(next.endDate))"
         case .beforeSchool:
-            return scheduleLabel(suppressRegular: false)
+            // Show schedule type if available; otherwise show nothing (no next-event preview).
+            // We never want tomorrow's event appearing before today's school has started.
+            if let label = scheduleLabel(suppressRegular: false) { return label }
+            return nil
         case .holiday:
             return store.events(on: DateFormatter.isoDay.string(from: now))
                 .first { $0.category == .holiday }.map { $0.title }

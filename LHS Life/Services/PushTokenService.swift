@@ -36,10 +36,21 @@ enum PushTokenService {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONEncoder().encode([
-            "deviceId":  deviceId,
-            "pushToken": tokenString,
-        ])
+        struct RegisterBody: Encodable {
+            let deviceId: String
+            let pushToken: String
+            let environment: String
+        }
+        #if DEBUG
+        let apnsEnvironment = "sandbox"
+        #else
+        let apnsEnvironment = "production"
+        #endif
+        request.httpBody = try? JSONEncoder().encode(RegisterBody(
+            deviceId: deviceId,
+            pushToken: tokenString,
+            environment: apnsEnvironment
+        ))
 
         do {
             let (_, response) = try await URLSession.shared.data(for: request)

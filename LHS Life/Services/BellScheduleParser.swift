@@ -343,13 +343,24 @@ final class BellScheduleParser {
 
     private func inferScheduleType(from lines: [String]) -> ScheduleType {
         let combined = lines.joined(separator: " ").lowercased()
+        let hasLiturgy     = combined.contains("liturgy") || combined.contains("mass")
+        let hasOdd         = combined.contains("odd")
+        let hasEven        = combined.contains("even")
+        let hasBlock       = combined.contains("block")
+        let hasEarlyRel    = combined.contains("early release") || combined.contains("early dismissal")
+
         if combined.contains("final exam") || combined.contains("finals") { return .finals }
         if combined.contains("late start")                                 { return .lateStart }
-        if combined.contains("early release") ||
-           combined.contains("early dismissal")                            { return .earlyRelease }
-        if combined.contains("block")                                      { return .block }
-        if combined.contains("assembly")                                   { return .assembly }
-        if combined.contains("regular")                                    { return .regular }
+        if hasEarlyRel && hasLiturgy  { return .earlyReleaseLiturgy }
+        if hasEarlyRel                { return .earlyRelease }
+        if hasOdd  && hasBlock && hasLiturgy { return .oddBlockLiturgy }
+        if hasEven && hasBlock && hasLiturgy { return .evenBlockLiturgy }
+        if hasOdd  && hasBlock               { return .oddBlock }
+        if hasEven && hasBlock               { return .evenBlock }
+        if combined.contains("assembly")     { return .assembly }
+        if combined.contains("regular") && hasLiturgy { return .regularLiturgy }
+        if combined.contains("regular")      { return .regular }
+        if hasLiturgy                        { return .regularLiturgy }
         return .unknown
     }
 

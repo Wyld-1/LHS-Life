@@ -2,16 +2,16 @@
 //  LiveActivityService.swift
 //  LHS Life
 //
-//  Starts, updates, and ends the schedule Live Activity.
+//  Starts and ends the schedule Live Activity.
+//  All content updates are server-pushed via the Cloudflare Worker.
 //
 //  currentActivity is in-memory only — lost on app suspend/resume.
 //  reconnect() restores it from ActivityKit's live activities list on launch.
-//  updateNow() pushes the correct ContentState immediately — called on foreground
-//  so tapping the LA to open the app always fixes stale content.
 //
 
 import Foundation
 import ActivityKit
+import UserNotifications
 
 @MainActor
 @Observable
@@ -38,21 +38,20 @@ final class LiveActivityService {
     func startIfNeeded(schedule: BellSchedule?, settings: UserSettings) {
         // Reconnect first — avoids starting a duplicate if one already exists
         reconnect()
-        guard currentActivity == nil else {
-            // Already have an activity — just update it
-            updateNow(schedule: schedule, settings: settings)
-            return
-        }
+        guard currentActivity == nil else { return }
 
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
 
-        let dayKey       = DateFormatter.isoDay.string(from: Date())
         let scheduleType = schedule?.scheduleType
         guard settings.liveActivityEffectivelyEnabled(scheduleType: scheduleType) else { return }
         guard let schedule = schedule else { return }
 
         let periods = buildSchedule(from: schedule, settings: settings)
         guard !periods.isEmpty else { return }
+
+        // Don't start more than 60 minutes before the first enabled period
+        if let firstBell = periods.first?.startDate,
+           firstBell.timeIntervalSinceNow > 3600 { return }
 
         CachedSchedule.save(periods)
 
@@ -67,7 +66,11 @@ final class LiveActivityService {
         )
         let lastBell = periods.last?.endDate ?? Date().addingTimeInterval(3600)
 
-        let attributes = ScheduleActivityAttributes(schoolName: "LaSalle", schedule: periods)
+        let attributes = ScheduleActivityAttributes(
+            schoolName: "LaSalle",
+            scheduleTypeName: schedule.scheduleType.rawValue + " Schedule",
+            schedule: periods
+        )
 
         do {
             let activity = try Activity.request(
@@ -78,32 +81,25 @@ final class LiveActivityService {
             currentActivity = activity
             print("[LiveActivity] Started — id: \(activity.id), \(periods.count) periods")
 
-            // Observe push token updates and register with Cloudflare Worker
+            // Cancel the "school starts soon" reminder — LA is already running
+            let todayKey = DateFormatter.isoDay.string(from: Date())
+            UNUserNotificationCenter.current().removePendingNotificationRequests(
+                withIdentifiers: ["lareminder-\(todayKey)"]
+            )
+
+            // Register the initial push token immediately (it's already available
+            // on activity.pushToken at this point), then watch for rotations.
+            // Relying solely on pushTokenUpdates risks missing the first token
+            // if the stream doesn't emit before the app backgrounds.
+            if let initialToken = activity.pushToken {
+                Task { await PushTokenService.register(token: initialToken) }
+            }
             PushTokenService.observeTokenUpdates(for: activity)
 
             let upcoming = periods.filter { $0.startDate > Date() }
             BellTransitionService.scheduleTransitions(for: upcoming)
         } catch {
             print("[LiveActivity] Failed to start: \(error)")
-        }
-    }
-
-    // MARK: - Foreground update
-    // Call whenever the app comes to the foreground.
-    // Pushes the correct ContentState immediately so stale content is fixed
-    // the moment the user taps the Live Activity to open the app.
-
-    func updateNow(schedule: BellSchedule?, settings: UserSettings) {
-        reconnect()
-        guard let activity = currentActivity else { return }
-        guard let schedule = schedule else { return }
-
-        let periods = buildSchedule(from: schedule, settings: settings)
-        guard let state = buildContentState(from: periods) else { return }
-
-        Task {
-            await activity.update(.init(state: state, staleDate: periods.last?.endDate))
-            print("[LiveActivity] Foreground update — slot: \(state.slotStartMinutes) min")
         }
     }
 
@@ -172,6 +168,10 @@ final class LiveActivityService {
 
             let num    = extractPeriodNumber(from: period.name)
             let config = num.flatMap { settings.config(for: $0) }
+
+            // Skip periods the user has disabled
+            if let config, !config.isEnabled { return nil }
+
             let colorHex = config.map { ColorPalette.color(at: $0.colorIndex).hex } ?? "#94A3B8"
 
             return ScheduleActivityAttributes.ScheduledPeriod(

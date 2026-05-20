@@ -8,6 +8,9 @@
 
 import Foundation
 import Observation
+#if !WIDGET_EXTENSION
+import Combine
+#endif
 
 // MARK: - Live Activity Mode
 
@@ -186,7 +189,11 @@ final class UserSettings {
         case .off:          return liveActivityEnabledToday
         case .everyDay:     return true
         case .abnormalOnly:
-            let abnormal: Set<ScheduleType> = [.lateStart, .earlyRelease, .assembly, .custom]
+            let abnormal: Set<ScheduleType> = [
+                .lateStart, .earlyRelease, .earlyReleaseLiturgy,
+                .oddBlock, .evenBlock, .oddBlockLiturgy, .evenBlockLiturgy,
+                .assembly, .custom
+            ]
             return abnormal.contains(scheduleType ?? .unknown)
         }
     }
@@ -221,6 +228,9 @@ final class UserSettings {
         if let data = try? JSONEncoder().encode(asbWorkDays) {
             store.set(data, forKey: Keys.asbWorkDays)
         }
+        #if !WIDGET_EXTENSION
+        pushToICloud()
+        #endif
     }
 
     // MARK: - Helpers
@@ -260,4 +270,136 @@ final class UserSettings {
     }
 
     private static let currentPaletteVersion = 2
-}
+
+    // MARK: - iCloud KV Sync
+    // Syncs user identity and preferences across iPhone and iPad on the same Apple ID.
+    // One person should only have to set up their profile once.
+    //
+    // Synced:     periodConfigs, graduationYear, professionalDressNotificationsEnabled,
+    //             isASBMember, asbWorkDays, apSilencedKey, apBadgeClearedKey,
+    //             hasCompletedOnboarding, accessApproved, schoolEmail
+    // Not synced: liveActivityMode, liveActivityEnabledToday (per-device preference)
+
+    #if !WIDGET_EXTENSION
+    @ObservationIgnored private var iCloudObserver: AnyCancellable?
+
+    func startICloudSync() {
+        // Pull remote changes on launch
+        mergeFromICloud()
+        NSUbiquitousKeyValueStore.default.synchronize()
+
+        // Observe changes pushed from other devices
+        iCloudObserver = NotificationCenter.default
+            .publisher(for: NSUbiquitousKeyValueStore.didChangeExternallyNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.mergeFromICloud()
+            }
+    }
+
+    /// Writes syncable prefs to iCloud KV. Called from save().
+    private func pushToICloud() {
+        let icloud = NSUbiquitousKeyValueStore.default
+        icloud.set(Int64(graduationYear), forKey: ICloudKeys.gradYear)
+        icloud.set(professionalDressNotificationsEnabled, forKey: ICloudKeys.dressNotifs)
+        icloud.set(isASBMember, forKey: ICloudKeys.asbMember)
+        icloud.set(hasCompletedOnboarding, forKey: ICloudKeys.onboarding)
+        icloud.set(accessApproved, forKey: ICloudKeys.accessApproved)
+        icloud.set(schoolEmail, forKey: ICloudKeys.schoolEmail)
+        icloud.set(apSilencedKey, forKey: ICloudKeys.apSilencedKey)
+        icloud.set(apBadgeClearedKey, forKey: ICloudKeys.apBadgeClearedKey)
+        if let data = try? JSONEncoder().encode(periodConfigs) {
+            icloud.set(data, forKey: ICloudKeys.periodConfigs)
+        }
+        if let data = try? JSONEncoder().encode(asbWorkDays) {
+            icloud.set(data, forKey: ICloudKeys.asbWorkDays)
+        }
+        icloud.synchronize()
+    }
+
+    /// Reads remote iCloud values and merges them in. Last-write-wins (iCloud's default).
+    /// Writes merged state back to App Group UserDefaults via save() so the widget
+    /// picks up the changes immediately.
+    private func mergeFromICloud() {
+        let icloud = NSUbiquitousKeyValueStore.default
+        var changed = false
+
+        let remoteYear = Int(icloud.longLong(forKey: ICloudKeys.gradYear))
+        if remoteYear != 0, remoteYear != graduationYear {
+            graduationYear = remoteYear
+            changed = true
+        }
+
+        let remoteDress = icloud.object(forKey: ICloudKeys.dressNotifs) as? Bool
+        if let remoteDress, remoteDress != professionalDressNotificationsEnabled {
+            professionalDressNotificationsEnabled = remoteDress
+            changed = true
+        }
+
+        let remoteASB = icloud.object(forKey: ICloudKeys.asbMember) as? Bool
+        if let remoteASB, remoteASB != isASBMember {
+            isASBMember = remoteASB
+            changed = true
+        }
+
+        let remoteOnboarding = icloud.object(forKey: ICloudKeys.onboarding) as? Bool
+        if let remoteOnboarding, remoteOnboarding != hasCompletedOnboarding {
+            hasCompletedOnboarding = remoteOnboarding
+            changed = true
+        }
+
+        let remoteAccess = icloud.object(forKey: ICloudKeys.accessApproved) as? Bool
+        if let remoteAccess, remoteAccess != accessApproved {
+            accessApproved = remoteAccess
+            changed = true
+        }
+
+        let remoteEmail = icloud.string(forKey: ICloudKeys.schoolEmail) ?? ""
+        if !remoteEmail.isEmpty, remoteEmail != schoolEmail {
+            schoolEmail = remoteEmail
+            changed = true
+        }
+
+        let remoteAPSilenced = icloud.string(forKey: ICloudKeys.apSilencedKey) ?? ""
+        if !remoteAPSilenced.isEmpty, remoteAPSilenced != apSilencedKey {
+            apSilencedKey = remoteAPSilenced
+            changed = true
+        }
+
+        let remoteAPBadge = icloud.string(forKey: ICloudKeys.apBadgeClearedKey) ?? ""
+        if !remoteAPBadge.isEmpty, remoteAPBadge != apBadgeClearedKey {
+            apBadgeClearedKey = remoteAPBadge
+            changed = true
+        }
+
+        if let data = icloud.data(forKey: ICloudKeys.periodConfigs),
+           let remote = try? JSONDecoder().decode([PeriodConfig].self, from: data),
+           remote != periodConfigs {
+            periodConfigs = remote
+            changed = true
+        }
+
+        if let data = icloud.data(forKey: ICloudKeys.asbWorkDays),
+           let remote = try? JSONDecoder().decode([ASBDayMode].self, from: data),
+           remote.count == 5, remote != asbWorkDays {
+            asbWorkDays = remote
+            changed = true
+        }
+
+        // Persist merged state to App Group so widget reflects remote changes
+        if changed { save() }
+    }
+    #endif
+
+    private enum ICloudKeys {
+        static let gradYear          = "icloud_graduation_year"
+        static let dressNotifs       = "icloud_dress_notifications_enabled"
+        static let asbMember         = "icloud_asb_member"
+        static let onboarding        = "icloud_onboarding_complete"
+        static let accessApproved    = "icloud_access_approved"
+        static let schoolEmail       = "icloud_school_email"
+        static let apSilencedKey     = "icloud_ap_silenced_key"
+        static let apBadgeClearedKey = "icloud_ap_badge_cleared_key"
+        static let periodConfigs     = "icloud_period_configs"
+        static let asbWorkDays       = "icloud_asb_work_days"
+    }

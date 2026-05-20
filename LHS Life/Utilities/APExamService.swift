@@ -23,18 +23,13 @@ enum APExamService {
         settings: UserSettings
     ) -> APExamState {
         guard let exam = apExamEvent(on: dayKey, events: events) else {
-            print("[APExam] No AP exam event found for \(dayKey)")
             return .none
         }
 
-        print("[APExam] Found exam: '\(exam.title)' category=\(exam.category) start=\(exam.startDate)")
-
         let (matched, config) = matchingConfig(examTitle: exam.title, settings: settings)
         if matched {
-            print("[APExam] Matched as mine — config: \(config?.displayName ?? "nil")")
             return .mine(examName: exam.title, startTime: exam.startDate, endTime: exam.endDate, config: config)
         } else {
-            print("[APExam] No match — showing as someone else's exam")
             return .someoneElses(examName: exam.title, startTime: exam.startDate)
         }
     }
@@ -48,7 +43,6 @@ enum APExamService {
             event.dayKey == dayKey &&
             event.title.lowercased().hasPrefix("ap ")
         }
-        print("[APExam] Candidates for \(dayKey): \(candidates.map { "\($0.title) [\($0.category)]" })")
         return candidates.first
     }
 
@@ -60,7 +54,6 @@ enum APExamService {
         let enabledConfigs = settings.periodConfigs
             .filter { $0.isEnabled && !$0.customName.trimmingCharacters(in: .whitespaces).isEmpty }
 
-        print("[APExam] Checking against \(enabledConfigs.count) enabled classes:")
 
         for config in enabledConfigs {
             let tokens = config.customName
@@ -68,7 +61,6 @@ enum APExamService {
                 .components(separatedBy: CharacterSet.alphanumerics.inverted)
                 .filter { $0.count >= 3 }  // lowered from 4 — catches "lit", "bio", "env"
 
-            print("[APExam]   '\(config.customName)' → tokens: \(tokens)")
 
             for token in tokens {
                 // Whole-word match only — prevents "calculus" matching "pre-calculus".
@@ -78,7 +70,6 @@ enum APExamService {
                     .map { $0.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)) != nil }
                     ?? false
                 if matched {
-                    print("[APExam]   ✓ Token '\(token)' whole-word matched in '\(title)'")
                     return (true, config)
                 }
             }

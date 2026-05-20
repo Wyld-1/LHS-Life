@@ -46,7 +46,7 @@ final class RemindersService: ObservableObject {
     /// Priority follows EKReminder convention: 0 = none, 1 = high, 5 = medium, 9 = low.
     func addAssignment(
         title: String,
-        className: String,
+        className: String?,
         dueDate: Date?,
         priority: Int = 0
     ) async throws {
@@ -56,7 +56,7 @@ final class RemindersService: ObservableObject {
         let reminder = EKReminder(eventStore: ekStore)
         reminder.title    = title
         reminder.calendar = list
-        reminder.notes    = className          // class name always in notes
+        reminder.notes    = className   // nil when no class selected — no notes written
         reminder.priority = priority
 
         if let due = dueDate {
