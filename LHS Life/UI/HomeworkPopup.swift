@@ -43,6 +43,7 @@ struct HomeworkPopup: View {
                 }
 
             card
+                .frame(maxWidth: 400)
                 .padding(.horizontal, LS.xl)
                 .offset(y: -40)
         }
@@ -157,7 +158,7 @@ struct HomeworkPopup: View {
         .padding(LS.md)
         .background {
             RoundedRectangle(cornerRadius: LS.radiusXl, style: .continuous)
-                .fill(.regularMaterial)
+                .fill(Color.lsSurface)
                 .overlay {
                     RoundedRectangle(cornerRadius: LS.radiusXl, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5)

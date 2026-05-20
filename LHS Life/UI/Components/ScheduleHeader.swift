@@ -2,56 +2,59 @@
 //  ScheduleHeader.swift
 //  LHS Life
 //
-//  Two independent components:
-//
-//  ScheduleHeaderPill — the pill with text and progress fill. No settings button.
-//                       Used by both iPhone (top) and iPad (bottom accessory).
-//
-//  SettingsButton     — standalone settings button, always pinned top-right.
-//
-//  The 1-second timer lives in ScheduleHeaderPill since it owns the live state.
-//
-//  Glass notes (iOS 26):
-//  — .glassEffect(_, in: Shape) must be the LAST modifier on a view.
-//    It replaces the background entirely. Never nest it inside .background{}.
-//  — GlassEffectContainer coordinates blending between sibling glass views.
-//    Wrap the HStack containing pill + button so they share one glass surface.
-//  — Each child still declares its own .glassEffect with its own shape.
+//  ScheduleHeaderPill — pill with text and progress fill, used on both platforms
+//  HeaderActionButton — generic action button paired with the pill
+//    • iPhone: lightning bolt → settings (with AP badge)
+//    • iPad:   checklist     → homework
+//  ScheduleHeader — GlassEffectContainer(pill + action button), platform-agnostic
+//  SettingsButton  — standalone, iPad top-right only
 //
 
 import SwiftUI
 
-// MARK: - Settings Button
+// MARK: - Header Action Button
 
-struct SettingsButton: View {
-    @Binding var showSettings: Bool
-    var showBadge: Bool = false
+struct HeaderActionButton: View {
+    enum Icon: Equatable {
+        case settings(showBadge: Bool)
+        case homework
+    }
+
+    let icon: Icon
+    let action: () -> Void
+    var suppressGlass: Bool = false
 
     var body: some View {
-        Button {
-            showSettings = true
-        } label: {
+        Button(action: action) {
             ZStack(alignment: .topTrailing) {
-                Image("lhs-lightning")
-                    .resizable()
-                    .renderingMode(.original)
-                    .frame(width: 28, height: 28)
-                    .padding(12)
-                    // iOS 17–25 fallback — glass applied via background
-                    .background {
-                        if #available(iOS 26, *) {
-                            Color.clear
-                        } else {
-                            Circle()
-                                .fill(.ultraThinMaterial)
-                                .overlay { Circle().strokeBorder(Color.white.opacity(0.07), lineWidth: 0.5) }
-                                .shadow(color: .black.opacity(0.3), radius: 8)
-                        }
+                Group {
+                    switch icon {
+                    case .settings:
+                        Image("lhs-lightning")
+                            .resizable()
+                            .renderingMode(.original)
+                            .frame(width: 28, height: 28)
+                    case .homework:
+                        Image(systemName: "checklist")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(Color.lsPrimary)
+                            .frame(width: 28, height: 28)
                     }
-                    // iOS 26: glass as outermost modifier on the whole button content
-                    .modifier(CircleGlassModifier())
+                }
+                .padding(12)
+                .background {
+                    if #available(iOS 26, *) {
+                        Color.clear
+                    } else {
+                        Circle()
+                            .fill(.ultraThinMaterial)
+                            .overlay { Circle().strokeBorder(Color.white.opacity(0.07), lineWidth: 0.5) }
+                            .shadow(color: .black.opacity(0.3), radius: 8)
+                    }
+                }
+                .ifTrue(!suppressGlass) { $0.modifier(CircleGlassModifier(tint: icon == .homework ? Color.lsPurple : Color.clear)) }
 
-                if showBadge {
+                if case .settings(let showBadge) = icon, showBadge {
                     Circle()
                         .fill(Color.lsDestructive)
                         .frame(width: 10, height: 10)
@@ -63,13 +66,28 @@ struct SettingsButton: View {
     }
 }
 
-// MARK: - Glass modifier helpers
-// Avoids #available inside result builders (causes layout issues).
+// MARK: - Settings Button (standalone — iPad top-right only)
+
+struct SettingsButton: View {
+    @Binding var showSettings: Bool
+    var showBadge: Bool = false
+
+    var body: some View {
+        HeaderActionButton(
+            icon: .settings(showBadge: showBadge),
+            action: { showSettings = true }
+        )
+    }
+}
+
+// MARK: - Glass modifiers
 
 private struct CircleGlassModifier: ViewModifier {
+    var tint: Color? = nil
     func body(content: Content) -> some View {
         if #available(iOS 26, *) {
-            content.glassEffect(.regular.interactive(), in: Circle())
+            content.glassEffect(.regular.interactive().tint(tint), in: Circle())
+            
         } else {
             content
         }
@@ -95,6 +113,9 @@ struct ScheduleHeaderPill: View {
 
     var onPillTap: (() -> Void)? = nil
     var onEventTap: ((SchoolEvent) -> Void)? = nil
+    /// When true, suppresses the pill's own glassEffect — use when the system
+    /// (e.g. tabViewBottomAccessory) already provides the glass surface.
+    var suppressGlass: Bool = false
 
     @State private var now: Date = Date()
     @State private var timer: Timer? = nil
@@ -106,7 +127,6 @@ struct ScheduleHeaderPill: View {
         )
     }
 
-    /// True if user is in AP Mode and exam has started but not ended.
     private var inAPMode: Bool {
         guard settings.apModeEnabledToday else { return false }
         if case .mine(_, let start, let end, _) = apExamState {
@@ -115,20 +135,13 @@ struct ScheduleHeaderPill: View {
         return false
     }
 
-    /// True if user is in AP Mode and exam has ended — treat as afterSchool.
     private var apModeExamDone: Bool {
         guard settings.apModeEnabledToday else { return false }
-        if case .mine(_, _, let end, _) = apExamState {
-            return now >= end
-        }
+        if case .mine(_, _, let end, _) = apExamState { return now >= end }
         return false
     }
 
-    private var state: ScheduleEngine.ScheduleState {
-        store.todayState(at: now)
-    }
-
-    // MARK: - Body
+    private var state: ScheduleEngine.ScheduleState { store.todayState(at: now) }
 
     var body: some View {
         HStack {
@@ -171,7 +184,6 @@ struct ScheduleHeaderPill: View {
             }
         }
         .clipShape(Capsule())
-        // iOS 17–25 fallback background
         .background {
             if #available(iOS 26, *) { Color.clear } else {
                 Capsule()
@@ -183,23 +195,20 @@ struct ScheduleHeaderPill: View {
         .contentShape(Capsule())
         .onTapGesture {
             if let event = tappableEvent, let onEventTap {
-                HapticEngine.shared.tap()
-                onEventTap(event)
+                HapticEngine.shared.tap(); onEventTap(event)
             } else if onPillTap != nil {
-                HapticEngine.shared.tap()
-                onPillTap?()
+                HapticEngine.shared.tap(); onPillTap?()
             }
         }
-        .modifier(CapsuleGlassModifier())
+        .ifTrue(!suppressGlass) { $0.modifier(CapsuleGlassModifier()) }
         .onAppear  { startTimer() }
         .onDisappear { stopTimer() }
     }
 
-    // MARK: - Text Logic
+    // MARK: Text
 
     private var todayScheduleType: ScheduleType? {
-        let dayKey = DateFormatter.isoDay.string(from: now)
-        return store.bellSchedules[dayKey]?.scheduleType
+        store.bellSchedules[DateFormatter.isoDay.string(from: now)]?.scheduleType
     }
 
     private func scheduleLabel(suppressRegular: Bool = true) -> String? {
@@ -214,63 +223,49 @@ struct ScheduleHeaderPill: View {
     }
 
     private var primaryText: String {
-        // AP Mode overrides everything
-        if inAPMode {
-            if case .mine(let name, _, _, _) = apExamState {
-                return name
-            }
-        }
+        if inAPMode, case .mine(let name, _, _, _) = apExamState { return name }
         if apModeExamDone { return afterSchoolPrimary }
-
         switch state.dayState {
         case .inSession:
             guard let slot = state.currentSlot else { return "" }
-            let mins = Int(ceil(slot.timeRemaining / 60))
-            return "\(mins) min left in \(slot.displayName)"
+            return "\(Int(ceil(slot.timeRemaining / 60))) min left in \(slot.displayName)"
         case .betweenPeriods:
             guard let next = state.nextSlot else { return "" }
-            let mins = Int(ceil(next.startDate.timeIntervalSince(now) / 60))
-            return "\(next.displayName) in \(mins) min"
+            return "\(next.displayName) in \(Int(ceil(next.startDate.timeIntervalSince(now) / 60))) min"
         case .beforeSchool:
             guard let next = state.nextSlot else { return "No school today" }
             let mins = Int(ceil(next.startDate.timeIntervalSince(now) / 60))
-            return mins > 30
-                ? "School at \(ScheduleEngine.timeString(next.startDate))"
-                : "School in \(mins) min"
+            return mins > 30 ? "School at \(ScheduleEngine.timeString(next.startDate))" : "School in \(mins) min"
         case .afterSchool:   return afterSchoolPrimary
         case .holiday:       return "No school today"
         case .pathwaysDay:   return "Internship Day"
         case .noSchedule:
-            let weekday = Calendar.current.component(.weekday, from: now)
-            return (weekday >= 2 && weekday <= 6) ? "No school today" : weekendPrimary
+            let wd = Calendar.current.component(.weekday, from: now)
+            return (wd >= 2 && wd <= 6) ? "No school today" : weekendPrimary
         }
     }
 
     private var afterSchoolPrimary: String {
         switch Calendar.current.component(.weekday, from: now) {
-        case 6:     return "Happy Friday! 🎉"
-        case 7, 1:  return "Enjoy the weekend!"
-        default:    return "School's out"
+        case 6:    return "Happy Friday! 🎉"
+        case 7, 1: return "Enjoy the weekend!"
+        default:   return "School's out"
         }
     }
 
     private var weekendPrimary: String {
         switch Calendar.current.component(.weekday, from: now) {
-        case 6:     return "Happy Friday! 🎉"
-        case 7, 1:  return "Enjoy the weekend!"
-        default:    return "No school today"
+        case 6:    return "Happy Friday! 🎉"
+        case 7, 1: return "Enjoy the weekend!"
+        default:   return "No school today"
         }
     }
 
     private var secondaryText: String? {
-        // AP Mode overrides
-        if inAPMode {
-            if case .mine(_, _, let end, _) = apExamState {
-                return "Until \(ScheduleEngine.timeString(end))"
-            }
+        if inAPMode, case .mine(_, _, let end, _) = apExamState {
+            return "Until \(ScheduleEngine.timeString(end))"
         }
         if apModeExamDone { return tomorrowSecondary }
-
         let cal = Calendar.current
         let weekday = cal.component(.weekday, from: now)
         switch state.dayState {
@@ -281,10 +276,10 @@ struct ScheduleHeaderPill: View {
             guard let next = state.nextSlot else { return nil }
             return "Until \(ScheduleEngine.timeString(next.endDate))"
         case .beforeSchool:
-            return scheduleLabel(suppressRegular: false).map { $0 } ?? nil
+            return scheduleLabel(suppressRegular: false)
         case .holiday:
-            let dayKey = DateFormatter.isoDay.string(from: now)
-            return store.events(on: dayKey).first { $0.category == .holiday }.map { $0.title }
+            return store.events(on: DateFormatter.isoDay.string(from: now))
+                .first { $0.category == .holiday }.map { $0.title }
         case .afterSchool, .noSchedule:
             switch weekday {
             case 6:  return saturdaySecondary
@@ -292,17 +287,15 @@ struct ScheduleHeaderPill: View {
             case 1:  return sundaySecondary
             default: return tomorrowSecondary
             }
-        case .pathwaysDay:
-            return nil
+        case .pathwaysDay: return nil
         }
     }
 
     private var saturdaySecondary: String? {
         let cal = Calendar.current
-        guard let saturday = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
-        return store.events(on: DateFormatter.isoDay.string(from: saturday))
-            .first { $0.category != .bellSchedule }
-            .map { upcomingEventText($0) }
+        guard let sat = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
+        return store.events(on: DateFormatter.isoDay.string(from: sat))
+            .first { $0.category != .bellSchedule }.map { upcomingEventText($0) }
     }
 
     private var saturdayOrSundaySecondary: String? {
@@ -311,10 +304,9 @@ struct ScheduleHeaderPill: View {
         if let event = store.events(on: todayKey).first(where: { $0.category != .bellSchedule && $0.startDate > now }) {
             return upcomingEventText(event)
         }
-        guard let sunday = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
-        return store.events(on: DateFormatter.isoDay.string(from: sunday))
-            .first { $0.category != .bellSchedule }
-            .map { upcomingEventText($0) }
+        guard let sun = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
+        return store.events(on: DateFormatter.isoDay.string(from: sun))
+            .first { $0.category != .bellSchedule }.map { upcomingEventText($0) }
     }
 
     private var sundaySecondary: String? {
@@ -323,78 +315,67 @@ struct ScheduleHeaderPill: View {
         if let event = store.events(on: todayKey).first(where: { $0.category != .bellSchedule && $0.startDate > now }) {
             return upcomingEventText(event)
         }
-        guard let monday = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
-        let monKey = DateFormatter.isoDay.string(from: monday)
-        if let event = store.events(on: monKey).first(where: { $0.category != .bellSchedule }) {
-            return upcomingEventText(event)
-        }
-        return scheduleLabelFor(dayKey: monKey).map { "Tomorrow: \($0)" }
+        guard let mon = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
+        let monKey = DateFormatter.isoDay.string(from: mon)
+        return store.events(on: monKey).first { $0.category != .bellSchedule }.map { upcomingEventText($0) }
+            ?? scheduleLabelFor(dayKey: monKey).map { "Tomorrow: \($0)" }
     }
 
     private var tomorrowSecondary: String? {
         let cal = Calendar.current
-        guard let tomorrow = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
-        return store.events(on: DateFormatter.isoDay.string(from: tomorrow))
-            .first { $0.category != .bellSchedule }
-            .map { upcomingEventText($0) }
+        guard let tom = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
+        return store.events(on: DateFormatter.isoDay.string(from: tom))
+            .first { $0.category != .bellSchedule }.map { upcomingEventText($0) }
     }
 
-    /// The SchoolEvent referenced in the secondary text, if any.
-    /// Used to route pill taps directly to that event in the calendar.
     private var tappableEvent: SchoolEvent? {
         let cal = Calendar.current
         let weekday = cal.component(.weekday, from: now)
         switch state.dayState {
         case .afterSchool, .noSchedule:
             switch weekday {
-            case 6:  return saturdayEvent
+            case 6:  return eventOn(daysAhead: 1)
             case 7:  return saturdayOrSundayEvent
             case 1:  return sundayEvent
-            default: return tomorrowEvent
+            default: return eventOn(daysAhead: 1)
             }
         case .holiday:
-            let dayKey = DateFormatter.isoDay.string(from: now)
-            return store.events(on: dayKey).first { $0.category == .holiday }
+            return store.events(on: DateFormatter.isoDay.string(from: now))
+                .first { $0.category == .holiday }
         default: return nil
         }
     }
 
-    private var tomorrowEvent: SchoolEvent? {
+    private func eventOn(daysAhead: Int) -> SchoolEvent? {
         let cal = Calendar.current
-        guard let tomorrow = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
-        return store.events(on: DateFormatter.isoDay.string(from: tomorrow))
-            .first { $0.category != .bellSchedule }
+        guard let d = cal.date(byAdding: .day, value: daysAhead, to: cal.startOfDay(for: now)) else { return nil }
+        return store.events(on: DateFormatter.isoDay.string(from: d)).first { $0.category != .bellSchedule }
     }
-    private var saturdayEvent: SchoolEvent? {
-        let cal = Calendar.current
-        guard let saturday = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
-        return store.events(on: DateFormatter.isoDay.string(from: saturday))
-            .first { $0.category != .bellSchedule }
-    }
+
     private var saturdayOrSundayEvent: SchoolEvent? {
         let cal = Calendar.current
         let todayKey = DateFormatter.isoDay.string(from: now)
         if let event = store.events(on: todayKey).first(where: { $0.category != .bellSchedule && $0.startDate > now }) { return event }
-        guard let sunday = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
-        return store.events(on: DateFormatter.isoDay.string(from: sunday)).first { $0.category != .bellSchedule }
+        guard let sun = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
+        return store.events(on: DateFormatter.isoDay.string(from: sun)).first { $0.category != .bellSchedule }
     }
+
     private var sundayEvent: SchoolEvent? {
         let cal = Calendar.current
         let todayKey = DateFormatter.isoDay.string(from: now)
         if let event = store.events(on: todayKey).first(where: { $0.category != .bellSchedule && $0.startDate > now }) { return event }
-        guard let monday = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
-        return store.events(on: DateFormatter.isoDay.string(from: monday)).first { $0.category != .bellSchedule }
+        guard let mon = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
+        return store.events(on: DateFormatter.isoDay.string(from: mon)).first { $0.category != .bellSchedule }
     }
 
     private func upcomingEventText(_ event: SchoolEvent) -> String {
         let cal = Calendar.current
-        let dayLabel: String
-        if cal.isDateInTomorrow(event.startDate)  { dayLabel = "Tomorrow" }
-        else if cal.isDateInToday(event.startDate) { dayLabel = "Today" }
-        else { dayLabel = DateFormatter.shortWeekday.string(from: event.startDate) }
+        let label = cal.isDateInTomorrow(event.startDate) ? "Tomorrow"
+                  : cal.isDateInToday(event.startDate)   ? "Today"
+                  : DateFormatter.shortWeekday.string(from: event.startDate)
         return event.isAllDay
-            ? "\(dayLabel): \(event.title)"
-            : "\(dayLabel): \(event.title) at \(ScheduleEngine.timeString(event.startDate))"
+            ? "\(label): \(event.title)"
+            : "\(label): \(event.title) at \(ScheduleEngine.timeString(event.startDate))"
     }
 
     private func progressColor(slot: ScheduleEngine.ActiveSlot) -> Color {
@@ -402,7 +383,6 @@ struct ScheduleHeaderPill: View {
         return Color.paletteColor(for: config)
     }
 
-    /// Progress 0→1 through passing time, computed from the previous slot's end to next slot's start.
     private func passingProgress(nextStart: Date) -> Double {
         let dayKey = DateFormatter.isoDay.string(from: now)
         guard let schedule = store.bellSchedules[dayKey],
@@ -416,72 +396,44 @@ struct ScheduleHeaderPill: View {
         return max(0, min(1, now.timeIntervalSince(prevEnd) / total))
     }
 
-    // MARK: - Timer
-
     private func startTimer() {
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
             Task { @MainActor in
                 self.now = Date()
-                let state = self.store.todayState(at: self.now)
-                LiveActivityService.shared.endIfSchoolOver(state: state)
+                LiveActivityService.shared.endIfSchoolOver(state: self.store.todayState(at: self.now))
             }
         }
     }
     private func stopTimer() { timer?.invalidate(); timer = nil }
 }
 
-// MARK: - Schedule Header (iPhone: pill + settings button)
+// MARK: - Schedule Header
+// Pill + action button in a unified glass surface.
+// Platform provides the icon and action — component is identical.
 
 struct ScheduleHeader: View {
-    @Binding var showSettings: Bool
+    let actionIcon: HeaderActionButton.Icon
+    let onAction: () -> Void
     var onPillTap: (() -> Void)? = nil
     var onEventTap: ((SchoolEvent) -> Void)? = nil
-
-    @Environment(UserSettings.self) private var settings
-    @Environment(CalendarStore.self) private var store
-
-    private var showBadge: Bool {
-        let dayKey = DateFormatter.isoDay.string(from: Date())
-        let state = APExamService.examState(
-            for: dayKey, events: store.events(on: dayKey), settings: settings
-        )
-        if case .none = state { return false }
-        return !settings.apBadgeCleared
-    }
-
-    private var apAccentColor: Color {
-        let dayKey = DateFormatter.isoDay.string(from: Date())
-        let state = APExamService.examState(
-            for: dayKey, events: store.events(on: dayKey), settings: settings
-        )
-        if case .mine(_, _, _, let config) = state, let config = config {
-            return Color.paletteColor(for: config)
-        }
-        return Color.lsBlue
-    }
 
     var body: some View {
         Group {
             if #available(iOS 26, *) {
-                // GlassEffectContainer lets pill + button share one continuous glass surface.
-                // Each child applies .glassEffect with its own shape via ViewModifier above.
                 GlassEffectContainer(spacing: LS.sm) {
                     HStack(spacing: LS.sm) {
                         ScheduleHeaderPill(onPillTap: onPillTap, onEventTap: onEventTap)
                             .frame(maxWidth: .infinity)
-                        SettingsButton(showSettings: $showSettings, showBadge: showBadge)
+                        HeaderActionButton(icon: actionIcon, action: onAction)
                     }
                 }
             } else {
                 HStack(spacing: LS.sm) {
                     ScheduleHeaderPill(onPillTap: onPillTap, onEventTap: onEventTap)
                         .frame(maxWidth: .infinity)
-                    SettingsButton(showSettings: $showSettings, showBadge: showBadge)
+                    HeaderActionButton(icon: actionIcon, action: onAction)
                 }
             }
-        }
-        .onChange(of: showSettings) { _, showing in
-            if showing { settings.apBadgeCleared = true }
         }
     }
 }
@@ -532,19 +484,20 @@ struct APExamBanner: View {
 
 private extension DateFormatter {
     static let shortWeekday: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "EEEE"
-        return f
+        let f = DateFormatter(); f.dateFormat = "EEEE"; return f
     }()
 }
 
 #Preview {
     ZStack(alignment: .top) {
         Color.lsBackground.ignoresSafeArea()
-        ScheduleHeader(showSettings: .constant(false))
-            .environment(CalendarStore())
-            .environment(UserSettings.shared)
-            .padding(.horizontal, LS.md)
-            .padding(.top, LS.sm)
+        ScheduleHeader(
+            actionIcon: .settings(showBadge: false),
+            onAction: {}
+        )
+        .environment(CalendarStore())
+        .environment(UserSettings.shared)
+        .padding(.horizontal, LS.md)
+        .padding(.top, LS.sm)
     }
 }

@@ -79,6 +79,15 @@ struct AppTabContainer: View {
 
     private var isPhone: Bool { UIDevice.current.userInterfaceIdiom == .phone }
 
+    private var showBadge: Bool {
+        let dayKey = DateFormatter.isoDay.string(from: Date())
+        let state = APExamService.examState(
+            for: dayKey, events: store.events(on: dayKey), settings: settings
+        )
+        if case .none = state { return false }
+        return !settings.apBadgeCleared
+    }
+
     private var launchProgress: Double {
         var p = store.events.isEmpty ? 0.0 : 0.34
         if lunchState.isReady       { p += 0.22 }
@@ -147,7 +156,11 @@ struct AppTabContainer: View {
 
             VStack {
                 ScheduleHeader(
-                    showSettings: $showSettings,
+                    actionIcon: .settings(showBadge: showBadge),
+                    onAction: {
+                        settings.apBadgeCleared = true
+                        showSettings = true
+                    },
                     onPillTap: { withAnimation(.lsSnappy) { selectedTab = .events } },
                     onEventTap: { event in
                         withAnimation(.lsSnappy) { selectedTab = .events }
@@ -230,59 +243,83 @@ struct AppTabContainer: View {
 
     @available(iOS 26, *)
     private var iPadTabView: some View {
-        TabView(selection: $selectedTab) {
-            Tab("Events", systemImage: "calendar", value: AppTab.events) {
-                EventsTabView()
-                    .environment(calendarUI)
-            }
-            Tab("Order", systemImage: "fork.knife", value: AppTab.lunch) {
-                LunchTabView(webState: lunchState)
-            }
-            Tab(value: AppTab.powerschool) {
-                PowerSchoolTabView(webState: powerschoolState)
-                    .overlay(alignment: .bottomTrailing) {
-                        FloatingNavButtons(role: .web(state: powerschoolState, onHome: { powerschoolState.reload() }))
-                        .padding(.trailing, LS.md)
-                        .padding(.bottom, LS.xxl)
-                    }
-            } label: {
-                Label("Grades", image: "powerschool-logo")
-            }
-            Tab(value: AppTab.schoology) {
-                SchoologyTabView(webState: schoologyState)
-                    .overlay(alignment: .bottomTrailing) {
-                        FloatingNavButtons(role: .web(state: schoologyState, onHome: { schoologyState.reload() }))
-                        .padding(.trailing, LS.md)
-                        .padding(.bottom, LS.xxl)
-                    }
-            } label: {
-                Label("Schoology", image: "schoology-logo")
-            }
-            Tab(value: AppTab.homework, role: .search) {
-                iPadHomeworkContent
-            } label: {
-                Label("Homework", systemImage: "checklist")
-            }
-        }
-        .tabBarMinimizeBehavior(.onScrollDown)
-        .tint(Color.lsBlue)
-        .tabViewBottomAccessory {
-            ScheduleHeaderPill(
-                onPillTap: { withAnimation(.lsSnappy) { selectedTab = .events } },
-                onEventTap: { event in
-                    withAnimation(.lsSnappy) { selectedTab = .events }
-                    calendarUI.navigateTo(event: event)
+        ZStack {
+            TabView(selection: $selectedTab) {
+                Tab("Events", systemImage: "calendar", value: AppTab.events) {
+                    EventsTabView()
+                        .environment(calendarUI)
+                        .overlay(alignment: .bottomTrailing) {
+                            FloatingNavButtons(role: .calendar(
+                                onToday: { calendarUI.goToToday() },
+                                isOnToday: Calendar.current.isDateInToday(calendarUI.selectedDate) && calendarUI.viewMode == .day,
+                                zoomLabel: calendarUI.zoomOutLabel,
+                                onZoom: { calendarUI.zoomOutAction() }
+                            ))
+                            .padding(.trailing, LS.md)
+                            .padding(.bottom, 120)
+                        }
                 }
-            )
-            .padding(.horizontal, LS.md)
-            .padding(.vertical, LS.xs)
-        }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                SettingsButton(showSettings: $showSettings)
+                Tab("Order", systemImage: "fork.knife", value: AppTab.lunch) {
+                    LunchTabView(webState: lunchState)
+                }
+                Tab(value: AppTab.powerschool) {
+                    PowerSchoolTabView(webState: powerschoolState)
+                        .overlay(alignment: .bottomTrailing) {
+                            FloatingNavButtons(role: .web(state: powerschoolState, onHome: { powerschoolState.reload() }))
+                            .padding(.trailing, LS.md)
+                            .padding(.bottom, 120)
+                        }
+                } label: {
+                    Label("Grades", image: "powerschool-logo")
+                }
+                Tab(value: AppTab.schoology) {
+                    SchoologyTabView(webState: schoologyState)
+                        .overlay(alignment: .bottomTrailing) {
+                            FloatingNavButtons(role: .web(state: schoologyState, onHome: { schoologyState.reload() }))
+                            .padding(.trailing, LS.md)
+                            .padding(.bottom, 120)
+                        }
+                } label: {
+                    Label("Schoology", image: "schoology-logo")
+                }
             }
-        }
-        .overlay {
+            .tabBarMinimizeBehavior(.onScrollDown)
+            .tint(Color.lsBlue)
+            // Settings button — top right
+            .overlay(alignment: .topTrailing) {
+                SettingsButton(showSettings: $showSettings, showBadge: showBadge)
+                    .padding(.trailing, LS.md)
+                    .padding(.top, LS.sm)
+            }
+
+            // Header + homework button — bottom, mirroring iPhone's top header
+            VStack {
+                Spacer()
+                HStack {
+                    ScheduleHeader(
+                        actionIcon: .homework,
+                        onAction: { withAnimation(.lsSpring) { showHomework = true } },
+                        onPillTap: { withAnimation(.lsSnappy) { selectedTab = .events } },
+                        onEventTap: { event in
+                            withAnimation(.lsSnappy) { selectedTab = .events }
+                            calendarUI.navigateTo(event: event)
+                        }
+                    )
+                    .environment(settings)
+                    .environment(store)
+                }
+                .padding(.horizontal, LS.md)
+                .padding(.bottom, LS.sm)
+                .safeAreaPadding(.bottom)
+            }
+
+            if showHomework {
+                HomeworkPopup(onDismiss: { withAnimation(.lsSpring) { showHomework = false } })
+                    .environment(store)
+                    .environment(settings)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    .zIndex(10)
+            }
             if isLaunching {
                 LaunchScreen(progress: launchProgress)
                     .transition(.opacity)
@@ -291,15 +328,6 @@ struct AppTabContainer: View {
         }
     }
 
-    @available(iOS 26, *)
-    private var iPadHomeworkContent: some View {
-        ZStack {
-            Color.lsBackground.ignoresSafeArea()
-            HomeworkPopup(onDismiss: { selectedTab = previousTab })
-                .environment(store)
-                .environment(settings)
-        }
-    }
 }
 
 // MARK: - Homework FAB (iPhone legacy only)

@@ -30,6 +30,7 @@ extension Color {
     static let lsDestructive    = Color(hex: "#FF6B6B")
     static let lsSuccess        = Color(hex: "#34C78A")
     static let lsOrange         = Color(hex: "#FB923C")
+    static let lsPurple         = Color(hex: "#7C3AED")
 
     // Header gradient stops
     static let lsHeaderTop      = Color(hex: "#0D1220")
@@ -139,5 +140,10 @@ extension View {
     }
     func lsPressEffect(action: @escaping () -> Void) -> some View {
         modifier(LSPressEffect(action: action))
+    }
+    /// Conditionally apply a modifier — avoids ternary type mismatch.
+    @ViewBuilder
+    func ifTrue<Content: View>(_ condition: Bool, transform: (Self) -> Content) -> some View {
+        if condition { transform(self) } else { self }
     }
 }
