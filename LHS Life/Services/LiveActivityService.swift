@@ -72,7 +72,7 @@ final class LiveActivityService {
 
         let attributes = ScheduleActivityAttributes(
             schoolName: "LaSalle",
-            scheduleTypeName: schedule.scheduleType.rawValue + " Schedule",
+            scheduleTypeName: schedule.scheduleType.scheduleLabel,
             schedule: periods
         )
 
@@ -96,9 +96,9 @@ final class LiveActivityService {
             // Relying solely on pushTokenUpdates risks missing the first token
             // if the stream doesn't emit before the app backgrounds.
             if let initialToken = activity.pushToken {
-                Task { await PushTokenService.register(token: initialToken) }
+                Task { await PushTokenService.register(token: initialToken, periods: periods) }
             }
-            PushTokenService.observeTokenUpdates(for: activity)
+            PushTokenService.observeTokenUpdates(for: activity, periods: periods)
 
             let upcoming = periods.filter { $0.startDate > Date() }
             BellTransitionService.scheduleTransitions(for: upcoming)

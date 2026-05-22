@@ -41,6 +41,19 @@ enum ScheduleType: String, Codable, CaseIterable {
     case unknown               = "Unknown"
 }
 
+extension ScheduleType {
+    /// Display label used in the schedule header pill, Live Activity, and calendar.
+    /// Most types append " Schedule", but some are already complete names.
+    var scheduleLabel: String {
+        switch self {
+        case .seniorPresentation: return rawValue  // "Senior Presentation" — already complete
+        case .finals:             return rawValue  // "Finals" — no suffix needed
+        case .assembly:           return rawValue  // "Assembly" — no suffix needed
+        default:                  return rawValue + " Schedule"
+        }
+    }
+}
+
 // MARK: - Period
 
 /// A single class period or passing time within a bell schedule.

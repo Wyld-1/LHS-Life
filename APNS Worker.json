@@ -21,8 +21,8 @@
  *   TOKENS           — KV namespace binding (set in wrangler.toml or dashboard)
  *
  * KV structure:
- *   token:{deviceId}        → { pushToken: string, updatedAt: string }
- *   schedule:{YYYY-MM-DD}   → parsed schedule JSON (cached for the day)
+ *   token:{deviceId}        → { pushToken, environment, transitions, endMinutes, updatedAt }
+ *   endpush:{deviceId}:{YYYY-MM-DD} → endMinutes (set when last period fires; auto-expires)
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -82,6 +82,8 @@ async function handleRegister(request, env) {
     await env.TOKENS.put(`token:${deviceId}`, JSON.stringify({
       pushToken,
       environment: environment ?? "production",
+      transitions: transitions ?? null,
+      endMinutes:  endMinutes  ?? null,
       updatedAt: new Date().toISOString(),
     }));
   } catch (e) {
@@ -120,293 +122,73 @@ async function runPushCycle(env) {
   console.log(`[Cron] ${todayKey} ${String(nowPT.hours).padStart(2,'0')}:${String(nowPT.minutes).padStart(2,'0')} PT`);
 
   // Only run Mon–Fri
-  const dow = nowPT.dow; // 0=Sun, 6=Sat
-  if (dow === 0 || dow === 6) {
+  if (nowPT.dow === 0 || nowPT.dow === 6) {
     console.log("[Cron] Weekend — skipping");
     return;
   }
 
-  // Get today's schedule (cached in KV)
-  const schedule = await getSchedule(todayKey, env);
-  if (!schedule || schedule.periods.length === 0) {
-    console.log("[Cron] No schedule found for today");
-    return;
-  }
-
-  // Find the period that just started (within the last 2 minutes)
-  const periodIndex = schedule.periods.findIndex(p => {
-    const diff = currentMinutes - p.startMinutes;
-    return diff >= 0 && diff < 2;
-  });
-
-  if (periodIndex === -1) {
-    console.log("[Cron] No transition this minute");
-    // Still check for a pending end push. Use >= with a 10-minute window
-    // rather than exact equality — cron jitter on the free tier can cause
-    // the firing minute to drift past the target, silently missing the push.
-    const pendingEnd = await env.TOKENS.get(`endpush:${todayKey}`);
-    if (pendingEnd) {
-      const endMinutes = parseInt(pendingEnd);
-      if (currentMinutes >= endMinutes && currentMinutes <= endMinutes + 10) {
-        const tokens = await getAllTokens(env);
-        if (tokens.length > 0) {
-          const jwt = await getAPNsJWT(env);
-          console.log(`[Cron] Sending end-of-day dismissal push (${currentMinutes - endMinutes}min after target)`);
-          await pushToAll(tokens, { slotStartMinutes: 0, isEnded: true }, true, jwt, env);
-        }
-        await env.TOKENS.delete(`endpush:${todayKey}`);
-      }
-    }
-    return;
-  }
-
-  const justStarted = schedule.periods[periodIndex];
-  const isLastPeriod = periodIndex === schedule.periods.length - 1;
-
-  console.log(`[Cron] Transition → ${justStarted.name} at ${justStarted.startStr}${isLastPeriod ? " (LAST — will send end push at bell)" : ""}`);
-
-  // Load all push tokens
   const tokens = await getAllTokens(env);
   if (tokens.length === 0) {
     console.log("[Cron] No registered devices");
     return;
   }
 
-  console.log(`[Cron] Pushing to ${tokens.length} device(s)`);
-
-  // Get APNs JWT (cached for up to 45 minutes — Apple requires refresh < 60min)
   const jwt = await getAPNsJWT(env);
 
-  if (isLastPeriod) {
-    // Last period of the day: send an update now, then flag for an end push
-    // at this period's end time so the LA is dismissed the moment school ends.
-    const contentState = {
-      slotStartMinutes: justStarted.startMinutes,
-      isEnded: false,
-    };
+  for (const device of tokens) {
+    const transitions = device.transitions ?? [];
+    const endMinutes  = device.endMinutes  ?? null;
 
-    await pushToAll(tokens, contentState, false, jwt, env);
-
-    // nowPT.seconds is the sub-minute offset — used only for the log message.
-    const secondsUntilEnd = (justStarted.endMinutes - currentMinutes) * 60 - nowPT.seconds;
-    if (secondsUntilEnd > 0) {
-      console.log(`[Cron] Scheduling end push in ${secondsUntilEnd}s (at ${justStarted.endStr})`);
-      // Cloudflare doesn't support delayed execution natively, so we rely on
-      // the cron firing again at endMinutes and detecting the KV flag below.
-      await env.TOKENS.put(`endpush:${todayKey}`, String(justStarted.endMinutes), {
-        expirationTtl: 7200 // 2 hours — auto-cleanup
-      });
+    if (transitions.length === 0) {
+      console.log(`[Cron] ${device.deviceId} — no transitions stored, skipping`);
+      continue;
     }
-  } else {
-    // Normal mid-day transition
-    const contentState = {
-      slotStartMinutes: justStarted.startMinutes,
-      isEnded: false,
-    };
-    await pushToAll(tokens, contentState, false, jwt, env);
-  }
 
-  // Check if this minute also matches a scheduled end push.
-  // Use >= with a 10-minute window for the same jitter reason as above.
-  const pendingEnd = await env.TOKENS.get(`endpush:${todayKey}`);
-  if (pendingEnd) {
-    const endMinutes = parseInt(pendingEnd);
-    if (currentMinutes >= endMinutes && currentMinutes <= endMinutes + 10) {
-      console.log(`[Cron] Sending end-of-day dismissal push (${currentMinutes - endMinutes}min after target)`);
-      await pushToAll(tokens, { slotStartMinutes: 0, isEnded: true }, true, jwt, env);
-      await env.TOKENS.delete(`endpush:${todayKey}`);
-    }
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MARK: - Push helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function pushToAll(tokens, contentState, isEnd, jwt, env) {
-  const results = await Promise.allSettled(
-    tokens.map(({ deviceId, pushToken, environment }) => {
-      const pushFn = isEnd
-        ? sendAPNsEnd(pushToken, contentState, jwt, env, environment)
-        : sendAPNsUpdate(pushToken, contentState, jwt, env, environment);
-      return pushFn
-        .then(({ dead }) => ({ deviceId, ok: true, dead }))
-        .catch(err  => ({ deviceId, ok: false, err: err.message, dead: false }));
-    })
-  );
-
-  for (const r of results) {
-    if (r.status !== "fulfilled") continue;
-    const v = r.value;
-    if (!v.ok) {
-      console.log(`[APNs] ✗ ${v.deviceId}: ${v.err}`);
-    } else if (v.dead) {
-      console.log(`[APNs] 💀 ${v.deviceId} — dead token, removing`);
-      await env.TOKENS.delete(`token:${v.deviceId}`);
-    } else {
-      console.log(`[APNs] ✓ ${v.deviceId}`);
-    }
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MARK: - Schedule fetch + parse
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function getSchedule(dayKey, env) {
-  // Check KV cache first
-  const cached = await env.TOKENS.get(`schedule:${dayKey}`, "json");
-  if (cached) return cached;
-
-  // Fetch fresh from CalendarWiz
-  const ICAL_URL = "https://www.calendarwiz.com/CalendarWiz_iCal.php?crd=lasalleyakima&ical_days_back=1&ical_days_ahead=7";
-  let icalText;
-  try {
-    const resp = await fetch(ICAL_URL);
-    icalText = await resp.text();
-  } catch (e) {
-    console.error("[Schedule] Fetch failed:", e.message);
-    return null;
-  }
-
-  // Parse all events
-  const events = parseICal(icalText);
-
-  // Find today's bell schedule event
-  const bellEvent = events.find(e =>
-    e.dtstart.startsWith(dayKey.replace(/-/g, "")) &&
-    e.description &&
-    e.description.toLowerCase().includes("period")
-  );
-
-  if (!bellEvent) {
-    console.log("[Schedule] No bell schedule event for", dayKey);
-    return null;
-  }
-
-  // Parse the bell schedule
-  const schedule = parseBellDescription(bellEvent.description, dayKey);
-  if (!schedule) return null;
-
-  // Cache for the day
-  await env.TOKENS.put(`schedule:${dayKey}`, JSON.stringify(schedule), {
-    expirationTtl: 86400 // 24 hours
-  });
-
-  return schedule;
-}
-
-// Parse iCal text into a list of event objects
-function parseICal(text) {
-  const events = [];
-  const lines = unfoldICal(text).split("\n");
-
-  let current = null;
-  for (const line of lines) {
-    if (line.startsWith("BEGIN:VEVENT")) {
-      current = {};
-    } else if (line.startsWith("END:VEVENT")) {
-      if (current) events.push(current);
-      current = null;
-    } else if (current) {
-      const colonIdx = line.indexOf(":");
-      if (colonIdx === -1) continue;
-      const key   = line.slice(0, colonIdx).split(";")[0].toUpperCase();
-      const value = line.slice(colonIdx + 1).replace(/\\n/g, "\n").replace(/\\,/g, ",");
-      current[key.toLowerCase()] = value;
-    }
-  }
-  return events;
-}
-
-// Unfold multi-line iCal values (lines continuing with a space/tab)
-function unfoldICal(text) {
-  return text.replace(/\r\n[ \t]/g, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-}
-
-// Parse the DESCRIPTION field of a bell schedule event into periods.
-// Mirrors BellScheduleParser.swift exactly.
-function parseBellDescription(description, dayKey) {
-  const lines = description
-    .split("\n")
-    .map(l => l.trim())
-    .filter(Boolean);
-
-  const headerIdx = lines.findIndex(l => l.toLowerCase() === "period");
-  if (headerIdx === -1) return null;
-
-  const columnHeaders = ["begin", "end", "total", "min", "minutes"];
-  let dataStart = headerIdx + 1;
-  while (dataStart < lines.length && columnHeaders.includes(lines[dataStart].toLowerCase())) {
-    dataStart++;
-  }
-
-  const dataLines = lines.slice(dataStart);
-  const periods = [];
-
-  for (let i = 0; i + 3 < dataLines.length; i += 4) {
-    const name     = dataLines[i];
-    const startStr = dataLines[i + 1];
-    const endStr   = dataLines[i + 2];
-    // dataLines[i + 3] is duration — consumed but ignored
-
-    if (columnHeaders.includes(name.toLowerCase())) continue;
-
-    const startMins = parseTimeToMinutes(startStr);
-    const endMins   = parseTimeToMinutes(endStr);
-    if (startMins === null || endMins === null) continue;
-
-    periods.push({
-      name:         normalizeName(name),
-      startMinutes: startMins,
-      endMinutes:   endMins,
-      startStr:     minutesToTimeStr(startMins),
-      endStr:       minutesToTimeStr(endMins),
+    // Find a transition that just fired (within the last 2 minutes)
+    const firedMinutes = transitions.find(t => {
+      const diff = currentMinutes - t;
+      return diff >= 0 && diff < 2;
     });
+
+    if (firedMinutes !== undefined) {
+      const isLast = firedMinutes === transitions[transitions.length - 1];
+      console.log(`[Cron] ${device.deviceId} → transition at ${firedMinutes}min${isLast ? " (last)" : ""}`);
+
+      const { dead } = await sendAPNsUpdate(device.pushToken,
+        { slotStartMinutes: firedMinutes, isEnded: false },
+        jwt, env, device.environment).catch(err => { console.log(`[APNs] ✗ ${device.deviceId}: ${err.message}`); return { dead: false }; });
+
+      if (dead) {
+        console.log(`[APNs] 💀 ${device.deviceId} — dead token, removing`);
+        await env.TOKENS.delete(`token:${device.deviceId}`);
+        continue;
+      }
+
+      // Schedule the end push at this device's specific end time
+      if (isLast && endMinutes !== null) {
+        await env.TOKENS.put(`endpush:${device.deviceId}:${todayKey}`,
+          String(endMinutes), { expirationTtl: 7200 });
+        console.log(`[Cron] ${device.deviceId} — end push scheduled at ${endMinutes}min`);
+      }
+    }
+
+    // Check for a pending end push for this device
+    const pendingEnd = await env.TOKENS.get(`endpush:${device.deviceId}:${todayKey}`);
+    if (pendingEnd) {
+      const endAt = parseInt(pendingEnd);
+      if (currentMinutes >= endAt && currentMinutes <= endAt + 10) {
+        console.log(`[Cron] ${device.deviceId} — sending end push`);
+        const { dead } = await sendAPNsEnd(device.pushToken,
+          { slotStartMinutes: 0, isEnded: true },
+          jwt, env, device.environment).catch(err => { console.log(`[APNs] ✗ ${device.deviceId}: ${err.message}`); return { dead: false }; });
+        if (dead) await env.TOKENS.delete(`token:${device.deviceId}`);
+        await env.TOKENS.delete(`endpush:${device.deviceId}:${todayKey}`);
+      }
+    }
   }
-
-  if (periods.length === 0) return null;
-  return { dayKey, periods };
 }
 
-function parseTimeToMinutes(raw) {
-  let s = raw.trim();
-  let isPM = null;
-  if (s.toUpperCase().endsWith("AM")) { isPM = false; s = s.slice(0, -2); }
-  if (s.toUpperCase().endsWith("PM")) { isPM = true;  s = s.slice(0, -2); }
 
-  const parts = s.split(":").map(Number);
-  if (parts.length !== 2 || isNaN(parts[0]) || isNaN(parts[1])) return null;
-
-  let [hour, minute] = parts;
-  if (isPM === true  && hour < 12) hour += 12;
-  if (isPM === false && hour === 12) hour = 0;
-  if (isPM === null  && hour < 6)  hour += 12; // school runs 6AM–4PM
-
-  return hour * 60 + minute;
-}
-
-function minutesToTimeStr(mins) {
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  const ampm = h < 12 ? "AM" : "PM";
-  const h12  = h === 0 ? 12 : h > 12 ? h - 12 : h;
-  return `${h12}:${m.toString().padStart(2, "0")} ${ampm}`;
-}
-
-function normalizeName(raw) {
-  const lower = raw.toLowerCase();
-  if (lower === "break")    return "Break";
-  if (lower === "lunch")    return "Lunch";
-  if (lower === "advisory") return "Advisory";
-  if (lower === "passing")  return "Passing";
-  if (/^\d+$/.test(raw))   return `Period ${raw}`;
-  return raw.charAt(0).toUpperCase() + raw.slice(1);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MARK: - APNs push
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Sends a Live Activity update push (event: "update").
@@ -567,6 +349,8 @@ async function getAllTokens(env) {
         deviceId:    key.name.replace("token:", ""),
         pushToken:   value.pushToken,
         environment: value.environment ?? "production",
+        transitions: value.transitions ?? null,
+        endMinutes:  value.endMinutes  ?? null,
       });
     }
   }

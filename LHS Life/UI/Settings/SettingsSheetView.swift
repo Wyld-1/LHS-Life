@@ -415,7 +415,7 @@ struct SettingsSheetView: View {
                             content: .init(state: state, staleDate: now.addingTimeInterval(6000)),
                             pushType: .token
                         )
-                        PushTokenService.observeTokenUpdates(for: activity)
+                        PushTokenService.observeTokenUpdates(for: activity, periods: periods)
                         BellTransitionService.scheduleTransitions(for: periods.filter { $0.startDate > now })
                         print("[Debug] Dummy Live Activity started")
                     } catch {

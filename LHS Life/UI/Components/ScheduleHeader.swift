@@ -214,12 +214,12 @@ struct ScheduleHeaderPill: View {
     private func scheduleLabel(suppressRegular: Bool = true) -> String? {
         guard let type = todayScheduleType else { return nil }
         if suppressRegular && type == .regular { return nil }
-        return type.rawValue + " Schedule"
+        return type.scheduleLabel
     }
 
     private func scheduleLabelFor(dayKey: String) -> String? {
         guard let type = store.bellSchedules[dayKey]?.scheduleType else { return nil }
-        return type.rawValue + " Schedule"
+        return type.scheduleLabel
     }
 
     private var primaryText: String {

@@ -32,7 +32,7 @@ enum PushTokenService {
     // pushTokenUpdates emission within milliseconds of each other.
     private static var lastRegisteredToken: String?
 
-    static func register(token: Data) async {
+    static func register(token: Data, periods: [ScheduleActivityAttributes.ScheduledPeriod]) async {
         let tokenString = token.map { String(format: "%02x", $0) }.joined()
 
         if lastRegisteredToken == tokenString {
@@ -51,16 +51,27 @@ enum PushTokenService {
             let deviceId: String
             let pushToken: String
             let environment: String
+            let transitions: [Int]   // slotStartMinutes for each period start
+            let endMinutes: Int      // last period's end time — triggers the dismissal push
         }
         #if DEBUG
         let apnsEnvironment = "sandbox"
         #else
         let apnsEnvironment = "production"
         #endif
+        let cal = Calendar.current
+        let transitions = periods.map {
+            cal.component(.hour, from: $0.startDate) * 60 + cal.component(.minute, from: $0.startDate)
+        }
+        let endMinutes = periods.last.map {
+            cal.component(.hour, from: $0.endDate) * 60 + cal.component(.minute, from: $0.endDate)
+        } ?? 0
         request.httpBody = try? JSONEncoder().encode(RegisterBody(
             deviceId: deviceId,
             pushToken: tokenString,
-            environment: apnsEnvironment
+            environment: apnsEnvironment,
+            transitions: transitions,
+            endMinutes: endMinutes
         ))
 
         do {
@@ -99,12 +110,13 @@ enum PushTokenService {
 
     // MARK: - Observe token updates for a live activity
 
-    static func observeTokenUpdates<A: ActivityAttributes>(
-        for activity: Activity<A>
+    static func observeTokenUpdates(
+        for activity: Activity<ScheduleActivityAttributes>,
+        periods: [ScheduleActivityAttributes.ScheduledPeriod]
     ) {
         Task {
             for await token in activity.pushTokenUpdates {
-                await register(token: token)
+                await register(token: token, periods: periods)  // re-sends on token rotation
             }
             // Token stream ended — activity ended, unregister
             await unregister()

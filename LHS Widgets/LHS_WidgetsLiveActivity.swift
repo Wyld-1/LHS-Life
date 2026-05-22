@@ -46,7 +46,7 @@ struct LaSalle_WidgetsLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.trailing) {
                     TimelineView(.explicit(transitions)) { tl in
                         let slot = resolveSlot(at: tl.date, schedule: schedule, state: state, scheduleTypeName: scheduleTypeName)
-                        let timeStr = slot?.isPreSchool == true ? slot?.startTimeString : slot?.endTimeString
+                        let timeStr = (slot?.isPreSchool == true || slot?.isPassing == true) ? slot?.startTimeString : slot?.endTimeString
                         if let timeStr {
                             HStack(spacing: 4) {
                                 Image(systemName: slot?.isPreSchool == true ? "clock" : "bell.fill")
@@ -111,7 +111,7 @@ struct LaSalle_WidgetsLiveActivity: Widget {
             } compactTrailing: {
                 TimelineView(.explicit(transitions)) { tl in
                     let slot = resolveSlot(at: tl.date, schedule: schedule, state: state, scheduleTypeName: scheduleTypeName)
-                    let timeStr = slot?.isPreSchool == true ? slot?.startTimeString : slot?.endTimeString
+                    let timeStr = (slot?.isPreSchool == true || slot?.isPassing == true) ? slot?.startTimeString : slot?.endTimeString
                     if let timeStr {
                         Text(timeStr)
                             .font(.system(size: 11, weight: .bold, design: .rounded))
@@ -293,7 +293,7 @@ private struct LockScreenContent: View {
                 Spacer()
                 // Right: next bell time
                 VStack(alignment: .trailing, spacing: 1) {
-                    Text(slot.isPreSchool ? slot.startTimeString : slot.endTimeString)
+                    Text((slot.isPreSchool || slot.isPassing) ? slot.startTimeString : slot.endTimeString)
                         .font(.system(size: 16, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white)
                     Text(slot.isPreSchool ? "school starts" : "next bell")
