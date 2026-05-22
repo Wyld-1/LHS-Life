@@ -46,6 +46,10 @@ final class LiveActivityService {
         guard settings.liveActivityEffectivelyEnabled(scheduleType: scheduleType) else { return }
         guard let schedule = schedule else { return }
 
+        // Senior Presentation day: the server can't push assembly-schedule transitions,
+        // so only seniors (who have a short, server-compatible schedule) get a LA.
+        if schedule.scheduleType == .seniorPresentation && !settings.isSenior { return }
+
         let periods = buildSchedule(from: schedule, settings: settings)
         guard !periods.isEmpty else { return }
 
@@ -166,17 +170,28 @@ final class LiveActivityService {
                   end > Date()
             else { return nil }
 
-            let num    = extractPeriodNumber(from: period.name)
+            // Handle "Period 5 Final" — extract the number from the base name,
+            // then re-attach " Final" to the user's configured class display name.
+            let hasFinalSuffix = period.name.hasSuffix(" Final")
+            let baseName = hasFinalSuffix
+                ? String(period.name.dropLast(" Final".count))
+                : period.name
+
+            let num    = extractPeriodNumber(from: baseName)
             let config = num.flatMap { settings.config(for: $0) }
 
-            // Skip periods the user has disabled
+            // Skip periods the user has disabled.
+            // Named slots without a period number (Senior Presentation, Break, Lunch)
+            // are never disabled — they have no config.
             if let config, !config.isEnabled { return nil }
 
-            let colorHex = config.map { ColorPalette.color(at: $0.colorIndex).hex } ?? "#94A3B8"
+            let colorHex    = config.map { ColorPalette.color(at: $0.colorIndex).hex } ?? "#94A3B8"
+            let baseDisplay = config?.displayName ?? baseName
+            let displayName = hasFinalSuffix ? "\(baseDisplay) Final" : baseDisplay
 
             return ScheduleActivityAttributes.ScheduledPeriod(
                 periodNumber:  num,
-                displayName:   config?.displayName ?? period.name,
+                displayName:   displayName,
                 colorHex:      colorHex,
                 startDate:     start,
                 endDate:       end,
@@ -187,8 +202,8 @@ final class LiveActivityService {
     }
 
     private func extractPeriodNumber(from name: String) -> Int? {
-        let p = name.split(separator: " ")
-        guard p.count == 2, p[0].lowercased() == "period" else { return nil }
-        return Int(p[1])
+        let parts = name.split(separator: " ")
+        guard parts.count >= 2, parts[0].lowercased() == "period" else { return nil }
+        return Int(parts[1])
     }
 }

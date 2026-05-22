@@ -46,12 +46,13 @@ struct LaSalle_WidgetsLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.trailing) {
                     TimelineView(.explicit(transitions)) { tl in
                         let slot = resolveSlot(at: tl.date, schedule: schedule, state: state, scheduleTypeName: scheduleTypeName)
-                        if let endTime = slot?.endTimeString {
+                        let timeStr = slot?.isPreSchool == true ? slot?.startTimeString : slot?.endTimeString
+                        if let timeStr {
                             HStack(spacing: 4) {
-                                Image(systemName: "bell.fill")
+                                Image(systemName: slot?.isPreSchool == true ? "clock" : "bell.fill")
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(.white.opacity(0.7))
-                                Text(endTime)
+                                Text(timeStr)
                                     .font(.system(size: 14, weight: .semibold, design: .rounded))
                                     .foregroundStyle(.white)
                             }.padding(.trailing, 4)
@@ -110,8 +111,9 @@ struct LaSalle_WidgetsLiveActivity: Widget {
             } compactTrailing: {
                 TimelineView(.explicit(transitions)) { tl in
                     let slot = resolveSlot(at: tl.date, schedule: schedule, state: state, scheduleTypeName: scheduleTypeName)
-                    if let endTime = slot?.endTimeString {
-                        Text(endTime)
+                    let timeStr = slot?.isPreSchool == true ? slot?.startTimeString : slot?.endTimeString
+                    if let timeStr {
+                        Text(timeStr)
                             .font(.system(size: 11, weight: .bold, design: .rounded))
                             .foregroundStyle(.white).padding(.trailing, 2)
                     }
@@ -185,10 +187,12 @@ private func resolveSlot(
     let upcomingSlot = schedule.first(where: { date < $0.startDate })
 
     // Determine state
-    let isPassing   = activeSlot == nil && pushedSlot == nil && upcomingSlot != nil
+    // isPreSchool is purely time-based — don't check pushedSlot here.
+    // pushedSlot is set from slotStartMinutes which is always > 0 on start,
+    // so requiring pushedSlot == nil would always suppress isPreSchool.
+    let isPreSchool = activeSlot == nil && schedule.allSatisfy({ $0.startDate > date })
+    let isPassing   = !isPreSchool && activeSlot == nil && upcomingSlot != nil
                       && (schedule.last(where: { $0.endDate <= date }) != nil)
-    let isPreSchool = activeSlot == nil && pushedSlot == nil && upcomingSlot != nil
-                      && schedule.allSatisfy({ $0.startDate > date })
 
     let current = pushedSlot ?? activeSlot ?? upcomingSlot
     guard let current else { return nil }

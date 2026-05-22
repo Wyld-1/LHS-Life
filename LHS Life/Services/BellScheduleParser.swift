@@ -235,6 +235,17 @@ final class BellScheduleParser {
     // MARK: - Entry Point
 
     func parse(from event: SchoolEvent, graduationYear: Int? = nil) -> [BellSchedule] {
+        // Senior Presentation day — CalendarWiz has no machine-readable bell schedule
+        // in the description. Detect by title and inject the hardcoded grade-specific
+        // schedule. This check runs BEFORE finals and description parsing so the pro
+        // dress floor rule in CalendarStore never fires on this day.
+        if event.title.lowercased().contains("senior presentation") {
+            if let schedule = seniorPresentationSchedule(on: event.startDate, graduationYear: graduationYear) {
+                return [schedule]
+            }
+            return []
+        }
+
         let titleOrDesc = (event.title + " " + (event.description ?? "")).lowercased()
         let looksLikeFinals = event.title.lowercased().contains("final")
             || titleOrDesc.contains("final exam schedule")
@@ -362,6 +373,63 @@ final class BellScheduleParser {
         if combined.contains("regular")      { return .regular }
         if hasLiturgy                        { return .regularLiturgy }
         return .unknown
+    }
+
+    // MARK: - Senior Presentation Schedule Factory
+
+    /// Returns the hardcoded Senior Presentation day schedule for the user's grade.
+    /// Two completely different schedules run simultaneously on this day:
+    ///   Seniors:    Short finals day (Periods 5 & 6 exams) ending at 12:10 dismissal.
+    ///   9–11 grade: Full compressed 7-period assembly day around the SP block.
+    ///
+    /// Returns nil only if graduationYear is nil (unknown grade) — caller should
+    /// avoid starting a Live Activity in that case.
+    private func seniorPresentationSchedule(
+        on date: Date,
+        graduationYear: Int?
+    ) -> BellSchedule? {
+        guard let graduationYear else { return nil }
+        let dayKey   = DateFormatter.isoDay.string(from: date)
+        let isSenior = PathwaysService.schoolYear(for: date) + 1 == graduationYear
+
+        func t(_ h: Int, _ m: Int) -> DateComponents {
+            var c = DateComponents(); c.hour = h; c.minute = m; return c
+        }
+
+        let periods: [Period]
+        if isSenior {
+            // Senior Final Exam Schedule
+            // Period 5 / 6 are named "Period X Final" so LiveActivityService.buildSchedule
+            // can look up the user's configured class name and append " Final".
+            periods = [
+                Period(id: "\(dayKey)-sp-5f",   name: "Period 5 Final",      startTime: t(8,5),   endTime: t(9,30)),
+                Period(id: "\(dayKey)-sp-brk",  name: "Break",              startTime: t(9,30),  endTime: t(9,40)),
+                Period(id: "\(dayKey)-sp-6f",   name: "Period 6 Final",      startTime: t(9,45),  endTime: t(11,10)),
+                Period(id: "\(dayKey)-sp-pres", name: "Senior Presentation", startTime: t(11,15), endTime: t(12,10)),
+            ]
+        } else {
+            // Assembly Schedule (9–11th grade)
+            periods = [
+                Period(id: "\(dayKey)-sp-1",    name: "Period 1",            startTime: t(8,5),   endTime: t(8,45)),
+                Period(id: "\(dayKey)-sp-2",    name: "Period 2",            startTime: t(8,50),  endTime: t(9,30)),
+                Period(id: "\(dayKey)-sp-brk",  name: "Break",              startTime: t(9,30),  endTime: t(9,40)),
+                Period(id: "\(dayKey)-sp-3",    name: "Period 3",            startTime: t(9,45),  endTime: t(10,25)),
+                Period(id: "\(dayKey)-sp-4",    name: "Period 4",            startTime: t(10,30), endTime: t(11,10)),
+                Period(id: "\(dayKey)-sp-pres", name: "Senior Presentation", startTime: t(11,15), endTime: t(12,10)),
+                Period(id: "\(dayKey)-sp-lnch", name: "Lunch",              startTime: t(12,10), endTime: t(12,40)),
+                Period(id: "\(dayKey)-sp-5",    name: "Period 5",            startTime: t(12,45), endTime: t(13,25)),
+                Period(id: "\(dayKey)-sp-6",    name: "Period 6",            startTime: t(13,30), endTime: t(14,10)),
+                Period(id: "\(dayKey)-sp-7",    name: "Period 7",            startTime: t(14,20), endTime: t(15,0)),
+            ]
+        }
+
+        return BellSchedule(
+            id: "seniorp-\(dayKey)-\(isSenior ? "senior" : "assembly")",
+            date: date,
+            scheduleType: .seniorPresentation,
+            periods: periods,
+            sourceEventID: "senior-presentation"
+        )
     }
 
     private func normalizeName(_ raw: String) -> String {

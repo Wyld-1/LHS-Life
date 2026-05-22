@@ -243,8 +243,9 @@ extension ScheduleType {
         case .lateStart:                                  return Color.lsOrange
         case .earlyRelease, .earlyReleaseLiturgy:         return Color.lsGold
         case .assembly:                                   return Color.lsSuccess
-        case .finals:                                     return Color.lsDestructive
-        case .custom, .unknown:                           return Color.lsSecondary
+        case .seniorPresentation:                          return Color.lsGold
+        case .finals:                                      return Color.lsDestructive
+        case .custom, .unknown:                            return Color.lsSecondary
         }
     }
 }

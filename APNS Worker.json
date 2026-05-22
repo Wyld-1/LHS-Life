@@ -71,13 +71,26 @@ async function handleRegister(request, env) {
     return new Response("Missing deviceId or pushToken", { status: 400 });
   }
 
-  await env.TOKENS.put(`token:${deviceId}`, JSON.stringify({
-    pushToken,
-    environment: environment ?? "production",
-    updatedAt: new Date().toISOString(),
-  }));
+  // Guard against missing KV binding — the most common cause of opaque 500s.
+  if (!env.TOKENS) {
+    const msg = "KV binding 'TOKENS' is not configured on this worker. Check Cloudflare dashboard → Workers → Settings → Variables → KV Namespace Bindings.";
+    console.error(`[Register] ${msg}`);
+    return new Response(msg, { status: 500 });
+  }
 
-  console.log(`[Register] Device ${deviceId} registered`);
+  try {
+    await env.TOKENS.put(`token:${deviceId}`, JSON.stringify({
+      pushToken,
+      environment: environment ?? "production",
+      updatedAt: new Date().toISOString(),
+    }));
+  } catch (e) {
+    const msg = `KV write failed: ${e.message}`;
+    console.error(`[Register] ${msg}`);
+    return new Response(msg, { status: 500 });
+  }
+
+  console.log(`[Register] Device ${deviceId} registered (${environment ?? "production"})`);
   return new Response("OK", { status: 200 });
 }
 
@@ -128,17 +141,21 @@ async function runPushCycle(env) {
 
   if (periodIndex === -1) {
     console.log("[Cron] No transition this minute");
-    // Still check for a pending end push (handles the case where this cron
-    // fires exactly at the end minute with no concurrent period transition).
+    // Still check for a pending end push. Use >= with a 10-minute window
+    // rather than exact equality — cron jitter on the free tier can cause
+    // the firing minute to drift past the target, silently missing the push.
     const pendingEnd = await env.TOKENS.get(`endpush:${todayKey}`);
-    if (pendingEnd && parseInt(pendingEnd) === currentMinutes) {
-      const tokens = await getAllTokens(env);
-      if (tokens.length > 0) {
-        const jwt = await getAPNsJWT(env);
-        console.log(`[Cron] Sending end-of-day dismissal push`);
-        await pushToAll(tokens, { slotStartMinutes: 0, isEnded: true }, true, jwt, env);
+    if (pendingEnd) {
+      const endMinutes = parseInt(pendingEnd);
+      if (currentMinutes >= endMinutes && currentMinutes <= endMinutes + 10) {
+        const tokens = await getAllTokens(env);
+        if (tokens.length > 0) {
+          const jwt = await getAPNsJWT(env);
+          console.log(`[Cron] Sending end-of-day dismissal push (${currentMinutes - endMinutes}min after target)`);
+          await pushToAll(tokens, { slotStartMinutes: 0, isEnded: true }, true, jwt, env);
+        }
+        await env.TOKENS.delete(`endpush:${todayKey}`);
       }
-      await env.TOKENS.delete(`endpush:${todayKey}`);
     }
     return;
   }
@@ -189,12 +206,16 @@ async function runPushCycle(env) {
     await pushToAll(tokens, contentState, false, jwt, env);
   }
 
-  // Check if this minute also matches a scheduled end push
+  // Check if this minute also matches a scheduled end push.
+  // Use >= with a 10-minute window for the same jitter reason as above.
   const pendingEnd = await env.TOKENS.get(`endpush:${todayKey}`);
-  if (pendingEnd && parseInt(pendingEnd) === currentMinutes) {
-    console.log(`[Cron] Sending end-of-day dismissal push`);
-    await pushToAll(tokens, { slotStartMinutes: 0, isEnded: true }, true, jwt, env);
-    await env.TOKENS.delete(`endpush:${todayKey}`);
+  if (pendingEnd) {
+    const endMinutes = parseInt(pendingEnd);
+    if (currentMinutes >= endMinutes && currentMinutes <= endMinutes + 10) {
+      console.log(`[Cron] Sending end-of-day dismissal push (${currentMinutes - endMinutes}min after target)`);
+      await pushToAll(tokens, { slotStartMinutes: 0, isEnded: true }, true, jwt, env);
+      await env.TOKENS.delete(`endpush:${todayKey}`);
+    }
   }
 }
 

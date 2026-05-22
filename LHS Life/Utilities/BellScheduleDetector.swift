@@ -26,6 +26,9 @@ enum BellScheduleDetector {
     /// events that merely embed a schedule table in their description.
     static func looksLikeBellScheduleTitle(_ title: String) -> Bool {
         let t = title.lowercased()
+        // Senior Presentation day has no machine-readable description but IS a
+        // schedule event — detect by title before the keyword check.
+        if t.contains("senior presentation") { return true }
         return bellKeywords.contains { t.contains($0) }
     }
 

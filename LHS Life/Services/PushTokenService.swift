@@ -27,8 +27,19 @@ enum PushTokenService {
 
     // MARK: - Register
 
+    // Deduplicates rapid registrations of the same token. ActivityKit sometimes
+    // delivers the initial token via both activity.pushToken AND the first
+    // pushTokenUpdates emission within milliseconds of each other.
+    private static var lastRegisteredToken: String?
+
     static func register(token: Data) async {
         let tokenString = token.map { String(format: "%02x", $0) }.joined()
+
+        if lastRegisteredToken == tokenString {
+            print("[PushToken] Skipping duplicate registration: \(tokenString.prefix(16))...")
+            return
+        }
+
         print("[PushToken] Registering token: \(tokenString.prefix(16))...")
 
         guard let url = URL(string: "\(workerURL)/register") else { return }
@@ -53,11 +64,17 @@ enum PushTokenService {
         ))
 
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(for: request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            print("[PushToken] Registered — HTTP \(status)")
+            if status == 200 {
+                lastRegisteredToken = tokenString
+                print("[PushToken] Registered — HTTP \(status) (\(apnsEnvironment))")
+            } else {
+                let body = String(data: data, encoding: .utf8) ?? "<no body>"
+                print("[PushToken] Registration FAILED — HTTP \(status): \(body)")
+            }
         } catch {
-            print("[PushToken] Registration failed: \(error)")
+            print("[PushToken] Registration network error: \(error)")
         }
     }
 

@@ -34,10 +34,11 @@ enum ScheduleType: String, Codable, CaseIterable {
     case lateStart           = "Late Start"
     case earlyRelease        = "Early Release"
     case earlyReleaseLiturgy = "Early Release Liturgy"
-    case assembly            = "Assembly"
-    case finals              = "Finals"
-    case custom              = "Custom"
-    case unknown             = "Unknown"
+    case assembly              = "Assembly"
+    case seniorPresentation    = "Senior Presentation"
+    case finals                = "Finals"
+    case custom                = "Custom"
+    case unknown               = "Unknown"
 }
 
 // MARK: - Period
