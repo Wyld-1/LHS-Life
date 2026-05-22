@@ -14,7 +14,8 @@ enum BellScheduleDetector {
 
     private static let bellKeywords: [String] = [
         "bell schedule", "block schedule", "late start", "early release",
-        "early dismissal", "schedule", "period", "modified day"
+        "early dismissal", "schedule", "period", "modified day",
+        "senior presentation",
     ]
 
     static func looksLikeBellSchedule(title: String, description: String?) -> Bool {

@@ -122,7 +122,7 @@ private struct DayView: View {
                             .frame(width: 1, height: 1)
                             .id("now-anchor")
                         // Event anchor — repositions when scrollToEvent changes
-                        if let event = uiState.scrollToEvent {
+                        if uiState.scrollToEvent != nil {
                             Color.clear
                                 .frame(width: 1, height: max(0, eventAnchorY - anchorY))
                             Color.clear

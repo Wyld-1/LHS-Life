@@ -181,11 +181,19 @@ final class CalendarStore {
     private func applyEvents(_ fetched: [SchoolEvent]) {
         events = fetched.sorted { $0.startDate < $1.startDate }
         var schedules: [String: BellSchedule] = [:]
+
         for event in events where event.hasBellSchedule {
             for schedule in bellParser.parse(from: event, graduationYear: settings.graduationYear) {
-                if let existing = schedules[schedule.dayKey],
-                   existing.scheduleType == .finals,
-                   schedule.scheduleType != .finals { continue }
+                if let existing = schedules[schedule.dayKey] {
+                    // High-priority schedules (finals, seniorPresentation) are never
+                    // overwritten by lower-priority ones. Pro Dress Day embeds a regular
+                    // schedule table in its description and would otherwise clobber these.
+                    let existingIsProtected = existing.scheduleType == .finals
+                        || existing.scheduleType == .seniorPresentation
+                    let incomingIsHigher = schedule.scheduleType == .finals
+                        || schedule.scheduleType == .seniorPresentation
+                    if existingIsProtected && !incomingIsHigher { continue }
+                }
                 schedules[schedule.dayKey] = schedule
             }
         }
