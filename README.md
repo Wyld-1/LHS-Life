@@ -52,7 +52,7 @@ After launch, find us on the App Store!
 ### Notes:
 - LHS Life is available exclusively to LaSalle students.
 - iOS 26.0 or later is recommend for all users.
-- All of your personal data stays on your device. LHS Life has **NO** external servers or methods to view your private information. 
+- All of your personal data stays on your device. LHS Life has **NO** methods to view your private information. 
 
 ---
  
