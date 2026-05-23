@@ -30,6 +30,9 @@ enum BellScheduleDetector {
         // Senior Presentation day has no machine-readable description but IS a
         // schedule event — detect by title before the keyword check.
         if t.contains("senior presentation") { return true }
+        // Finals events contain "exam" which BellScheduleDetector.category would
+        // otherwise catch first and return .academic, hiding them from the parser.
+        if t.contains("final exam") || t.contains("finals") { return true }
         return bellKeywords.contains { t.contains($0) }
     }
 

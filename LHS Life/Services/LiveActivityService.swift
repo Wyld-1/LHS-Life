@@ -164,7 +164,7 @@ final class LiveActivityService {
         from schedule: BellSchedule,
         settings: UserSettings
     ) -> [ScheduleActivityAttributes.ScheduledPeriod] {
-        schedule.periods.compactMap { period -> ScheduleActivityAttributes.ScheduledPeriod? in
+        let mapped = schedule.periods.compactMap { period -> ScheduleActivityAttributes.ScheduledPeriod? in
             guard let start = period.startDate(on: schedule.date),
                   let end   = period.endDate(on: schedule.date),
                   end > Date()
@@ -199,6 +199,30 @@ final class LiveActivityService {
             )
         }
         .sorted { $0.startDate < $1.startDate }
+
+        // Synthesize passing periods for implicit gaps between consecutive periods.
+        // The schedule data has no explicit Passing entries — the gaps are implicit.
+        // Without this, the worker never fires during passing and the widget holds
+        // the previous period until the next class starts.
+        var withPassing: [ScheduleActivityAttributes.ScheduledPeriod] = []
+        for (i, period) in mapped.enumerated() {
+            withPassing.append(period)
+            guard i < mapped.count - 1 else { continue }
+            let next = mapped[i + 1]
+            let gap = next.startDate.timeIntervalSince(period.endDate)
+            // ≤ 10 min = passing period. Longer gaps are already named (Break, Lunch).
+            if gap > 0 && gap <= 600 {
+                withPassing.append(ScheduleActivityAttributes.ScheduledPeriod(
+                    periodNumber: nil,
+                    displayName: "Passing",
+                    colorHex: "#94A3B8",
+                    startDate: period.endDate,
+                    endDate: next.startDate,
+                    endTimeString: ScheduleEngine.timeString(next.startDate)
+                ))
+            }
+        }
+        return withPassing
     }
 
     private func extractPeriodNumber(from name: String) -> Int? {

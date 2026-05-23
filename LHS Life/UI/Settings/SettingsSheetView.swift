@@ -380,22 +380,27 @@ struct SettingsSheetView: View {
                 Button {
                     HapticEngine.shared.tap()
                     let now = Date()
+                    let fmt = DateFormatter()
+                    fmt.dateFormat = "h:mm a"
+                    let p1End   = now.addingTimeInterval(120)  // +2 min
+                    let passEnd = now.addingTimeInterval(150)  // +2 min 30 s
+                    let p2End   = now.addingTimeInterval(270)  // +4 min 30 s
                     let periods: [ScheduleActivityAttributes.ScheduledPeriod] = [
                         .init(periodNumber: 1, displayName: "English",
                               colorHex: "#FF6B6B",
-                              startDate: now.addingTimeInterval(-1200),
-                              endDate: now.addingTimeInterval(1800),
-                              endTimeString: "In 30 min"),
-                        .init(periodNumber: nil, displayName: "Break",
+                              startDate: now.addingTimeInterval(-5),
+                              endDate: p1End,
+                              endTimeString: fmt.string(from: p1End)),
+                        .init(periodNumber: nil, displayName: "Passing",
                               colorHex: "#94A3B8",
-                              startDate: now.addingTimeInterval(1800),
-                              endDate: now.addingTimeInterval(2400),
-                              endTimeString: "In 10 min"),
+                              startDate: p1End,
+                              endDate: passEnd,
+                              endTimeString: fmt.string(from: passEnd)),
                         .init(periodNumber: 2, displayName: "Chemistry",
                               colorHex: "#F5B800",
-                              startDate: now.addingTimeInterval(2400),
-                              endDate: now.addingTimeInterval(6000),
-                              endTimeString: "In 60 min"),
+                              startDate: passEnd,
+                              endDate: p2End,
+                              endTimeString: fmt.string(from: p2End)),
                     ]
                     let cal = Calendar.current
                     let h = cal.component(.hour,   from: periods[0].startDate)
