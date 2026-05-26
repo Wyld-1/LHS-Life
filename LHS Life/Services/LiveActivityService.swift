@@ -36,26 +36,33 @@ final class LiveActivityService {
     // MARK: - Start if needed
 
     func startIfNeeded(schedule: BellSchedule?, settings: UserSettings) {
-        // Reconnect first — avoids starting a duplicate if one already exists
         reconnect()
-        guard currentActivity == nil else { return }
-
-        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
-
+        guard currentActivity == nil else {
+            print("[LiveActivity] startIfNeeded bailed — activity already running (id: \(currentActivity!.id))")
+            return
+        }
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else {
+            print("[LiveActivity] startIfNeeded bailed — activities not enabled")
+            return
+        }
         let scheduleType = schedule?.scheduleType
-        guard settings.liveActivityEffectivelyEnabled(scheduleType: scheduleType) else { return }
-        guard let schedule = schedule else { return }
-
-        // Senior Presentation day: the server can't push assembly-schedule transitions,
-        // so only seniors (who have a short, server-compatible schedule) get a LA.
-        if schedule.scheduleType == .seniorPresentation && !settings.isSenior { return }
-
+        guard settings.liveActivityEffectivelyEnabled(scheduleType: scheduleType) else {
+            print("[LiveActivity] startIfNeeded bailed — liveActivityEffectivelyEnabled returned false (type: \(String(describing: scheduleType)))")
+            return
+        }
+        guard let schedule = schedule else {
+            print("[LiveActivity] startIfNeeded bailed — schedule is nil")
+            return
+        }
         let periods = buildSchedule(from: schedule, settings: settings)
-        guard !periods.isEmpty else { return }
-
-        // Don't start more than 60 minutes before the first enabled period
-        if let firstBell = periods.first?.startDate,
-           firstBell.timeIntervalSinceNow > 3600 { return }
+        guard !periods.isEmpty else {
+            print("[LiveActivity] startIfNeeded bailed — periods empty after buildSchedule")
+            return
+        }
+        if let firstBell = periods.first?.startDate, firstBell.timeIntervalSinceNow > 3600 {
+            print("[LiveActivity] startIfNeeded bailed — first bell too far away (\(Int(firstBell.timeIntervalSinceNow / 60))min)")
+            return
+        }
 
         CachedSchedule.save(periods)
 

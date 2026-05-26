@@ -121,9 +121,8 @@ async function runPushCycle(env) {
 
   console.log(`[Cron] ${todayKey} ${String(nowPT.hours).padStart(2,'0')}:${String(nowPT.minutes).padStart(2,'0')} PT`);
 
-  // Only run Mon–Fri
-  if (nowPT.dow === 0 || nowPT.dow === 6) {
-    console.log("[Cron] Weekend — skipping");
+  // Only run Mon–Fri, 6:00 AM–4:00 PM PT (supports 0 period; avoids burning KV list quota overnight)
+  if (nowPT.dow === 0 || nowPT.dow === 6 || nowPT.hours < 6 || nowPT.hours >= 16) {
     return;
   }
 
