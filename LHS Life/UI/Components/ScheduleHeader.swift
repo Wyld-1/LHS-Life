@@ -156,13 +156,14 @@ struct ScheduleHeaderPill: View {
                     Text(sub)
                         .font(.lsCaption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                 }
             }
             Spacer()
         }
         .padding(.horizontal, LS.md)
         .padding(.vertical, LS.sm)
+        .frame(minHeight: 44)
         .overlay(alignment: .leading) {
             if !settings.apModeEnabledToday {
                 if state.dayState == .inSession, let slot = state.currentSlot {
@@ -438,6 +439,154 @@ struct ScheduleHeader: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Phone Header Row
+// iPhone-only. Header pill leading and greedy; trailing toolbar-style
+// capsule holds an optional per-tab contextual button (cycle in Events,
+// back in the web tabs, none in Lunch) plus settings — one shared capsule,
+// like Calendar/Notes, not two separate circles. With no contextual button
+// the capsule naturally narrows to just settings.
+
+struct PhoneHeaderRow: View {
+    let selectedTab: AppTab
+    let cycleLabel: String?
+    let onCycle: () -> Void
+    let canGoBack: Bool
+    let onBack: () -> Void
+    let showSettingsBadge: Bool
+    let onSettings: () -> Void
+    var onPillTap: (() -> Void)? = nil
+    var onEventTap: ((SchoolEvent) -> Void)? = nil
+
+    private var contextualSymbol: String? {
+        switch selectedTab {
+        case .events:                  return zoomSystemIcon(for: cycleLabel)
+        case .powerschool, .schoology: return "chevron.left"
+        default:                       return nil
+        }
+    }
+
+    private var contextualEnabled: Bool {
+        switch selectedTab {
+        case .powerschool, .schoology: return canGoBack
+        default:                       return true
+        }
+    }
+
+    private var contextualAction: () -> Void {
+        switch selectedTab {
+        case .events:                  return onCycle
+        case .powerschool, .schoology: return onBack
+        default:                       return {}
+        }
+    }
+
+    var body: some View {
+        let _ = print("[TABNAV] HEADER render — selectedTab=\(selectedTab) symbol=\(contextualSymbol ?? "nil")")
+        HStack(spacing: LS.sm) {
+            ScheduleHeaderPill(onPillTap: onPillTap, onEventTap: onEventTap)
+                .frame(maxWidth: .infinity)
+            HeaderTrailingCapsule(
+                contextualIcon: contextualSymbol,
+                contextualEnabled: contextualEnabled,
+                onContextual: contextualAction,
+                showSettingsBadge: showSettingsBadge,
+                onSettings: onSettings
+            )
+        }
+    }
+
+    private func zoomSystemIcon(for label: String?) -> String {
+        switch label {
+        case "Month": return "square.grid.2x2.fill"
+        case "Year":  return "square.grid.3x3.fill"
+        case "Day":   return "calendar.day.timeline.leading"
+        default:      return "calendar"
+        }
+    }
+}
+
+// MARK: - Header Trailing Capsule
+// One shared toolbar-style capsule (Calendar/Notes pattern): a single
+// glassEffect(in: Capsule()) around plain icon buttons on iOS 26+, or one
+// shared frosted Capsule background pre-26 — never per-button circles.
+// Downsized to standard toolbar scale (32pt buttons vs. the 56pt floating
+// buttons this replaced).
+
+struct HeaderTrailingCapsule: View {
+    var contextualIcon: String? = nil       // SF Symbol name; nil hides it (e.g. Lunch tab)
+    var contextualEnabled: Bool = true
+    var onContextual: () -> Void = {}
+    let showSettingsBadge: Bool
+    let onSettings: () -> Void
+
+    private let buttonSize: CGFloat = 44
+    private let iconSize: CGFloat = 20
+
+    var body: some View {
+        if #available(iOS 26, *) {
+            toolbarContent
+                .glassEffect(.regular.interactive(), in: Capsule())
+        } else {
+            toolbarContent
+                .background {
+                    Capsule()
+                        .fill(.ultraThinMaterial)
+                        .overlay { Capsule().strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5) }
+                        .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
+                }
+        }
+    }
+
+    private var toolbarContent: some View {
+        HStack(spacing: 6) {
+            if let contextualIcon {
+                iconButton(systemName: contextualIcon, enabled: contextualEnabled, action: onContextual)
+            }
+            settingsButton
+        }
+        .frame(height: buttonSize)
+    }
+
+    private func iconButton(systemName: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            HapticEngine.shared.tap()
+            action()
+        } label: {
+            Image(systemName: systemName)
+                .font(.system(size: iconSize, weight: .regular))
+                .foregroundStyle(Color.lsPrimary)
+                .frame(width: buttonSize, height: buttonSize)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(enabled ? 1 : 0.35)
+        .disabled(!enabled)
+    }
+
+    private var settingsButton: some View {
+        Button {
+            HapticEngine.shared.tap()
+            onSettings()
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "person.crop.circle")
+                    .font(.system(size: iconSize, weight: .regular))
+                    .foregroundStyle(Color.lsPrimary)
+                    .frame(width: buttonSize, height: buttonSize)
+                    .contentShape(Rectangle())
+                if showSettingsBadge {
+                    Circle()
+                        .fill(Color.lsDestructive)
+                        .frame(width: 8, height: 8)
+                        .offset(x: 1, y: -1)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

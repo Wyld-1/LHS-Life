@@ -23,6 +23,7 @@ struct AppDock: View {
     let powerschoolState: EmbeddedWebState
     let schoologyState:   EmbeddedWebState
     var onSameTabTap: (AppTab) -> Void = { _ in }
+    var onHomeworkTap: () -> Void = {}
 
     var body: some View {
         if #available(iOS 26, *), UIDevice.current.userInterfaceIdiom == .phone {
@@ -31,7 +32,9 @@ struct AppDock: View {
                 selectedTab: $selectedTab,
                 lunchState: lunchState,
                 powerschoolState: powerschoolState,
-                schoologyState: schoologyState
+                schoologyState: schoologyState,
+                onSameTabTap: onSameTabTap,
+                onHomeworkTap: onHomeworkTap
             )
         } else {
             // iPhone iOS 17-25, and iPad (iPad uses AppTabContainer's iPadLayout directly)
@@ -54,9 +57,29 @@ private struct SystemTabDock: View {
     let lunchState:       EmbeddedWebState
     let powerschoolState: EmbeddedWebState
     let schoologyState:   EmbeddedWebState
+    var onSameTabTap: (AppTab) -> Void = { _ in }
+    var onHomeworkTap: () -> Void = {}
+
+    /// Custom selection binding: SwiftUI writes to `set` on every tab tap,
+    /// including reselecting the already-active tab (newValue == current).
+    /// That same-value write is our reselect signal. We do NOT touch the
+    /// tab bar controller's delegate, so SwiftUI's own coordinator keeps
+    /// driving selection — selectedTab stays live and the header updates.
+    private var selection: Binding<AppTab> {
+        Binding(
+            get: { selectedTab },
+            set: { newValue in
+                let isReselect = (newValue == selectedTab)
+                if isReselect {
+                    onSameTabTap(newValue)
+                }
+                selectedTab = newValue
+            }
+        )
+    }
 
     var body: some View {
-        TabView(selection: $selectedTab) {
+        TabView(selection: selection) {
             Tab("Events", systemImage: "calendar", value: AppTab.events) {
                 EventsTabView()
             }
@@ -73,37 +96,41 @@ private struct SystemTabDock: View {
             } label: {
                 Label("Schoology", image: "schoology-logo")
             }
-            Tab(value: AppTab.homework, role: .search) {
-                HomeworkSearchTab()
-            } label: {
-                Label("Homework", systemImage: "checklist")
-            }
         }
         .tabBarMinimizeBehavior(.onScrollDown)
         .tint(Color.lsBlue)
+        .tabViewBottomAccessory {
+            HomeworkAccessory(action: onHomeworkTap)
+        }
     }
 }
 
-// MARK: - Homework Search Tab (iOS 26 only)
-// Presented when the detached circle button is tapped.
-// The system uses the .search role icon (magnifying glass) by default —
-// we override the label to use our checklist icon instead.
+// MARK: - Homework Accessory (iOS 26+)
+// Persistent one-tap "add homework" control, floating above the tab bar
+// via the system tabViewBottomAccessory API — same mechanism as Apple
+// Music's Now Playing bar. Always visible regardless of selected tab;
+// tapping opens the same HomeworkPopup the legacy FAB opens.
 @available(iOS 26, *)
-private struct HomeworkSearchTab: View {
-    @Environment(CalendarStore.self) private var store
-    @Environment(UserSettings.self) private var settings
-    @State private var show = true
+private struct HomeworkAccessory: View {
+    @Environment(\.tabViewBottomAccessoryPlacement) private var placement
+    let action: () -> Void
 
     var body: some View {
-        ZStack {
-            Color.lsBackground.ignoresSafeArea()
-            if show {
-                HomeworkPopup(onDismiss: { show = false })
-                    .environment(store)
-                    .environment(settings)
+        Button {
+            HapticEngine.shared.bump()
+            action()
+        } label: {
+            HStack(spacing: LS.xs) {
+                Image(systemName: "checklist")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                Text("Add Homework")
+                    .font(.lsHeadline)
             }
+            .foregroundStyle(Color.lsPrimary)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
         }
-        .onAppear { show = true }
+        .buttonStyle(.plain)
     }
 }
 

@@ -9,6 +9,7 @@
 //
 
 import SwiftUI
+internal import WebKit
 
 // MARK: - Tab Definition
 
@@ -145,19 +146,32 @@ struct AppTabContainer: View {
                 schoologyState: schoologyState,
                 onSameTabTap: { tab in
                     switch tab {
+                    case .events:      calendarUI.goToToday()
                     case .powerschool: powerschoolState.reload()
                     case .schoology:   schoologyState.reload()
                     case .lunch:       lunchState.reload()
                     default: break
                     }
+                },
+                onHomeworkTap: {
+                    HapticEngine.shared.bump()
+                    withAnimation(.lsSpring) { showHomework = true }
                 }
             )
             .environment(calendarUI)
 
             VStack {
-                ScheduleHeader(
-                    actionIcon: .settings(showBadge: showBadge),
-                    onAction: {
+                PhoneHeaderRow(
+                    selectedTab: selectedTab,
+                    cycleLabel: calendarUI.zoomOutLabel,
+                    onCycle: { calendarUI.zoomOutAction() },
+                    canGoBack: selectedTab == .powerschool ? powerschoolState.canGoBack : schoologyState.canGoBack,
+                    onBack: {
+                        if selectedTab == .powerschool { powerschoolState.webView?.goBack() }
+                        else if selectedTab == .schoology { schoologyState.webView?.goBack() }
+                    },
+                    showSettingsBadge: showBadge,
+                    onSettings: {
                         settings.apBadgeCleared = true
                         showSettings = true
                     },
@@ -174,18 +188,6 @@ struct AppTabContainer: View {
                 HStack(alignment: .bottom) {
                     Spacer()
                     VStack(spacing: LS.sm) {
-                        if selectedTab == .events {
-                            FloatingNavButtons(role: .calendar(
-                                onToday: { calendarUI.goToToday() },
-                                isOnToday: Calendar.current.isDateInToday(calendarUI.selectedDate) && calendarUI.viewMode == .day,
-                                zoomLabel: calendarUI.zoomOutLabel,
-                                onZoom: { calendarUI.zoomOutAction() }
-                            ))
-                        } else if selectedTab == .powerschool {
-                            FloatingNavButtons(role: .web(state: powerschoolState, onHome: { powerschoolState.reload() }))
-                        } else if selectedTab == .schoology {
-                            FloatingNavButtons(role: .web(state: schoologyState, onHome: { schoologyState.reload() }))
-                        }
                         if #unavailable(iOS 26) {
                             HomeworkFAB {
                                 HapticEngine.shared.bump()
