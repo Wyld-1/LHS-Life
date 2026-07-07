@@ -21,6 +21,7 @@ final class LiveActivityService {
     private init() {}
 
     private var currentActivity: Activity<ScheduleActivityAttributes>?
+    private(set) var isDebugSession = false
 
     // MARK: - Reconnect (call on app launch/foreground)
     // Restores currentActivity from ActivityKit if the app was suspended.
@@ -114,9 +115,64 @@ final class LiveActivityService {
         }
     }
 
+    // MARK: - Dummy start (debug only)
+    // Starts a fake 2-minute schedule anchored to now, immune to school-over checks.
+
+    func startDummy() {
+        let now = Date()
+        let fmt = DateFormatter()
+        fmt.dateFormat = "h:mm a"
+        let p1End   = now.addingTimeInterval(120)
+        let passEnd = now.addingTimeInterval(150)
+        let p2End   = now.addingTimeInterval(270)
+        let periods: [ScheduleActivityAttributes.ScheduledPeriod] = [
+            .init(periodNumber: 1,   displayName: "English",
+                  colorHex: "#FF6B6B",
+                  startDate: now.addingTimeInterval(-5), endDate: p1End,
+                  endTimeString: fmt.string(from: p1End)),
+            .init(periodNumber: nil, displayName: "Passing",
+                  colorHex: "#94A3B8",
+                  startDate: p1End, endDate: passEnd,
+                  endTimeString: fmt.string(from: passEnd)),
+            .init(periodNumber: 2,   displayName: "Chemistry",
+                  colorHex: "#F5B800",
+                  startDate: passEnd, endDate: p2End,
+                  endTimeString: fmt.string(from: p2End)),
+        ]
+        let cal = Calendar.current
+        let h   = cal.component(.hour,   from: periods[0].startDate)
+        let m   = cal.component(.minute, from: periods[0].startDate)
+        let state = ScheduleActivityAttributes.ContentState(
+            slotStartMinutes: h * 60 + m, isEnded: false
+        )
+        CachedSchedule.save(periods)
+        do {
+            let activity = try Activity.request(
+                attributes: ScheduleActivityAttributes(
+                    schoolName: "LaSalle",
+                    scheduleTypeName: "Debug Schedule",
+                    schedule: periods
+                ),
+                content: .init(state: state, staleDate: now.addingTimeInterval(6000)),
+                pushType: .token
+            )
+            currentActivity = activity
+            isDebugSession  = true
+            print("[LiveActivity] Dummy started — id: \(activity.id)")
+            if let initialToken = activity.pushToken {
+                Task { await PushTokenService.register(token: initialToken, periods: periods) }
+            }
+            PushTokenService.observeTokenUpdates(for: activity, periods: periods)
+            BellTransitionService.scheduleTransitions(for: periods.filter { $0.startDate > now })
+        } catch {
+            print("[LiveActivity] Dummy start failed: \(error)")
+        }
+    }
+
     // MARK: - End if school over
 
     func endIfSchoolOver(state: ScheduleEngine.ScheduleState) {
+        guard !isDebugSession else { return }   // leave debug sessions alone
         switch state.dayState {
         case .afterSchool, .holiday, .pathwaysDay:
             guard currentActivity != nil ||
@@ -131,6 +187,7 @@ final class LiveActivityService {
     // MARK: - End
 
     func end() async {
+        isDebugSession = false
         CachedSchedule.clear()
         // End all activities in case of duplicates from BGTask timing issues
         for activity in Activity<ScheduleActivityAttributes>.activities {

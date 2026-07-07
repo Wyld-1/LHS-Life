@@ -23,6 +23,7 @@
  * KV structure:
  *   token:{deviceId}        → { pushToken, environment, transitions, endMinutes, updatedAt }
  *   endpush:{deviceId}:{YYYY-MM-DD} → endMinutes (set when last period fires; auto-expires)
+ *   registry:devices        → JSON array of active deviceIds (avoids list() quota burn in push cycle)
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -86,6 +87,13 @@ async function handleRegister(request, env) {
       endMinutes:  endMinutes  ?? null,
       updatedAt: new Date().toISOString(),
     }));
+    // Maintain the device registry so getAllTokens can use a single get() instead of list()
+    const regRaw = await env.TOKENS.get("registry:devices");
+    const regIds = regRaw ? JSON.parse(regRaw) : [];
+    if (!regIds.includes(deviceId)) {
+      regIds.push(deviceId);
+      await env.TOKENS.put("registry:devices", JSON.stringify(regIds));
+    }
   } catch (e) {
     const msg = `KV write failed: ${e.message}`;
     console.error(`[Register] ${msg}`);
@@ -106,6 +114,15 @@ async function handleUnregister(request, env) {
   if (!deviceId) return new Response("Missing deviceId", { status: 400 });
 
   await env.TOKENS.delete(`token:${deviceId}`);
+  try {
+    const regRaw = await env.TOKENS.get("registry:devices");
+    if (regRaw) {
+      const ids = JSON.parse(regRaw).filter(id => id !== deviceId);
+      await env.TOKENS.put("registry:devices", JSON.stringify(ids));
+    }
+  } catch (e) {
+    console.error(`[Unregister] Registry update failed: ${e.message}`);
+  }
   console.log(`[Unregister] Device ${deviceId} removed`);
   return new Response("OK", { status: 200 });
 }
@@ -121,10 +138,9 @@ async function runPushCycle(env) {
 
   console.log(`[Cron] ${todayKey} ${String(nowPT.hours).padStart(2,'0')}:${String(nowPT.minutes).padStart(2,'0')} PT`);
 
-  // Only run Mon–Fri, 6:00 AM–4:00 PM PT (supports 0 period; avoids burning KV list quota overnight)
-  if (nowPT.dow === 0 || nowPT.dow === 6 || nowPT.hours < 6 || nowPT.hours >= 16) {
-    return;
-  }
+  // Only skip weekends — the hours guard was removed when list() was replaced
+  // by the registry key, eliminating the 1k/day list quota concern.
+  if (nowPT.dow === 0 || nowPT.dow === 6) return;
 
   const tokens = await getAllTokens(env);
   if (tokens.length === 0) {
@@ -159,7 +175,7 @@ async function runPushCycle(env) {
 
       if (dead) {
         console.log(`[APNs] 💀 ${device.deviceId} — dead token, removing`);
-        await env.TOKENS.delete(`token:${device.deviceId}`);
+        await removeDevice(device.deviceId, env);
         continue;
       }
 
@@ -180,7 +196,7 @@ async function runPushCycle(env) {
         const { dead } = await sendAPNsEnd(device.pushToken,
           { slotStartMinutes: 0, isEnded: true },
           jwt, env, device.environment).catch(err => { console.log(`[APNs] ✗ ${device.deviceId}: ${err.message}`); return { dead: false }; });
-        if (dead) await env.TOKENS.delete(`token:${device.deviceId}`);
+        if (dead) await removeDevice(device.deviceId, env);
         await env.TOKENS.delete(`endpush:${device.deviceId}:${todayKey}`);
       }
     }
@@ -338,14 +354,18 @@ async function generateJWT(keyId, teamId, privateKeyPem) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function getAllTokens(env) {
-  const list = await env.TOKENS.list({ prefix: "token:" });
+  // Uses a stored registry key instead of list() — list() has a 1,000/day free-tier quota;
+  // reads are capped at 100,000/day, giving 100× more headroom as users scale.
+  const raw = await env.TOKENS.get("registry:devices");
+  if (!raw) return [];
+  let deviceIds;
+  try { deviceIds = JSON.parse(raw); } catch { return []; }
   const tokens = [];
-
-  for (const key of list.keys) {
-    const value = await env.TOKENS.get(key.name, "json");
+  for (const deviceId of deviceIds) {
+    const value = await env.TOKENS.get(`token:${deviceId}`, "json");
     if (value?.pushToken) {
       tokens.push({
-        deviceId:    key.name.replace("token:", ""),
+        deviceId,
         pushToken:   value.pushToken,
         environment: value.environment ?? "production",
         transitions: value.transitions ?? null,
@@ -353,8 +373,21 @@ async function getAllTokens(env) {
       });
     }
   }
-
   return tokens;
+}
+
+// Deletes a device's token and removes it from the registry.
+async function removeDevice(deviceId, env) {
+  await env.TOKENS.delete(`token:${deviceId}`);
+  try {
+    const raw = await env.TOKENS.get("registry:devices");
+    if (raw) {
+      const ids = JSON.parse(raw).filter(id => id !== deviceId);
+      await env.TOKENS.put("registry:devices", JSON.stringify(ids));
+    }
+  } catch (e) {
+    console.error(`[Registry] Failed to remove ${deviceId}: ${e.message}`);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

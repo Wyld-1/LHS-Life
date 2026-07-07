@@ -168,9 +168,10 @@ final class CalendarStore {
             )
             cachedTodayKey = dayKey
         }
+        let scheduleForDay = bellSchedules[dayKey]
         return ScheduleEngine.state(
             for: date,
-            schedule: bellSchedules[dayKey],
+            schedule: scheduleForDay,
             settings: settings,
             isPathwaysDay: cachedTodayIsPathways,
             isHoliday: cachedTodayIsHoliday
@@ -183,7 +184,8 @@ final class CalendarStore {
         var schedules: [String: BellSchedule] = [:]
 
         for event in events where event.hasBellSchedule {
-            for schedule in bellParser.parse(from: event, graduationYear: settings.graduationYear) {
+            let parsed = bellParser.parse(from: event, graduationYear: settings.graduationYear)
+            for schedule in parsed {
                 if let existing = schedules[schedule.dayKey] {
                     // High-priority schedules (finals, seniorPresentation) are never
                     // overwritten by lower-priority ones. Pro Dress Day embeds a regular

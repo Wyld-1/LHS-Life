@@ -94,6 +94,7 @@ private struct GlassFloatingButtons: View {
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(item.tint.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.primary))
                         .frame(width: 56, height: 56)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .opacity(item.isEnabled ? 1 : 0.35)
@@ -125,6 +126,7 @@ private struct LegacyFloatingButtons: View {
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(item.tint ?? Color.lsSecondary)
                         .frame(width: 56, height: 56)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .opacity(item.isEnabled ? 1 : 0.35)

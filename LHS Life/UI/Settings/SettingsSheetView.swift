@@ -4,10 +4,8 @@
 //
 
 import SwiftUI
-#if DEBUG
 import UserNotifications
 import ActivityKit
-#endif
 
 struct SettingsSheetView: View {
     @Bindable var settings: UserSettings
@@ -50,9 +48,7 @@ struct SettingsSheetView: View {
                     periodsSection
                     notificationsSection   // includes Live Activity
                     asbSection             // moved to bottom — power user feature
-                    #if DEBUG
                     debugSection
-                    #endif
                 }
                 .padding(.horizontal, LS.md)
                 .padding(.top, LS.md)
@@ -344,11 +340,11 @@ struct SettingsSheetView: View {
         }
     }
 
-    #if DEBUG
     private var debugSection: some View {
         VStack(alignment: .leading, spacing: LS.sm) {
             sectionLabel("Debug")
             VStack(spacing: 0) {
+                #if DEBUG
                 Button {
                     HapticEngine.shared.tap()
                     Task {
@@ -376,56 +372,11 @@ struct SettingsSheetView: View {
                     .padding(LS.md)
                 }
                 Divider().background(Color.lsTertiary.opacity(0.3))
+                #endif
                 
                 Button {
                     HapticEngine.shared.tap()
-                    let now = Date()
-                    let fmt = DateFormatter()
-                    fmt.dateFormat = "h:mm a"
-                    let p1End   = now.addingTimeInterval(120)  // +2 min
-                    let passEnd = now.addingTimeInterval(150)  // +2 min 30 s
-                    let p2End   = now.addingTimeInterval(270)  // +4 min 30 s
-                    let periods: [ScheduleActivityAttributes.ScheduledPeriod] = [
-                        .init(periodNumber: 1, displayName: "English",
-                              colorHex: "#FF6B6B",
-                              startDate: now.addingTimeInterval(-5),
-                              endDate: p1End,
-                              endTimeString: fmt.string(from: p1End)),
-                        .init(periodNumber: nil, displayName: "Passing",
-                              colorHex: "#94A3B8",
-                              startDate: p1End,
-                              endDate: passEnd,
-                              endTimeString: fmt.string(from: passEnd)),
-                        .init(periodNumber: 2, displayName: "Chemistry",
-                              colorHex: "#F5B800",
-                              startDate: passEnd,
-                              endDate: p2End,
-                              endTimeString: fmt.string(from: p2End)),
-                    ]
-                    let cal = Calendar.current
-                    let h = cal.component(.hour,   from: periods[0].startDate)
-                    let m = cal.component(.minute, from: periods[0].startDate)
-                    let state = ScheduleActivityAttributes.ContentState(
-                        slotStartMinutes: h * 60 + m,
-                        isEnded: false
-                    )
-                    CachedSchedule.save(periods)
-                    do {
-                        let activity = try Activity.request(
-                            attributes: ScheduleActivityAttributes(
-                                schoolName: "LaSalle",
-                                scheduleTypeName: "Regular Schedule",
-                                schedule: periods
-                            ),
-                            content: .init(state: state, staleDate: now.addingTimeInterval(6000)),
-                            pushType: .token
-                        )
-                        PushTokenService.observeTokenUpdates(for: activity, periods: periods)
-                        BellTransitionService.scheduleTransitions(for: periods.filter { $0.startDate > now })
-                        print("[Debug] Dummy Live Activity started")
-                    } catch {
-                        print("[Debug] Dummy start failed: \(error)")
-                    }
+                    LiveActivityService.shared.startDummy()
                 } label: {
                     HStack {
                         Image(systemName: "bolt.circle.fill")
@@ -492,7 +443,6 @@ struct SettingsSheetView: View {
             .lsCard()
         }
     }
-    #endif
 
     private func sectionLabel(_ text: String) -> some View {
         Text(text.uppercased())

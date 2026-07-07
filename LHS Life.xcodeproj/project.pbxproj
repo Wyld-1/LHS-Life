@@ -52,6 +52,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		231449CD2FFCB0A5000D05F3 /* LHS Life.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = "LHS Life.xcodeproj"; sourceTree = SOURCE_ROOT; };
 		231F30642FB04A0F00F58221 /* LHS Life Icon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = "LHS Life Icon.icon"; sourceTree = "<group>"; };
 		2335D8672FBE7E470054E1EC /* APNS Worker.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "APNS Worker.json"; sourceTree = "<group>"; };
 		23E395A12FA5399800574B85 /* LHS Life.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "LHS Life.app"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -153,6 +154,11 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		231449CE2FFCB0A5000D05F3 /* Products */ = {
+			isa = PBXGroup;
+			name = Products;
+			sourceTree = "<group>";
+		};
 		23E395982FA5399800574B85 = {
 			isa = PBXGroup;
 			children = (
@@ -165,6 +171,7 @@
 				23E395A22FA5399800574B85 /* Products */,
 				231F30642FB04A0F00F58221 /* LHS Life Icon.icon */,
 				2335D8672FBE7E470054E1EC /* APNS Worker.json */,
+				231449CD2FFCB0A5000D05F3 /* LHS Life.xcodeproj */,
 			);
 			sourceTree = "<group>";
 		};
@@ -323,6 +330,12 @@
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 23E395A22FA5399800574B85 /* Products */;
 			projectDirPath = "";
+			projectReferences = (
+				{
+					ProductGroup = 231449CE2FFCB0A5000D05F3 /* Products */;
+					ProjectRef = 231449CD2FFCB0A5000D05F3 /* LHS Life.xcodeproj */;
+				},
+			);
 			projectRoot = "";
 			targets = (
 				23E395A02FA5399800574B85 /* LHS Life */,
@@ -419,6 +432,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				APS_ENVIRONMENT = development;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
@@ -483,6 +497,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				APS_ENVIRONMENT = production;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
@@ -544,7 +559,7 @@
 				CODE_SIGN_ENTITLEMENTS = "LHS Life/LHS Life.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = NM24PZL726;
+				DEVELOPMENT_TEAM = PQW4KRLW78;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "LHS-Life-Info.plist";
@@ -562,7 +577,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.15;
+				MARKETING_VERSION = 1.16;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lasalle.lhslife;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -583,7 +598,7 @@
 				CODE_SIGN_ENTITLEMENTS = "LHS Life/LHS Life.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = NM24PZL726;
+				DEVELOPMENT_TEAM = PQW4KRLW78;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "LHS-Life-Info.plist";
@@ -601,7 +616,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.15;
+				MARKETING_VERSION = 1.16;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lasalle.lhslife;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
