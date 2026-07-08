@@ -108,6 +108,17 @@ final class EmbeddedWebState {
         wv.isOpaque = true
         wv.scrollView.contentInsetAdjustmentBehavior = .never
         wv.navigationDelegate = delegate
+        // Created with an explicit frame (UIKit default leaves
+        // translatesAutoresizingMaskIntoConstraints = true), but this view
+        // gets embedded into SwiftUI via UIViewRepresentable, which sizes it
+        // through Auto Layout constraints generated from .frame(). Leaving
+        // the autoresizing-mask translation on creates two competing sizing
+        // systems — the view keeps rendering at its original full-screen
+        // frame regardless of the actual space SwiftUI gives it (e.g. the
+        // narrower NavigationSplitView detail column when the iPad sidebar
+        // is expanded). Turning this off lets SwiftUI's constraints fully
+        // own sizing.
+        wv.translatesAutoresizingMaskIntoConstraints = false
         webView = wv
         isReady  = true
         isLoading = true
@@ -177,25 +188,25 @@ struct EmbeddedWebView: View {
 
     var body: some View {
         GeometryReader { geo in
+            let _ = print("[WEBVIEW-SIZE] \(webState.siteName) GeometryReader geo.size=\(geo.size)")
             ZStack(alignment: .top) {
                 if let wv = webState.webView {
-                    WebViewRepresentable(webView: wv)
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .ignoresSafeArea()
+                    WebViewRepresentable(webView: wv, size: geo.size)
+                        .ignoresSafeArea(edges: [.top, .bottom])
                         .onAppear {
                             webState.applyInsets(top: LS.contentTopInset, bottom: 0)
                         }
                 }
 
                 if webState.isLoading || !webState.isReady {
-                    Color.lsBackground.ignoresSafeArea()
+                    Color.lsBackground.ignoresSafeArea(edges: [.top, .bottom])
                     ProgressView()
                         .tint(Color.lsBlue)
                         .scaleEffect(1.3)
                 }
 
                 if let error = webState.loadError {
-                    Color.lsBackground.ignoresSafeArea()
+                    Color.lsBackground.ignoresSafeArea(edges: [.top, .bottom])
                     VStack(spacing: LS.md) {
                         Image(systemName: "wifi.slash")
                             .font(.system(size: 44))
@@ -217,7 +228,7 @@ struct EmbeddedWebView: View {
             }
         }
         .background(Color.lsBackground)
-        .ignoresSafeArea()
+        .ignoresSafeArea(edges: [.top, .bottom])
         .animation(.lsFade, value: webState.isLoading)
         .animation(.lsFade, value: webState.isReady)
     }
@@ -227,6 +238,18 @@ struct EmbeddedWebView: View {
 
 struct WebViewRepresentable: UIViewRepresentable {
     let webView: WKWebView
-    func makeUIView(context: Context) -> WKWebView { webView }
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
+    let size: CGSize
+
+    func makeUIView(context: Context) -> WKWebView {
+        webView
+    }
+
+    func updateUIView(_ uiView: WKWebView, context: Context) {
+        guard size.width > 0, size.height > 0 else { return }
+        let target = CGRect(origin: .zero, size: size)
+        if uiView.frame != target {
+            print("[WEBVIEW-SIZE] updateUIView — forcing frame from \(uiView.frame) to \(target)")
+            uiView.frame = target
+        }
+    }
 }

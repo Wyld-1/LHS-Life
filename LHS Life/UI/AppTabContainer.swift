@@ -4,8 +4,10 @@
 //
 //  Single branch point at the top level: iPhone vs iPad.
 //
-//  iPhone — ZStack with floating pill+button at top, AppDock at bottom.
-//  iPad   — System TabView (top bar) with pill as bottom accessory.
+//  iPhone — PhoneLayout (UI/iPhone/): ZStack, floating header + tab dock.
+//  iPad   — iPadRootView (UI/iPad/): NavigationSplitView, sidebar +
+//           detail pane with a top-toolbar contextual button and a
+//           persistent Homework FAB.
 //
 
 import SwiftUI
@@ -80,15 +82,6 @@ struct AppTabContainer: View {
 
     private var isPhone: Bool { UIDevice.current.userInterfaceIdiom == .phone }
 
-    private var showBadge: Bool {
-        let dayKey = DateFormatter.isoDay.string(from: Date())
-        let state = APExamService.examState(
-            for: dayKey, events: store.events(on: dayKey), settings: settings
-        )
-        if case .none = state { return false }
-        return !settings.apBadgeCleared
-    }
-
     private var launchProgress: Double {
         var p = store.events.isEmpty ? 0.0 : 0.34
         if lunchState.isReady       { p += 0.22 }
@@ -138,231 +131,35 @@ struct AppTabContainer: View {
     // MARK: - iPhone Layout
 
     private var iPhoneLayout: some View {
-        ZStack {
-            AppDock(
-                selectedTab: $selectedTab,
-                lunchState: lunchState,
-                powerschoolState: powerschoolState,
-                schoologyState: schoologyState,
-                onSameTabTap: { tab in
-                    switch tab {
-                    case .events:      calendarUI.goToToday()
-                    case .powerschool: powerschoolState.reload()
-                    case .schoology:   schoologyState.reload()
-                    case .lunch:       lunchState.reload()
-                    default: break
-                    }
-                },
-                onHomeworkTap: {
-                    HapticEngine.shared.bump()
-                    withAnimation(.lsSpring) { showHomework = true }
-                }
-            )
-            .environment(calendarUI)
-
-            VStack {
-                PhoneHeaderRow(
-                    selectedTab: selectedTab,
-                    cycleLabel: calendarUI.zoomOutLabel,
-                    onCycle: { calendarUI.zoomOutAction() },
-                    canGoBack: selectedTab == .powerschool ? powerschoolState.canGoBack : schoologyState.canGoBack,
-                    onBack: {
-                        if selectedTab == .powerschool { powerschoolState.webView?.goBack() }
-                        else if selectedTab == .schoology { schoologyState.webView?.goBack() }
-                    },
-                    showSettingsBadge: showBadge,
-                    onSettings: {
-                        settings.apBadgeCleared = true
-                        showSettings = true
-                    },
-                    onPillTap: { withAnimation(.lsSnappy) { selectedTab = .events } },
-                    onEventTap: { event in
-                        withAnimation(.lsSnappy) { selectedTab = .events }
-                        calendarUI.navigateTo(event: event)
-                    }
-                )
-                .padding(.horizontal, LS.md)
-
-                Spacer()
-
-                HStack(alignment: .bottom) {
-                    Spacer()
-                    VStack(spacing: LS.sm) {
-                        if #unavailable(iOS 26) {
-                            HomeworkFAB {
-                                HapticEngine.shared.bump()
-                                withAnimation(.lsSpring) { showHomework = true }
-                            }
-                        }
-                    }
-                }
-                .padding(.trailing, LS.md)
-                .padding(.bottom, LS.xxl)
-            }
-            .safeAreaPadding(.bottom)
-            .background(alignment: .top) {
-                LinearGradient(
-                    stops: [
-                        .init(color: Color.lsBackground,            location: 0),
-                        .init(color: Color.lsBackground,            location: 0.3),
-                        .init(color: Color.lsBackground.opacity(0), location: 1)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: LS.contentTopInset)
-                .ignoresSafeArea(edges: .top)
-                .allowsHitTesting(false)
-            }
-
-            if showHomework {
-                HomeworkPopup(onDismiss: { withAnimation(.lsSpring) { showHomework = false } })
-                    .environment(store)
-                    .environment(settings)
-                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                    .zIndex(10)
-            }
-
-            if isLaunching {
-                LaunchScreen(progress: launchProgress)
-                    .transition(.opacity)
-                    .zIndex(20)
-            }
-        }
-        .background(Color.lsBackground)
+        PhoneLayout(
+            selectedTab: $selectedTab,
+            showSettings: $showSettings,
+            showHomework: $showHomework,
+            isLaunching: isLaunching,
+            launchProgress: launchProgress,
+            calendarUI: calendarUI,
+            lunchState: lunchState,
+            powerschoolState: powerschoolState,
+            schoologyState: schoologyState
+        )
     }
 
     // MARK: - iPad Layout
 
-    @ViewBuilder
     private var iPadLayout: some View {
-        if #available(iOS 26, *) {
-            iPadTabView
-        } else {
-            iPhoneLayout
-        }
+        iPadRootView(
+            selectedTab: $selectedTab,
+            showSettings: $showSettings,
+            showHomework: $showHomework,
+            isLaunching: isLaunching,
+            launchProgress: launchProgress,
+            calendarUI: calendarUI,
+            lunchState: lunchState,
+            powerschoolState: powerschoolState,
+            schoologyState: schoologyState
+        )
     }
 
-    @available(iOS 26, *)
-    private var iPadTabView: some View {
-        ZStack {
-            TabView(selection: $selectedTab) {
-                Tab("Events", systemImage: "calendar", value: AppTab.events) {
-                    EventsTabView()
-                        .environment(calendarUI)
-                        .overlay(alignment: .bottomTrailing) {
-                            FloatingNavButtons(role: .calendar(
-                                onToday: { calendarUI.goToToday() },
-                                isOnToday: Calendar.current.isDateInToday(calendarUI.selectedDate) && calendarUI.viewMode == .day,
-                                zoomLabel: calendarUI.zoomOutLabel,
-                                onZoom: { calendarUI.zoomOutAction() }
-                            ))
-                            .padding(.trailing, LS.md)
-                            .padding(.bottom, 120)
-                        }
-                }
-                Tab("Order", systemImage: "fork.knife", value: AppTab.lunch) {
-                    LunchTabView(webState: lunchState)
-                }
-                Tab(value: AppTab.powerschool) {
-                    PowerSchoolTabView(webState: powerschoolState)
-                        .overlay(alignment: .bottomTrailing) {
-                            FloatingNavButtons(role: .web(state: powerschoolState, onHome: { powerschoolState.reload() }))
-                            .padding(.trailing, LS.md)
-                            .padding(.bottom, 120)
-                        }
-                } label: {
-                    Label("Grades", image: "powerschool-logo")
-                }
-                Tab(value: AppTab.schoology) {
-                    SchoologyTabView(webState: schoologyState)
-                        .overlay(alignment: .bottomTrailing) {
-                            FloatingNavButtons(role: .web(state: schoologyState, onHome: { schoologyState.reload() }))
-                            .padding(.trailing, LS.md)
-                            .padding(.bottom, 120)
-                        }
-                } label: {
-                    Label("Schoology", image: "schoology-logo")
-                }
-            }
-            .tabBarMinimizeBehavior(.onScrollDown)
-            .tint(Color.lsBlue)
-            // Settings button — top right
-            .overlay(alignment: .topTrailing) {
-                SettingsButton(
-                    showSettings: Binding(
-                        get: { showSettings },
-                        set: { show in
-                            if show { settings.apBadgeCleared = true }
-                            showSettings = show
-                        }
-                    ),
-                    showBadge: showBadge
-                )
-                .padding(.trailing, LS.md)
-                .padding(.top, LS.sm)
-            }
-
-            // Header + homework button — bottom, mirroring iPhone's top header
-            VStack {
-                Spacer()
-                HStack {
-                    ScheduleHeader(
-                        actionIcon: .homework,
-                        onAction: { withAnimation(.lsSpring) { showHomework = true } },
-                        onPillTap: { withAnimation(.lsSnappy) { selectedTab = .events } },
-                        onEventTap: { event in
-                            withAnimation(.lsSnappy) { selectedTab = .events }
-                            calendarUI.navigateTo(event: event)
-                        }
-                    )
-                    .environment(settings)
-                    .environment(store)
-                }
-                .padding(.horizontal, LS.md)
-                .padding(.bottom, LS.sm)
-                .safeAreaPadding(.bottom)
-            }
-
-            if showHomework {
-                HomeworkPopup(onDismiss: { withAnimation(.lsSpring) { showHomework = false } })
-                    .environment(store)
-                    .environment(settings)
-                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                    .zIndex(10)
-            }
-            if isLaunching {
-                LaunchScreen(progress: launchProgress)
-                    .transition(.opacity)
-                    .zIndex(20)
-            }
-        }
-    }
-
-}
-
-// MARK: - Homework FAB (iPhone legacy only)
-
-private struct HomeworkFAB: View {
-    let action: () -> Void
-
-    var body: some View {
-        Button {
-            HapticEngine.shared.bump()
-            action()
-        } label: {
-            Image(systemName: "checklist")
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 48, height: 48)
-                .background {
-                    Circle()
-                        .fill(Color.lsBlue)
-                        .shadow(color: Color.lsBlue.opacity(0.4), radius: 12, y: 4)
-                }
-        }
-        .buttonStyle(.plain)
-    }
 }
 
 #Preview {
