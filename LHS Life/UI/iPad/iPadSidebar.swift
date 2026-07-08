@@ -65,6 +65,7 @@ struct iPadSidebar: View {
         .navigationTitle("LHS Life")
         .safeAreaInset(edge: .bottom) {
             SettingsRow(onTap: onSettingsTap, showBadge: showSettingsBadge)
+                .ignoresSafeArea(edges: .bottom)
         }
     }
 }
@@ -80,7 +81,8 @@ private struct NavRow: View {
     var body: some View {
         Label {
             Text(tab.title)
-                .font(.lsBody)
+                .font(.lsHeadline)
+                .fontWeight(.semibold)
                 .foregroundStyle(isSelected ? Color.primary : Color.secondary)
         } icon: {
             if tab.isCustomAsset {
@@ -110,7 +112,7 @@ private struct SettingsRow: View {
             Button(action: onTap) {
                 HStack(spacing: 12) {
                     ZStack(alignment: .topTrailing) {
-                        Image(systemName: "gearshape.fill")
+                        Image(systemName: "person.crop.circle")
                             .font(.system(size: 17))
                             .foregroundStyle(Color.secondary)
                         if showBadge {
@@ -121,12 +123,12 @@ private struct SettingsRow: View {
                         }
                     }
                     Text("Settings")
-                        .font(.lsBody)
+                        .font(.lsHeadline)
                         .foregroundStyle(Color.primary)
                     Spacer()
                 }
                 .padding(.horizontal, LS.lg)
-                .padding(.vertical, LS.md)
+                .padding(.vertical, LS.lg)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

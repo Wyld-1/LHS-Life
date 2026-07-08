@@ -13,30 +13,36 @@ import SwiftUI
 
 extension Color {
     // Backgrounds
-    static let lsBackground     = Color(hex: "#0A0C10")  // Near-black base
-    static let lsSurface        = Color(hex: "#13161C")  // Card / sheet background
-    static let lsSurfaceRaised  = Color(hex: "#1C2029")  // Elevated card
+    static let lsBackground     = Color(light: "#F2F3F7", dark: "#0A0C10")  // Page canvas
+    static let lsSurface        = Color(light: "#FFFFFF", dark: "#13161C")  // Card / sheet background
+    static let lsSurfaceRaised  = Color(light: "#F7F8FA", dark: "#1C2029")  // Elevated card
 
     // LaSalle brand
-    static let lsBlue           = Color(hex: "#3A6FD8")  // Royal blue (lightened for dark)
-    static let lsGold           = Color(hex: "#F5B800")  // LaSalle gold
+    static let lsBlue           = Color(light: "#2F5FC4", dark: "#3A6FD8")  // Royal blue (deepened for light-mode contrast on white)
+    static let lsGold           = Color(light: "#A8790A", dark: "#F5B800")  // LaSalle gold (darkened — pure gold on white reads low-contrast)
 
     // Text
-    static let lsPrimary        = Color.white
-    static let lsSecondary      = Color(hex: "#8A93A8")
-    static let lsTertiary       = Color(hex: "#4A5168")
+    static let lsPrimary        = Color(light: "#0A0C10", dark: "#FFFFFF")  // Flips: near-black on light, white on dark
+    static let lsSecondary      = Color(light: "#5B6472", dark: "#8A93A8")
+    static let lsTertiary       = Color(light: "#9AA1AF", dark: "#4A5168")
 
     // Semantic
-    static let lsDestructive    = Color(hex: "#FF6B6B")
-    static let lsSuccess        = Color(hex: "#34C78A")
-    static let lsOrange         = Color(hex: "#FB923C")
-    static let lsPurple         = Color(hex: "#7C3AED")
+    static let lsDestructive    = Color(light: "#D64545", dark: "#FF6B6B")
+    static let lsSuccess        = Color(light: "#1F9968", dark: "#34C78A")
+    static let lsOrange         = Color(light: "#C9691F", dark: "#FB923C")
+    static let lsPurple         = Color(light: "#6425C4", dark: "#7C3AED")
 
     // Header gradient stops
-    static let lsHeaderTop      = Color(hex: "#0D1220")
-    static let lsHeaderBottom   = Color(hex: "#0A0C10")
+    static let lsHeaderTop      = Color(light: "#FAFBFC", dark: "#0D1220")
+    static let lsHeaderBottom   = Color(light: "#F2F3F7", dark: "#0A0C10")
 
     // MARK: Palette color → SwiftUI Color
+    // NOTE: period/subject colors (ColorPalette) are a separate, user-chosen
+    // palette (the color-picker grid in Settings) — not part of the light/
+    // dark token system above. Not touched here; those are fixed brand-ish
+    // accent swatches the user picks per-period, expected to read the same
+    // regardless of appearance, same as how a label-maker's colors don't
+    // change with the room lighting.
     static func paletteColor(at index: Int) -> Color {
         Color(hex: ColorPalette.color(at: index).hex)
     }
@@ -45,7 +51,7 @@ extension Color {
         Color(hex: ColorPalette.color(at: config.colorIndex).hex)
     }
 
-    // MARK: Hex init
+    // MARK: Hex init (fixed, non-adaptive — same color in light and dark)
     init(hex: String) {
         let h = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
         var int: UInt64 = 0
@@ -54,6 +60,29 @@ extension Color {
         let g = Double((int >> 8)  & 0xFF) / 255
         let b = Double(int         & 0xFF) / 255
         self.init(red: r, green: g, blue: b)
+    }
+
+    // MARK: Dynamic init — resolves differently per system appearance.
+    // This is what actually makes a token "light-mode ready": the plain
+    // hex init above always returns the same fixed color regardless of
+    // system appearance; this one picks between two hex values based on
+    // the active UITraitCollection at render time.
+    init(light: String, dark: String) {
+        self.init(uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark ? UIColor(hex: dark) : UIColor(hex: light)
+        })
+    }
+}
+
+private extension UIColor {
+    convenience init(hex: String) {
+        let h = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: h).scanHexInt64(&int)
+        let r = CGFloat((int >> 16) & 0xFF) / 255
+        let g = CGFloat((int >> 8)  & 0xFF) / 255
+        let b = CGFloat(int         & 0xFF) / 255
+        self.init(red: r, green: g, blue: b, alpha: 1)
     }
 }
 

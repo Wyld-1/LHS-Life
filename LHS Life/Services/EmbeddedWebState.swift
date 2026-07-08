@@ -70,6 +70,8 @@ final class EmbeddedWebState {
     // Schoology and PowerSchool serve desktop HTML when the view identifies as iPad/Mac.
     private static let mobileUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
 
+    private static let darkStyleID = "ls-dark-override"
+
     private static let darkModeCSS = """
         body, div, p, span, td, th, label, input, select, textarea, a {
             color: #FFFFFF !important;
@@ -84,26 +86,51 @@ final class EmbeddedWebState {
         a { color: #3A6FD8 !important; }
         """
 
-    private static let cssScript = WKUserScript(
-        source: """
+    // Style element carries an ID so it can be found and removed later —
+    // needed for live reactivity (Sunrise/Sunset auto-appearance switching
+    // mid-session), not just a one-time injection at page load.
+    private static let injectionScript = """
+        (function() {
+            if (document.getElementById('\(darkStyleID)')) return;
             var style = document.createElement('style');
+            style.id = '\(darkStyleID)';
             style.textContent = `\(darkModeCSS)`;
             document.head.appendChild(style);
-            """,
-        injectionTime: .atDocumentEnd,
-        forMainFrameOnly: false
-    )
+        })();
+        """
+
+    private static let removalScript = """
+        (function() {
+            var el = document.getElementById('\(darkStyleID)');
+            if (el) el.remove();
+        })();
+        """
+
+    private static func userScript(isDark: Bool) -> WKUserScript {
+        WKUserScript(
+            source: isDark ? injectionScript : removalScript,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: false
+        )
+    }
+
+    private static let darkWebBackground  = UIColor(red: 0.074, green: 0.086, blue: 0.11, alpha: 1)
+    private static let lightWebBackground = UIColor(red: 0.949, green: 0.953, blue: 0.969, alpha: 1)
 
     @MainActor
     func initialize() {
         guard webView == nil else { return }
         let config = WKWebViewConfiguration()
-        if injectDarkCSS {
-            config.userContentController.addUserScript(Self.cssScript)
+        let isDark = UIScreen.main.traitCollection.userInterfaceStyle == .dark
+        if injectDarkCSS && isDark {
+            config.userContentController.addUserScript(Self.userScript(isDark: true))
         }
         let wv = WKWebView(frame: UIScreen.main.bounds, configuration: config)
         wv.customUserAgent = Self.mobileUserAgent
-        wv.backgroundColor = UIColor(red: 0.074, green: 0.086, blue: 0.11, alpha: 1)
+        // Matches the app canvas in whichever mode is actually active —
+        // previously hardcoded dark for all three sites (Lunch, PowerSchool,
+        // Schoology), which would flash dark during load even in light mode.
+        wv.backgroundColor = isDark ? Self.darkWebBackground : Self.lightWebBackground
         wv.scrollView.backgroundColor = .clear
         wv.isOpaque = true
         wv.scrollView.contentInsetAdjustmentBehavior = .never
@@ -123,6 +150,26 @@ final class EmbeddedWebState {
         isReady  = true
         isLoading = true
         wv.load(URLRequest(url: url))
+    }
+
+    /// Called from EmbeddedWebView when SwiftUI's \.colorScheme actually
+    /// changes while the app is running — covers Sunrise/Sunset
+    /// auto-appearance, not just a fixed value read once at launch.
+    /// Updates the already-loaded page immediately via JS, and swaps the
+    /// WKUserScript so a future reload/navigation stays consistent too.
+    @MainActor
+    func updateAppearance(isDark: Bool) {
+        guard let wv = webView else { return }
+        wv.backgroundColor = isDark ? Self.darkWebBackground : Self.lightWebBackground
+        guard injectDarkCSS else { return }
+        wv.configuration.userContentController.removeAllUserScripts()
+        wv.configuration.userContentController.addUserScript(Self.userScript(isDark: isDark))
+        let script = isDark ? Self.injectionScript : Self.removalScript
+        wv.evaluateJavaScript(script) { _, error in
+            if let error {
+                print("[EmbeddedWebState] appearance update JS error: \(error)")
+            }
+        }
     }
 
     @MainActor
@@ -185,6 +232,7 @@ final class EmbeddedWebState {
 
 struct EmbeddedWebView: View {
     @Bindable var webState: EmbeddedWebState
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         GeometryReader { geo in
@@ -195,6 +243,16 @@ struct EmbeddedWebView: View {
                         .ignoresSafeArea(edges: [.top, .bottom])
                         .onAppear {
                             webState.applyInsets(top: LS.contentTopInset, bottom: 0)
+                            // Tabs that aren't currently selected get fully
+                            // unmounted by the native TabView/NavigationSplitView
+                            // switch — not just hidden — so .onChange(of:
+                            // colorScheme) below never fires for them while
+                            // backgrounded, and remounting doesn't retroactively
+                            // trigger .onChange either (it only fires on an
+                            // actual change, not initial appearance). Re-check
+                            // on every appear so a backgrounded tab catches up
+                            // the moment you switch to it, not just live ones.
+                            webState.updateAppearance(isDark: colorScheme == .dark)
                         }
                 }
 
@@ -231,6 +289,9 @@ struct EmbeddedWebView: View {
         .ignoresSafeArea(edges: [.top, .bottom])
         .animation(.lsFade, value: webState.isLoading)
         .animation(.lsFade, value: webState.isReady)
+        .onChange(of: colorScheme) { _, newValue in
+            webState.updateAppearance(isDark: newValue == .dark)
+        }
     }
 }
 

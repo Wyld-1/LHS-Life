@@ -163,7 +163,7 @@ struct HomeworkPopup: View {
                 .fill(Color.lsSurface)
                 .overlay {
                     RoundedRectangle(cornerRadius: LS.radiusXl, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5)
+                        .strokeBorder(Color.lsPrimary.opacity(0.08), lineWidth: 0.5)
                 }
         }
         .shadow(color: .black.opacity(0.35), radius: 40, y: 8)

@@ -478,7 +478,7 @@ private struct PeriodRow: View {
                 Circle()
                     .fill(Color.paletteColor(for: config))
                     .frame(width: 22, height: 22)
-                    .overlay { Circle().strokeBorder(Color.white.opacity(0.15), lineWidth: 1) }
+                    .overlay { Circle().strokeBorder(Color.lsPrimary.opacity(0.12), lineWidth: 1) }
             }
             .buttonStyle(.plain)
             .opacity(config.isEnabled ? 1.0 : 0.4)

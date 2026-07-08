@@ -113,7 +113,7 @@ struct iPadRootView: View {
                         button.action()
                     } label: {
                         Image(systemName: button.systemName)
-                            .font(.system(size: 20, weight: .regular))
+                            .font(.system(size: 17, weight: .regular))
                     }
                     .disabled(!button.enabled)
                     .opacity(button.enabled ? 1 : 0.35)

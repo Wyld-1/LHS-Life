@@ -93,9 +93,22 @@ private struct DayView: View {
         cal.dateComponents([.day], from: today, to: cal.startOfDay(for: date)).day ?? 0
     }
 
+    // A day counts as empty only when it has neither bell-schedule periods
+    // nor any calendar events — an ordinary school day always has periods
+    // to show, so this only trips on genuinely blank days (weekends with
+    // nothing on them, unscheduled breaks, etc.), not "school day with no
+    // extra events layered on top."
+    private var isSelectedDayEmpty: Bool {
+        let dayKey = DateFormatter.isoDay.string(from: uiState.selectedDate)
+        let noPeriods = store.bellSchedules[dayKey]?.periods.isEmpty ?? true
+        let noEvents  = store.events(on: dayKey).isEmpty
+        return noPeriods && noEvents
+    }
+
     var body: some View {
         GeometryReader { geo in
             let columnWidth = geo.size.width - Grid.gutterWidth
+            ZStack {
             VStack(spacing: 0) {
                 // Fixed header
                 Color.clear.frame(height: LS.contentTopInset)
@@ -198,8 +211,72 @@ private struct DayView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(Color.lsBackground)
+
+            // Screen-relative overlay — centers on the actual visible
+            // viewport (this outer ZStack's geo), not on the tall scrolled
+            // grid content behind it, so it's always dead-center regardless
+            // of scroll position. Purely visual (allowsHitTesting false) and
+            // scrolling stays fully enabled underneath — nothing here
+            // intercepts or restricts it.
+            //
+            // Vertical band is an ESTIMATE, not a measurement: the actual
+            // top (WeekStrip's real height) and bottom (the Homework
+            // accessory/FAB, which lives in a sibling view — PhoneLayout/
+            // AppDock — entirely outside what this view can see or measure)
+            // aren't available here. If it's off, these two padding numbers
+            // are the ones to nudge.
+            if isSelectedDayEmpty {
+                VStack {
+                    Spacer(minLength: 0)
+                    EmptyDayView(dayKey: DateFormatter.isoDay.string(from: uiState.selectedDate))
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, LS.contentTopInset + 96)
+                .padding(.bottom, 150)
+                .allowsHitTesting(false)
+            }
+            }
         }
         .ignoresSafeArea(edges: .top)
+    }
+}
+
+// MARK: - Empty Day View
+// Shown instead of the scrollable grid when the selected day has neither
+// bell-schedule periods nor calendar events — a static, non-scrolling
+// page rather than an empty scroll view with nothing to find in it.
+// Message is picked pseudo-randomly per day (stable within a session via
+// the day's own hash, so it doesn't change on every re-render) from a
+// small rotating list, matching the app's existing lightly-playful voice
+// elsewhere (e.g. ScheduleHeaderPill's "Happy Friday! 🎉").
+
+private struct EmptyDayView: View {
+    let dayKey: String
+
+    private static let messages = [
+        "No events today",
+        "Nothing on the calendar",
+        "All quiet today",
+        "Nothing scheduled",
+        "Free day",
+        "Not a thing on here",
+        "Clear skies ahead",
+    ]
+
+    private var message: String {
+        let index = abs(dayKey.hashValue) % Self.messages.count
+        return Self.messages[index]
+    }
+
+    var body: some View {
+        VStack(spacing: LS.sm) {
+            Image(systemName: "calendar.badge.checkmark")
+                .font(.system(size: 40, weight: .medium))
+                .foregroundStyle(Color.lsTertiary)
+            Text(message)
+                .font(.lsHeadline)
+                .foregroundStyle(Color.lsSecondary)
+        }
     }
 }
 
@@ -214,9 +291,6 @@ private struct TimeGutter: View {
 
     @State private var now: Date = Date()
     @State private var timer: Timer?
-
-    private var dotY: CGFloat { Grid.y(for: now, on: now) }
-    private var showDot: Bool { Calendar.current.isDateInToday(selectedDate) }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -238,24 +312,13 @@ private struct TimeGutter: View {
                     Spacer()
                     Text(number)
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(Color.lsPrimary.opacity(0.5))
                     Text(suffix)
                         .font(.system(size: 8, weight: .bold, design: .rounded))
                         .foregroundStyle(Color.lsTertiary)
                 }
                 .frame(width: Grid.gutterWidth - 6)
                 .offset(y: y - 9)
-            }
-
-            // Time dot — visible only when selected day is today
-            if showDot {
-                Circle()
-                    .fill(Color.lsDestructive)
-                    .frame(width: 11, height: 11)
-                    .shadow(color: Color.lsDestructive, radius: 2)
-                    .frame(width: Grid.gutterWidth, alignment: .trailing)
-                    .offset(y: dotY + 1.5 - 5.5)
-                    .animation(.linear(duration: 1), value: now)
             }
         }
         .frame(width: Grid.gutterWidth, height: Grid.totalHeight, alignment: .topLeading)
@@ -423,14 +486,28 @@ private struct DayColumn: View {
                     .offset(x: xOffset, y: Grid.y(for: item.event.startDate, on: date))
             }
 
-            // Time scrubber capsule — only on today
+            // Time scrubber — line with a "Now" capsule at the trailing
+            // end, replacing the old separate dot that used to live in the
+            // gutter. Line and capsule share one HStack so they vertically
+            // center on the same axis automatically via SwiftUI's default
+            // center alignment — the outer .offset(y:) positioning below is
+            // untouched from before, so the careful alignment work that
+            // already existed here carries over as-is.
             if isToday {
-                HStack(spacing: 0) {
+                HStack(spacing: 4) {
                     Capsule()
                         .fill(Color.lsDestructive)
+                        .frame(maxWidth: .infinity)
                         .frame(height: 3)
-                        .padding(.trailing, LS.sm)
+                    Text("Now")
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.lsDestructive)
+                        .clipShape(Capsule())
                 }
+                .padding(.trailing, LS.sm)
                 .shadow(color: Color.lsDestructive, radius: 2)
                 .frame(width: width, alignment: .leading)
                 .offset(y: Grid.y(for: now, on: date))
