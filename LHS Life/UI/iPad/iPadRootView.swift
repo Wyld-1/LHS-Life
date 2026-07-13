@@ -96,20 +96,23 @@ struct iPadRootView: View {
                     .environment(calendarUI)
             case .lunch:
                 LunchTabView(webState: lunchState)
+                    .padding(.top, LS.sm)
             case .powerschool:
                 PowerSchoolTabView(webState: powerschoolState)
+                    .padding(.top, LS.sm)
             case .schoology:
                 SchoologyTabView(webState: schoologyState)
+                    .padding(.top, LS.sm)
             case .homework:
                 EmptyView()
             }
         }
         .navigationTitle(selectedTab.title)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if let button = contextualToolbarButton {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        HapticEngine.shared.tap()
                         button.action()
                     } label: {
                         Image(systemName: button.systemName)
@@ -122,7 +125,6 @@ struct iPadRootView: View {
         }
         .overlay(alignment: .bottomTrailing) {
             iPadHomeworkFAB {
-                HapticEngine.shared.bump()
                 withAnimation(.lsSpring) { showHomework = true }
             }
             .padding(.trailing, LS.lg)
@@ -190,16 +192,23 @@ private struct iPadHomeworkFAB: View {
         Button {
             action()
         } label: {
-            Image(systemName: "checklist")
-                .font(.system(size: 22, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 64, height: 64)
-                .background {
+            if #available(iOS 26, *) {
+                icon.glassEffect(.regular.interactive().tint(Color.lsBlue), in: Circle())
+            } else {
+                icon.background {
                     Circle()
                         .fill(Color.lsBlue)
                         .shadow(color: Color.lsBlue.opacity(0.4), radius: 14, y: 4)
                 }
+            }
         }
         .buttonStyle(.plain)
+    }
+
+    private var icon: some View {
+        Image(systemName: "checklist")
+            .font(.system(size: 22, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(width: 64, height: 64)
     }
 }

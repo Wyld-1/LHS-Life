@@ -54,7 +54,6 @@ struct PhoneLayout: View {
                     }
                 },
                 onHomeworkTap: {
-                    HapticEngine.shared.bump()
                     withAnimation(.lsSpring) { showHomework = true }
                 }
             )
@@ -90,7 +89,6 @@ struct PhoneLayout: View {
                     VStack(spacing: LS.sm) {
                         if #unavailable(iOS 26) {
                             HomeworkFAB {
-                                HapticEngine.shared.bump()
                                 withAnimation(.lsSpring) { showHomework = true }
                             }
                         }

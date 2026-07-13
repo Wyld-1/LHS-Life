@@ -113,9 +113,9 @@ struct ScheduleHeaderPill: View {
         .contentShape(Capsule())
         .onTapGesture {
             if let event = tappableEvent, let onEventTap {
-                HapticEngine.shared.tap(); onEventTap(event)
+                onEventTap(event)
             } else if onPillTap != nil {
-                HapticEngine.shared.tap(); onPillTap?()
+                onPillTap?()
             }
         }
         .ifTrue(!suppressGlass) { $0.modifier(CapsuleGlassModifier()) }

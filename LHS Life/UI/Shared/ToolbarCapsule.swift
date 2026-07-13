@@ -58,7 +58,6 @@ struct ToolbarCapsule: View {
 
     private func iconButton(_ spec: ButtonSpec) -> some View {
         Button {
-            HapticEngine.shared.tap()
             spec.action()
         } label: {
             ZStack(alignment: .topTrailing) {

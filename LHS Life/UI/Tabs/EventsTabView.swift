@@ -494,7 +494,7 @@ private struct DayColumn: View {
             // untouched from before, so the careful alignment work that
             // already existed here carries over as-is.
             if isToday {
-                HStack(spacing: 4) {
+                HStack(spacing: -4) {
                     Capsule()
                         .fill(Color.lsDestructive)
                         .frame(maxWidth: .infinity)

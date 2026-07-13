@@ -119,7 +119,6 @@ private struct HomeworkAccessory: View {
 
     var body: some View {
         Button {
-            HapticEngine.shared.bump()
             action()
         } label: {
             HStack(spacing: LS.xs) {
@@ -186,10 +185,8 @@ private struct LegacyDockBar: View {
                 LegacyDockButton(tab: tab, isSelected: selectedTab == tab) {
                     if tab == selectedTab {
                         // Already on this tab — treat as home
-                        HapticEngine.shared.tap()
                         onSameTabTap(tab)
                     } else {
-                        HapticEngine.shared.tap()
                         withAnimation(.lsSnappy) { selectedTab = tab }
                     }
                 }

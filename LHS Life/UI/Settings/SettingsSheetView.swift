@@ -131,13 +131,12 @@ struct SettingsSheetView: View {
                         gradYearInput = String(settings.graduationYear)
                         isEditingGradYear = true
                         gradYearFocused = true
-                        HapticEngine.shared.tap()
                     } label: {
                         Text(String(settings.graduationYear))
                             .font(.lsTime)
                             .foregroundStyle(Color.lsBlue)
                             .padding(.horizontal, LS.sm)
-                            .padding(.vertical, LS.xs)
+                            .frame(height: LS.chipHeight)
                             .background(Color.lsBlue.opacity(0.12))
                             .clipShape(Capsule())
                     }
@@ -152,12 +151,15 @@ struct SettingsSheetView: View {
     }
 
     private func commitGradYear() {
-        if let year = Int(gradYearInput), year > 2020, year < 2040 {
+        if let year = Int(gradYearInput), year > 2020, year < 2040, year != graduationYearBeforeEdit {
             settings.graduationYear = year
+            HapticEngine.shared.tick()
         }
         isEditingGradYear = false
         gradYearFocused = false
     }
+
+    private var graduationYearBeforeEdit: Int { settings.graduationYear }
 
     // MARK: - Periods
 
@@ -170,7 +172,6 @@ struct SettingsSheetView: View {
                         config: $config,
                         isEditing: editingPeriodID == config.id,
                         onTapName: {
-                            HapticEngine.shared.tick()
                             withAnimation(.lsSnappy) {
                                 editingPeriodID = editingPeriodID == config.id ? nil : config.id
                             }
@@ -223,17 +224,20 @@ struct SettingsSheetView: View {
                     }
                     Spacer()
                     Menu {
-                        ForEach(LiveActivityMode.allCases, id: \.rawValue) { mode in
+                        ForEach(LiveActivityMode.allCases.filter { $0 != .off }, id: \.rawValue) { mode in
                             Button {
                                 settings.liveActivityMode = mode
                                 HapticEngine.shared.tick()
                             } label: {
-                                if settings.liveActivityMode == mode {
-                                    Label(mode.label, systemImage: "checkmark")
-                                } else {
-                                    Text(mode.label)
-                                }
+                                Text(mode.label)
                             }
+                        }
+                        Divider()
+                        Button {
+                            settings.liveActivityMode = .off
+                            HapticEngine.shared.tick()
+                        } label: {
+                            Text(LiveActivityMode.off.label)
                         }
                     } label: {
                         HStack(spacing: LS.xs) {
@@ -245,7 +249,7 @@ struct SettingsSheetView: View {
                                 .foregroundStyle(Color.lsBlue)
                         }
                         .padding(.horizontal, LS.sm)
-                        .padding(.vertical, LS.xs)
+                        .frame(height: LS.chipHeight)
                         .background(Color.lsBlue.opacity(0.12))
                         .clipShape(Capsule())
                     }
@@ -346,7 +350,6 @@ struct SettingsSheetView: View {
             VStack(spacing: 0) {
                 #if DEBUG
                 Button {
-                    HapticEngine.shared.tap()
                     Task {
                         let content = UNMutableNotificationContent()
                         content.title = "Morning Announcements"
@@ -375,7 +378,6 @@ struct SettingsSheetView: View {
                 #endif
                 
                 Button {
-                    HapticEngine.shared.tap()
                     LiveActivityService.shared.startDummy()
                 } label: {
                     HStack {
@@ -395,7 +397,6 @@ struct SettingsSheetView: View {
                 Divider().background(Color.lsTertiary.opacity(0.3))
 
                 Button {
-                    HapticEngine.shared.tap()
                     let now      = Date()
                     let dayKey   = DateFormatter.isoDay.string(from: now)
                     let schedule = store.bellSchedules[dayKey]
@@ -422,7 +423,6 @@ struct SettingsSheetView: View {
                 Divider().background(Color.lsTertiary.opacity(0.3))
 
                 Button(role: .destructive) {
-                    HapticEngine.shared.tap()
                     Task {
                         for activity in Activity<ScheduleActivityAttributes>.activities {
                             await activity.end(nil, dismissalPolicy: .immediate)
@@ -473,7 +473,6 @@ private struct PeriodRow: View {
 
             Button {
                 showColorPicker = true
-                HapticEngine.shared.tick()
             } label: {
                 Circle()
                     .fill(Color.paletteColor(for: config))

@@ -124,7 +124,6 @@ struct HomeworkPopup: View {
             // Cancel / Save
             HStack(spacing: LS.sm) {
                 Button("Cancel") {
-                    HapticEngine.shared.tap()
                     titleFocused = false
                     withAnimation(.lsSnappy) { onDismiss() }
                 }
@@ -174,52 +173,44 @@ struct HomeworkPopup: View {
 
     private var classMenu: some View {
         Menu {
-            // None option at top
-            Button {
-                selectedPeriodID = nil
-                HapticEngine.shared.tick()
-            } label: {
-                Label("None", systemImage: selectedPeriodID == nil ? "checkmark" : "minus")
-            }
-            Divider()
             ForEach(enabledPeriods) { config in
                 Button {
                     selectedPeriodID = config.id
                     HapticEngine.shared.tick()
                 } label: {
-                    if selectedPeriodID == config.id {
-                        Label(config.displayName, systemImage: "checkmark")
-                    } else {
-                        Text(config.displayName)
-                    }
+                    Text(config.displayName)
                 }
             }
+            Divider()
+            Button {
+                selectedPeriodID = nil
+                HapticEngine.shared.tick()
+            } label: {
+                Text("None")
+            }
         } label: {
-            HStack(spacing: LS.xs) {
+            HStack(spacing: LS.sm) {
                 if let config = selectedConfig {
                     Circle()
                         .fill(Color.paletteColor(for: config))
-                        .frame(width: 9, height: 9)
-                    Text(config.displayName)
-                        .font(.lsCaption)
-                        .foregroundStyle(Color.lsPrimary)
-                        .lineLimit(1)
+                        .frame(width: 10, height: 10)
+                        .overlay { Circle().strokeBorder(Color.lsPrimary.opacity(0.12), lineWidth: 1) }
                 } else {
                     Circle()
-                        .fill(Color.lsTertiary)
-                        .frame(width: 9, height: 9)
-                    Text("None")
-                        .font(.lsCaption)
-                        .foregroundStyle(Color.lsPrimary)
-                        .lineLimit(1)
+                        .fill(Color.lsSurfaceRaised)
+                        .frame(width: 10, height: 10)
                 }
+                Text(selectedConfig?.displayName ?? "None")
+                    .font(.lsCaption)
+                    .foregroundStyle(Color.lsSecondary)
+                    .lineLimit(1)
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Color.lsSecondary)
             }
             .padding(.horizontal, LS.sm)
-            .padding(.vertical, LS.sm)
+            .frame(height: LS.chipHeight)
             .frame(maxWidth: .infinity)
             .background(Color.lsSurfaceRaised)
             .clipShape(Capsule())
@@ -247,11 +238,11 @@ struct HomeworkPopup: View {
                     .foregroundStyle(priority == .high
                                      ? Color.lsOrange : Color.lsTertiary)
             }
-            .font(.system(size: 14, weight: .bold))
+            .font(.system(size: 14, weight: .black, design: .rounded))
             .padding(.horizontal, LS.sm)
-            .padding(.vertical, LS.sm)
+            .frame(height: LS.chipHeight)
             .fixedSize()
-            .background(Color.lsSurfaceRaised)
+            .background(priority == .none ? Color.lsSurfaceRaised : Color.lsBlue.opacity(0.12))
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -309,9 +300,9 @@ struct HomeworkPopup: View {
                     .lineLimit(1)
             }
             .padding(.horizontal, LS.sm)
-            .padding(.vertical, LS.sm)
+            .frame(height: LS.chipHeight)
             .fixedSize()
-            .background(Color.lsSurfaceRaised)
+            .background(dueDate == nil ? Color.lsSurfaceRaised : Color.lsBlue.opacity(0.12))
             .clipShape(Capsule())
         }
         .simultaneousGesture(TapGesture().onEnded { titleFocused = false })

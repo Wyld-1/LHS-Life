@@ -15,7 +15,6 @@ struct HomeworkFAB: View {
 
     var body: some View {
         Button {
-            HapticEngine.shared.bump()
             action()
         } label: {
             Image(systemName: "checklist")

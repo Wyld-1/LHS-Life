@@ -126,6 +126,13 @@ enum LS {
 
     // Tab bar
     static let tabBarHeight: CGFloat = 56
+
+    // Standard height for inline pill/chip controls (class selector,
+    // priority selector, due date selector, Settings' Grad Year and Live
+    // Activities chips). Explicit height rather than matching padding,
+    // since these controls use different font sizes — matching padding
+    // alone doesn't reliably produce matching visual height across them.
+    static let chipHeight: CGFloat = 32
 }
 
 // MARK: - Animation
