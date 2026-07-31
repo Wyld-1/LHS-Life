@@ -53,6 +53,18 @@ enum ClassOrientationService {
         }
     }
 
+    /// Start time only — used by the notification body, which states just
+    /// the report time rather than the full window.
+    static func startTimeLabel(forGrade grade: Int) -> String? {
+        switch grade {
+        case 9:  return "9 AM"
+        case 10: return "10 AM"
+        case 11: return "11 AM"
+        case 12: return "12 PM"
+        default: return nil
+        }
+    }
+
     static func gradeLabel(forGrade grade: Int) -> String {
         switch grade {
         case 9:  return "Freshmen"

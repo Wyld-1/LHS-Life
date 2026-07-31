@@ -152,6 +152,10 @@ struct ScheduleHeaderPill: View {
     private var primaryText: String {
         if inAPMode, case .mine(let name, _, _, _) = apExamState { return name }
         if apModeExamDone { return afterSchoolPrimary }
+        if isSummerWindow {
+            if let event = todayEvent { return event.title }
+            return "Enjoy summer \u{1F3DC}\u{FE0F}"
+        }
         switch state.dayState {
         case .inSession:
             guard let slot = state.currentSlot else { return "" }
@@ -193,6 +197,17 @@ struct ScheduleHeaderPill: View {
             return "Until \(ScheduleEngine.timeString(end))"
         }
         if apModeExamDone { return tomorrowSecondary }
+        if isSummerWindow {
+            if let event = todayEvent {
+                // "Today at {time}" — all-day events have no time to state,
+                // so the subtitle is simply omitted for those.
+                guard !event.isAllDay else { return nil }
+                return "Today at \(ScheduleEngine.timeString(event.startDate))"
+            }
+            if let event = tomorrowEvent { return upcomingEventText(event) }
+            guard let label = orientationDateLabel else { return nil }
+            return "Orientation on \(label)"
+        }
         let cal = Calendar.current
         let weekday = cal.component(.weekday, from: now)
         switch state.dayState {
@@ -221,81 +236,185 @@ struct ScheduleHeaderPill: View {
         }
     }
 
-    private var saturdaySecondary: String? {
-        let cal = Calendar.current
-        guard let sat = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
-        return store.events(on: DateFormatter.isoDay.string(from: sat))
-            .first { $0.category != .schedules }.map { upcomingEventText($0) }
-    }
+    // MARK: Summer Message
+    //
+    // Aug 1 through the day before Class Orientation Day, when there's no
+    // real event happening today, the header shows "Enjoy summer" instead
+    // of the normal generic "No school today"/weekend text. Once
+    // Orientation Day itself arrives, normal schedule-based header text
+    // resumes on its own (Orientation Day has real synthesized periods by
+    // then, so state.dayState is no longer .noSchedule).
 
-    private var saturdayOrSundaySecondary: String? {
-        let cal = Calendar.current
-        let todayKey = DateFormatter.isoDay.string(from: now)
-        if let event = store.events(on: todayKey).first(where: { $0.category != .schedules && $0.startDate > now }) {
-            return upcomingEventText(event)
+    /// Aug 1 of the current calendar year through (exclusive) the real,
+    /// dynamic Class Orientation Day date — not hardcoded, reads directly
+    /// from the feed the same way ClassOrientationService does.
+    private var orientationEvent: SchoolEvent? {
+        store.events.first {
+            $0.title.trimmingCharacters(in: .whitespaces).lowercased() == "class orientation day"
         }
-        guard let sun = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
-        return store.events(on: DateFormatter.isoDay.string(from: sun))
-            .first { $0.category != .schedules }.map { upcomingEventText($0) }
     }
 
-    private var sundaySecondary: String? {
+    private var summerMessageWindow: (start: Date, end: Date)? {
         let cal = Calendar.current
-        let todayKey = DateFormatter.isoDay.string(from: now)
-        if let event = store.events(on: todayKey).first(where: { $0.category != .schedules && $0.startDate > now }) {
-            return upcomingEventText(event)
-        }
-        guard let mon = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
-        let monKey = DateFormatter.isoDay.string(from: mon)
-        return store.events(on: monKey).first { $0.category != .schedules }.map { upcomingEventText($0) }
-            ?? scheduleLabelFor(dayKey: monKey).map { "Tomorrow: \($0)" }
+        let year = cal.component(.year, from: now)
+        guard let aug1 = cal.date(from: DateComponents(year: year, month: 8, day: 1)) else { return nil }
+        guard let orientation = orientationEvent else { return nil }
+        let orientationDay = cal.startOfDay(for: orientation.startDate)
+        guard orientationDay > aug1 else { return nil }
+        return (aug1, orientationDay)
     }
 
-    private var tomorrowSecondary: String? {
+    private var isSummerWindow: Bool {
+        guard let window = summerMessageWindow else { return false }
+        let today = Calendar.current.startOfDay(for: now)
+        return today >= window.start && today < window.end
+    }
+
+    /// FLAG FOR REVIEW: excludes "Summer School" specifically, same reasoning
+    /// as before — it's an all-day marker on nearly every July weekday in the
+    /// real feed, so treating it as a displayable "real event" would mean the
+    /// placeholders almost never show. Applies to both today's and tomorrow's
+    /// lookup identically. If Summer School SHOULD count, drop this exclusion
+    /// from both.
+    private var todayEvent: SchoolEvent? {
+        let dayKey = DateFormatter.isoDay.string(from: now)
+        return store.events(on: dayKey).first {
+            $0.category != .schedules &&
+            $0.title.trimmingCharacters(in: .whitespaces).lowercased() != "summer school"
+        }
+    }
+
+    private var tomorrowEvent: SchoolEvent? {
         let cal = Calendar.current
         guard let tom = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
-        return store.events(on: DateFormatter.isoDay.string(from: tom))
-            .first { $0.category != .schedules }.map { upcomingEventText($0) }
-    }
-
-    private var tappableEvent: SchoolEvent? {
-        let cal = Calendar.current
-        let weekday = cal.component(.weekday, from: now)
-        switch state.dayState {
-        case .afterSchool, .noSchedule:
-            switch weekday {
-            case 6:  return eventOn(daysAhead: 1)
-            case 7:  return saturdayOrSundayEvent
-            case 1:  return sundayEvent
-            default: return eventOn(daysAhead: 1)
-            }
-        case .holiday:
-            return store.events(on: DateFormatter.isoDay.string(from: now))
-                .first { $0.isHoliday }
-        default: return nil
+        let dayKey = DateFormatter.isoDay.string(from: tom)
+        return store.events(on: dayKey).first {
+            $0.category != .schedules &&
+            $0.title.trimmingCharacters(in: .whitespaces).lowercased() != "summer school"
         }
     }
 
-    private func eventOn(daysAhead: Int) -> SchoolEvent? {
+    private var orientationDateLabel: String? {
+        guard let orientation = orientationEvent else { return nil }
         let cal = Calendar.current
-        guard let d = cal.date(byAdding: .day, value: daysAhead, to: cal.startOfDay(for: now)) else { return nil }
-        return store.events(on: DateFormatter.isoDay.string(from: d)).first { $0.category != .schedules }
+        let day = cal.component(.day, from: orientation.startDate)
+        let f = DateFormatter()
+        f.dateFormat = "MMMM"
+        let month = f.string(from: orientation.startDate)
+        return "\(month) \(day)\(ordinalSuffix(for: day))"
     }
 
-    private var saturdayOrSundayEvent: SchoolEvent? {
+    private func ordinalSuffix(for day: Int) -> String {
+        switch day {
+        case 11, 12, 13: return "th"
+        default:
+            switch day % 10 {
+            case 1:  return "st"
+            case 2:  return "nd"
+            case 3:  return "rd"
+            default: return "th"
+            }
+        }
+    }
+
+    // MARK: Event lookups (single source of truth for BOTH text and tap —
+    // see "Tap Target" below. Each returns the underlying SchoolEvent;
+    // the *Secondary text properties just format whatever these find.)
+
+    private var saturdayLookaheadEvent: SchoolEvent? {
+        let cal = Calendar.current
+        guard let sat = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
+        return store.events(on: DateFormatter.isoDay.string(from: sat)).first { $0.category != .schedules }
+    }
+
+    private var saturdayOrSundayLookaheadEvent: SchoolEvent? {
         let cal = Calendar.current
         let todayKey = DateFormatter.isoDay.string(from: now)
-        if let event = store.events(on: todayKey).first(where: { $0.category != .schedules && $0.startDate > now }) { return event }
+        if let event = store.events(on: todayKey).first(where: { $0.category != .schedules && $0.startDate > now }) {
+            return event
+        }
         guard let sun = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
         return store.events(on: DateFormatter.isoDay.string(from: sun)).first { $0.category != .schedules }
     }
 
-    private var sundayEvent: SchoolEvent? {
+    private var sundayLookaheadEvent: SchoolEvent? {
         let cal = Calendar.current
         let todayKey = DateFormatter.isoDay.string(from: now)
-        if let event = store.events(on: todayKey).first(where: { $0.category != .schedules && $0.startDate > now }) { return event }
+        if let event = store.events(on: todayKey).first(where: { $0.category != .schedules && $0.startDate > now }) {
+            return event
+        }
         guard let mon = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
         return store.events(on: DateFormatter.isoDay.string(from: mon)).first { $0.category != .schedules }
+    }
+
+    private var tomorrowLookaheadEvent: SchoolEvent? {
+        let cal = Calendar.current
+        guard let tom = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
+        return store.events(on: DateFormatter.isoDay.string(from: tom)).first { $0.category != .schedules }
+    }
+
+    private var saturdaySecondary: String? {
+        saturdayLookaheadEvent.map { upcomingEventText($0) }
+    }
+
+    private var saturdayOrSundaySecondary: String? {
+        saturdayOrSundayLookaheadEvent.map { upcomingEventText($0) }
+    }
+
+    private var sundaySecondary: String? {
+        if let event = sundayLookaheadEvent { return upcomingEventText(event) }
+        let cal = Calendar.current
+        guard let mon = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
+        let monKey = DateFormatter.isoDay.string(from: mon)
+        return scheduleLabelFor(dayKey: monKey).map { "Tomorrow: \($0)" }
+    }
+
+    private var tomorrowSecondary: String? {
+        tomorrowLookaheadEvent.map { upcomingEventText($0) }
+    }
+
+    // MARK: Tap Target
+    //
+    // Priority: an event shown in the title, then an event shown in the
+    // subtitle, then nothing — which falls through to onPillTap (switches
+    // to the Events tab, which already auto-scrolls to "now" on appear).
+    // That third tier needs no code here at all: it's "go see your current
+    // class," and the Day view already does that on its own the moment you
+    // land on it. titleEvent/subtitleEvent are deliberately built from the
+    // exact same branches as primaryText/secondaryText above (reusing the
+    // same lookahead-event properties, not a separate parallel lookup) so
+    // tap can never point somewhere the displayed text didn't.
+
+    private var tappableEvent: SchoolEvent? {
+        titleEvent ?? subtitleEvent
+    }
+
+    private var titleEvent: SchoolEvent? {
+        if isSummerWindow { return todayEvent }
+        return nil
+    }
+
+    private var subtitleEvent: SchoolEvent? {
+        if apModeExamDone { return tomorrowLookaheadEvent }
+        if isSummerWindow {
+            if let event = todayEvent { return event.isAllDay ? nil : event }
+            if let event = tomorrowEvent { return event }
+            return orientationEvent
+        }
+        switch state.dayState {
+        case .holiday:
+            return store.events(on: DateFormatter.isoDay.string(from: now)).first { $0.isHoliday }
+        case .afterSchool, .noSchedule:
+            let weekday = Calendar.current.component(.weekday, from: now)
+            switch weekday {
+            case 6:  return saturdayLookaheadEvent
+            case 7:  return saturdayOrSundayLookaheadEvent
+            case 1:  return sundayLookaheadEvent
+            default: return tomorrowLookaheadEvent
+            }
+        default:
+            return nil
+        }
     }
 
     private func upcomingEventText(_ event: SchoolEvent) -> String {

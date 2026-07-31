@@ -23,20 +23,27 @@ final class EmbeddedWebDelegate: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFinish _: WKNavigation!) {
         Task { @MainActor [weak self] in
             self?.state?.isLoading = false
+            self?.state?.isReady = true
             self?.state?.canGoBack = webView.canGoBack
             // Inject email on Microsoft login page
             self?.state?.injectEmailIfNeeded(into: webView)
+            self?.state?.correctScrollPosition(in: webView)
         }
     }
     func webView(_ webView: WKWebView, didFail _: WKNavigation!, withError e: Error) {
         Task { @MainActor [weak self] in
             self?.state?.isLoading = false
+            // Still "ready" on failure — otherwise one bad network request
+            // would leave launchProgress permanently short of 1.0 and hang
+            // the LaunchScreen forever.
+            self?.state?.isReady = true
             self?.state?.loadError = e
         }
     }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation _: WKNavigation!, withError e: Error) {
         Task { @MainActor [weak self] in
             self?.state?.isLoading = false
+            self?.state?.isReady = true
             self?.state?.loadError = e
         }
     }
@@ -147,9 +154,19 @@ final class EmbeddedWebState {
         // own sizing.
         wv.translatesAutoresizingMaskIntoConstraints = false
         webView = wv
-        isReady  = true
         isLoading = true
         wv.load(URLRequest(url: url))
+        // isReady is deliberately NOT set here. It used to flip true the
+        // instant this function created the WKWebView object — before
+        // wv.load() had even started fetching, let alone rendered or
+        // settled scroll position. LaunchScreen's launchProgress reads
+        // exactly this flag to decide when preloading is actually done, so
+        // that made the whole preload gate a no-op: all three tabs hit
+        // isReady=true within the same run loop .task kicks them off in,
+        // the loading screen dismissed almost instantly, and a genuinely
+        // not-yet-loaded tab was fully reachable. isReady now only flips in
+        // didFinish/didFail below, once there's an actual page (or a
+        // confirmed failure) to show.
     }
 
     /// Called from EmbeddedWebView when SwiftUI's \.colorScheme actually
@@ -178,6 +195,40 @@ final class EmbeddedWebState {
         let insets = UIEdgeInsets(top: top, left: 0, bottom: bottom, right: 0)
         wv.scrollView.contentInset = insets
         wv.scrollView.verticalScrollIndicatorInsets = insets
+        // Setting contentInset doesn't retroactively move an already-settled
+        // contentOffset to match it. initialize() (and the page load/scroll
+        // settling that follows it) can happen before this tab has ever been
+        // visually appeared-to, while contentInset.top was still 0 — so by
+        // the time a real inset is applied here, the content is already
+        // sitting at what's now the wrong resting point, shifted down by
+        // exactly `top` points, hiding whatever sits in that band behind the
+        // floating header. Re-snap every time insets are (re-)applied, since
+        // that's the actual recurring moment that matters (every tab
+        // appearance), not the one-time page-load event. Guarded so this
+        // never fights a genuine in-progress user scroll further down the page.
+        if wv.scrollView.contentOffset.y > -top {
+            wv.scrollView.setContentOffset(CGPoint(x: 0, y: -top), animated: false)
+        }
+    }
+
+    /// After navigation completes, some pages (notably Microsoft's login
+    /// flow re-rendering with a validation error) auto-scroll to bring the
+    /// erroring field into view, using the page's own script/focus behavior.
+    /// That resets contentOffset to native (0, 0) rather than the actual
+    /// "scrolled all the way to top" resting point our own top contentInset
+    /// requires — (0, -contentInset.top) — since the page has no idea our
+    /// inset exists. That gap is exactly inset-tall, hiding whatever sits in
+    /// that band (the Microsoft/Schoology logo) behind the floating header.
+    /// Correcting twice — immediately and after a short delay — since the
+    /// page's own auto-scroll can fire slightly after didFinish rather than
+    /// exactly at it.
+    @MainActor
+    func correctScrollPosition(in webView: WKWebView) {
+        let target = CGPoint(x: 0, y: -webView.scrollView.contentInset.top)
+        webView.scrollView.setContentOffset(target, animated: false)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak webView] in
+            webView?.scrollView.setContentOffset(target, animated: false)
+        }
     }
 
     @MainActor

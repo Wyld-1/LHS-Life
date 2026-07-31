@@ -73,7 +73,7 @@ enum NotificationService {
 
         let content = UNMutableNotificationContent()
         content.title = "Professional Dress Tomorrow"
-        content.body  = "LaSalle requires professional dress for \(event.title)."
+        content.body  = "For \(event.title)."
         content.sound = .default
 
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
@@ -83,11 +83,8 @@ enum NotificationService {
 
     // MARK: - Class Orientation Day
     //
-    // Fires two weeks before, front-loaded with the actual grade-specific
-    // time so the value is visible without even opening the app — "Class
-    // Orientation Day is in 2 weeks" alone is forgettable; knowing your
-    // exact window and that it's already on your calendar is the difference
-    // between a notification someone swipes away and one they act on.
+    // Fires one week before, front-loaded with the actual grade-specific
+    // start time so the value is visible without even opening the app.
     static func scheduleClassOrientationNotification(events: [SchoolEvent], settings: UserSettings) async {
         center.removePendingNotificationRequests(withIdentifiers: ["class-orientation"])
         guard await isAuthorized else { return }
@@ -95,21 +92,20 @@ enum NotificationService {
             $0.title.trimmingCharacters(in: .whitespaces).lowercased() == "class orientation day"
         }) else { return }
         guard let grade = PathwaysService.gradeLevel(graduationYear: settings.graduationYear),
-              let timeRange = ClassOrientationService.timeRangeLabel(forGrade: grade)
+              let startTime = ClassOrientationService.startTimeLabel(forGrade: grade)
         else { return }
 
         let calendar = Calendar.current
-        guard let twoWeeksBefore = calendar.date(byAdding: .day, value: -14, to: orientation.startDate) else { return }
-        var comps = calendar.dateComponents([.year, .month, .day], from: twoWeeksBefore)
+        guard let oneWeekBefore = calendar.date(byAdding: .day, value: -7, to: orientation.startDate) else { return }
+        var comps = calendar.dateComponents([.year, .month, .day], from: oneWeekBefore)
         comps.hour = 9; comps.minute = 0
         guard let fireDate = calendar.date(from: comps), fireDate > Date() else { return }
 
         let gradeLabel = ClassOrientationService.gradeLabel(forGrade: grade)
-        let location = orientation.location ?? "Gamache Commons"
 
         let content = UNMutableNotificationContent()
-        content.title = "Class Orientation Day is in 2 weeks"
-        content.body  = "\(gradeLabel) report \(timeRange) at \(location). It's already on your calendar."
+        content.title = "Class Orientation Day is in a week"
+        content.body  = "\(gradeLabel) report at \(startTime)."
         content.sound = .default
 
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
@@ -287,7 +283,7 @@ enum NotificationService {
             let timeStr = NotificationService.timeString(startDate)
             let content = UNMutableNotificationContent()
             content.title = "School starts at \(timeStr)"
-            content.body  = "Tap to pin the bell schedule to your island."
+            content.body  = "Tap to start Live Activities."
             content.sound = .default
             content.categoryIdentifier = abnormalScheduleCategoryID // reuse — same action
 
@@ -359,18 +355,21 @@ enum NotificationService {
     private static func scheduleAbnormalNotification(date: Date,
                                                       schedule: BellSchedule,
                                                       dayKey: String) async {
-        // Fire 5 minutes before the main school day starts.
+        // Fire 10 minutes before the main school day starts — separated from
+        // the ASB "Morning Announcements" notification's 5-minutes-before
+        // timing on purpose, since a user can get both on the same abnormal-
+        // schedule morning and they were landing seconds apart.
         // Uses firstMainPeriod so it adapts to late starts, etc.
         guard let firstPeriod = firstMainPeriod(in: schedule),
               let startDate = firstPeriod.startDate(on: date),
-              let fireDate = Calendar.current.date(byAdding: .minute, value: -5, to: startDate),
+              let fireDate = Calendar.current.date(byAdding: .minute, value: -10, to: startDate),
               fireDate > Date() else { return }
 
         //let typeName = schedule.scheduleType.rawValue
 
         let content = UNMutableNotificationContent()
         content.title = "Different Schedule Today"
-        content.body  = "Tap to pin the live bell schedule to your home screen."
+        content.body  = "Tap to pin the bells to your Lock Screen."
         content.sound = .default
         content.categoryIdentifier = abnormalScheduleCategoryID
 
