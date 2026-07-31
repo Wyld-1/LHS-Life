@@ -12,7 +12,11 @@ import UIKit
 @main
 struct LaSalle_ScheduleApp: App {
 
-    @State private var store    = CalendarStore()
+    // .shared singletons — App Intents read the exact same instances via
+    // CalendarStore.shared / RemindersService.shared, no AppDependencyManager
+    // registration or timing race, and no more init()-time self-capture
+    // workaround needed either.
+    @State private var store    = CalendarStore.shared
     @State private var settings = UserSettings.shared
 
     init() {

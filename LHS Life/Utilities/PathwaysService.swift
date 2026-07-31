@@ -21,7 +21,7 @@ enum PathwaysService {
     /// Returns true if the student's graduation year makes them eligible
     /// for Pathways Days during the current school year.
     static func isEligible(graduationYear: Int, on date: Date = Date()) -> Bool {
-        let currentYear = schoolYear(for: date)
+        let currentYear = classYear(for: date)
         // Seniors graduate currentYear+1, juniors graduate currentYear+2
         // (school year starting in Aug YYYY ends in May YYYY+1)
         let seniorGradYear = currentYear + 1
@@ -53,6 +53,33 @@ enum PathwaysService {
     ) -> Bool {
         guard isEligible(graduationYear: graduationYear, on: referenceDate) else { return false }
         return pathwaysEvent(on: dayKey, events: events) != nil
+    }
+
+    // MARK: - Grade Level
+
+    /// The student's current grade (9–12) for their graduation year, or nil
+    /// if they've already graduated or the grad year doesn't resolve to a
+    /// current high-school grade.
+    static func gradeLevel(graduationYear: Int, on date: Date = Date()) -> Int? {
+        let currentYear = classYear(for: date)
+        let grade = 12 - (graduationYear - (currentYear + 1))
+        return (9...12).contains(grade) ? grade : nil
+    }
+
+    // MARK: - Class Year (July 1 cutover)
+    //
+    // Deliberately separate from schoolYear() below, which uses August —
+    // when school literally starts — for calendar/schedule-day grouping.
+    // "What grade do I currently call myself" is a different, more social
+    // convention that advances July 1: a rising senior says "I'm a senior"
+    // all summer, months before the new school year technically begins.
+    // Confirmed explicitly: grad year 2027 in July 2026 = senior; the same
+    // grad year in June 2026 = still junior.
+    private static func classYear(for date: Date) -> Int {
+        let comps = Calendar.current.dateComponents([.year, .month], from: date)
+        let year  = comps.year ?? 2025
+        let month = comps.month ?? 1
+        return month >= 7 ? year : year - 1
     }
 
     // MARK: - School Year Helper

@@ -1,0 +1,256 @@
+//
+//  EventDetailSheet.swift
+//  LHS Life
+//
+//  Tap-to-detail sheet for any calendar item — a real SchoolEvent (class
+//  events, all-day events, athletics, etc.) or a bell-schedule class period,
+//  which isn't backed by a SchoolEvent at all. Restates title, time, and
+//  location, then shows the full description when one exists — which is
+//  most events per CalendarWiz, but not all, so every section below is
+//  conditional and gracefully omitted rather than shown empty.
+//
+
+import SwiftUI
+
+enum EventDetailItem: Identifiable {
+    case schoolEvent(SchoolEvent)
+    case period(Period, config: PeriodConfig?, start: Date, end: Date, scheduleLabel: String)
+
+    var id: String {
+        switch self {
+        case .schoolEvent(let e):
+            return e.id
+        case .period(let p, _, let start, _, _):
+            return "period-\(p.id)-\(start.timeIntervalSince1970)"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .schoolEvent(let e): return e.title
+        case .period(let p, let config, _, _, _): return config?.displayName ?? p.name
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .schoolEvent(let e): return e.category.pillColor
+        case .period(_, let config, _, _, _):
+            return config.map { Color.paletteColor(for: $0) } ?? Color.lsTertiary
+        }
+    }
+
+    var location: String? {
+        switch self {
+        case .schoolEvent(let e): return e.location
+        case .period: return nil
+        }
+    }
+
+    /// Real description for SchoolEvents; for periods, a synthesized note
+    /// since there's no per-period description data to restate.
+    var description: String? {
+        switch self {
+        case .schoolEvent(let e): return e.description
+        case .period(_, _, _, _, let scheduleLabel): return "Part of today's \(scheduleLabel)."
+        }
+    }
+
+    // MARK: - Real dates, for saving to the system Calendar (EventDetailSheet's
+    // "Save to Calendar" button) — timeRangeText below is display-only and
+    // insufficient for that.
+
+    var startDate: Date {
+        switch self {
+        case .schoolEvent(let e): return e.startDate
+        case .period(_, _, let start, _, _): return start
+        }
+    }
+
+    var endDate: Date {
+        switch self {
+        case .schoolEvent(let e): return e.endDate
+        case .period(_, _, _, let end, _): return end
+        }
+    }
+
+    var isAllDay: Bool {
+        switch self {
+        case .schoolEvent(let e): return e.isAllDay
+        case .period: return false
+        }
+    }
+
+    var timeRangeText: String {
+        switch self {
+        case .schoolEvent(let e):
+            if e.isAllDay {
+                let cal = Calendar.current
+                // iCal all-day DTEND is exclusive (the day AFTER the last day),
+                // so the real last day is endDate - 1.
+                let lastDay = cal.date(byAdding: .day, value: -1, to: e.endDate) ?? e.endDate
+                if cal.isDate(e.startDate, inSameDayAs: lastDay) {
+                    return "All day"
+                }
+                let f = DateFormatter()
+                f.dateFormat = "MMM d"
+                return "\(f.string(from: e.startDate)) – \(f.string(from: lastDay))"
+            } else {
+                return "\(ScheduleEngine.timeString(e.startDate)) – \(ScheduleEngine.timeString(e.endDate))"
+            }
+        case .period(_, _, let start, let end, _):
+            return "\(ScheduleEngine.timeString(start)) – \(ScheduleEngine.timeString(end))"
+        }
+    }
+}
+
+struct EventDetailSheet: View {
+    let item: EventDetailItem
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: LS.md) {
+                    HStack(alignment: .top, spacing: LS.sm) {
+                        Capsule()
+                            .fill(item.color)
+                            .frame(width: 4, height: 30)
+                        Text(item.title)
+                            .font(.lsTitle)
+                            .foregroundStyle(Color.lsPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    VStack(alignment: .leading, spacing: LS.sm) {
+                        DetailRow(icon: "clock", text: item.timeRangeText, color: item.color)
+                        if let location = item.location, !location.isEmpty {
+                            DetailRow(icon: "mappin.and.ellipse", text: location, color: item.color)
+                                .textSelection(.enabled)
+                        }
+                    }
+
+                    Rectangle()
+                        .fill(Color.lsTertiary.opacity(0.2))
+                        .frame(height: 0.5)
+
+                    if let description = item.description, !description.isEmpty {
+                        Text(description)
+                            .font(.lsBody)
+                            .foregroundStyle(Color.lsPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    } else {
+                        Text("No description provided")
+                            .font(.lsBody)
+                            .foregroundStyle(Color.lsTertiary)
+                            .italic()
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(LS.lg)
+                .padding(.bottom, 64)
+            }
+
+            SaveToCalendarButton(item: item)
+                .padding(.horizontal, LS.xxl)
+        }
+        .presentationDragIndicator(.visible)
+        .presentationBackground(.regularMaterial)
+        .presentationDetents([.medium, .large])
+    }
+}
+
+private struct DetailRow: View {
+    let icon: String
+    let text: String
+    let color: Color
+
+    var body: some View {
+        HStack(alignment: .top, spacing: LS.sm) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 20)
+            Text(text)
+                .font(.lsHeadline)
+                .foregroundStyle(Color.lsSecondary)
+        }
+    }
+}
+
+// MARK: - Save to Calendar Button
+// Floating, pinned to the bottom of the sheet regardless of scroll position
+// or detent (.medium or .large) — same placement convention as Apple's own
+// "Delete Event" button in the system Calendar app's detail sheet.
+
+private struct SaveToCalendarButton: View {
+    let item: EventDetailItem
+
+    private enum SaveState: Equatable { case idle, saving, saved, failed }
+    @State private var state: SaveState = .idle
+
+    private var label: String {
+        switch state {
+        case .idle:    return "Save to Calendar"
+        case .saving:  return "Saving…"
+        case .saved:   return "Added to Calendar"
+        case .failed:  return "Couldn't Save — Try Again"
+        }
+    }
+
+    private var systemImage: String {
+        switch state {
+        case .idle, .saving: return "calendar.badge.plus"
+        case .saved:          return "checkmark"
+        case .failed:          return "exclamationmark.triangle"
+        }
+    }
+
+    var body: some View {
+        Button {
+            guard state != .saving && state != .saved else { return }
+            Task {
+                state = .saving
+                let result = await SystemCalendarService.shared.save(item)
+                switch result {
+                case .success:
+                    state = .saved
+                    HapticEngine.shared.success()
+                case .denied, .failed:
+                    state = .failed
+                    HapticEngine.shared.error()
+                }
+            }
+        } label: {
+            HStack(spacing: LS.sm) {
+                if state == .saving {
+                    ProgressView()
+                        .tint(.white)
+                } else {
+                    Image(systemName: systemImage)
+                }
+                Text(label)
+                    .font(.lsHeadline)
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, LS.sm + 2)
+        }
+        .buttonStyle(.plain)
+        .disabled(state == .saving || state == .saved)
+        .modifier(SaveButtonGlassModifier())
+    }
+}
+
+private struct SaveButtonGlassModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *) {
+            content.glassEffect(.regular.interactive(), in: Capsule())
+        } else {
+            content
+                .background(Color.lsBlue)
+                .clipShape(Capsule())
+                .shadow(color: .black.opacity(0.2), radius: 8, y: 3)
+        }
+    }
+}

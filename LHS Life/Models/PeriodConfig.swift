@@ -23,8 +23,15 @@ struct PeriodConfig: Identifiable, Codable, Hashable {
         return trimmed.isEmpty ? (id == 0 ? "Period 0" : "Period \(id)") : trimmed
     }
 
-    /// Default color index per period: gray, red, orange, yellow, green, sky, blue, lavender, gray
-    private static let defaultColorIndices = [0, 1, 2, 3, 4, 5, 6, 7, 0]
+    /// Default color index per period: LaSalle Blue (0, 6, 8 — the "no
+    /// custom color chosen" slots), red, orange, yellow, green, sky,
+    /// LaSalle Blue, lavender, LaSalle Blue.
+    /// Slate (index 0) is intentionally never assigned — it still exists
+    /// in ColorPalette.colors for index stability with any already-saved
+    /// data, but is excluded from the picker (see ColorPickerPopup) and
+    /// from these defaults, since flat gray read as "depressing and
+    /// forgettable" rather than as a real default.
+    private static let defaultColorIndices = [6, 1, 2, 3, 4, 5, 6, 7, 6]
 
     /// Default configs for all period slots.
     static let defaults: [PeriodConfig] = (0...8).map { n in

@@ -36,31 +36,59 @@ enum BellScheduleDetector {
         return bellKeywords.contains { t.contains($0) }
     }
 
-    // MARK: - Category Inference
+    // MARK: - Category Inference (fallback only)
+    //
+    // LaSalle's real feed tags every event with CATEGORIES:, which
+    // ICalParser reads directly via EventCategory(rawValue:) — this is now
+    // just the safety net for the rare event with no CATEGORIES property at
+    // all, so it doesn't need to be exhaustive the way it used to.
 
     static func category(title: String, description: String?) -> EventCategory {
         let t = title.lowercased()
-        // Check bell schedule ONLY on title — not description.
-        // Some events (e.g. Professional Dress Day) embed a bell schedule table
-        // in their description but are not themselves schedule events.
-        if looksLikeBellScheduleTitle(title) { return .bellSchedule }
+        if looksLikeBellScheduleTitle(title) { return .schedules }
         if t.contains("game") || t.contains("match") || t.contains("tournament")
             || t.contains("athletic") || t.contains("sport")
             || t.contains("golf") || t.contains("tennis") || t.contains("swim")
             || t.contains("basketball") || t.contains("baseball") || t.contains("softball")
             || t.contains("soccer") || t.contains("football") || t.contains("volleyball")
             || t.contains("track") || t.contains("cross country") || t.contains("wrestling")
-            || t.contains("lacrosse") || t.contains("vs.") || t.contains(" vs ") { return .athletic }
-        if t.contains("professional dress") || t.contains("formal dress")
-            || t.contains("dress uniform") || t.contains("professional attire") { return .professionalDress }
-        // Liturgy check: only trigger on standalone liturgy events, not schedule titles
-        // that happen to contain "liturgy" or "mass" (those are caught by bellSchedule above).
+            || t.contains("lacrosse") || t.contains("vs.") || t.contains(" vs ") { return .athletics }
+        if t.contains("faculty") || t.contains("staff") { return .facultyStaff }
         if t.contains("mass") || t.contains("liturgy") || t.contains("prayer")
-            || t.contains("retreat") || t.contains("service") { return .liturgy }
+            || t.contains("retreat") || t.contains("chapel") { return .campusMinistry }
         if t.contains("exam") || t.contains("test") || t.contains("finals")
-            || t.contains("graduation") || t.contains("ap ") { return .academic }
-        if t.contains("holiday") || t.contains("break") || t.contains("no school")
-            || t.contains("christmas") || t.contains("thanksgiving") { return .holiday }
+            || t.contains("graduation") || t.contains("ap ") { return .academics }
         return .other
+    }
+
+    // MARK: - Professional Dress
+    //
+    // Not a real CalendarWiz category (LaSalle tags Pro Dress Day itself as
+    // Student Activities) — title-detected the same way it always was. This
+    // is now the single canonical list; NotificationService used to keep its
+    // own separate copy, which has been folded in here (its list was the
+    // more complete one, so that's the version that survived).
+    private static let dressKeywords = [
+        "professional dress", "formal dress", "mass attire",
+        "dress uniform", "professional attire", "formal attire"
+    ]
+
+    static func isProfessionalDress(title: String) -> Bool {
+        let t = title.lowercased()
+        return dressKeywords.contains { t.contains($0) }
+    }
+
+    // MARK: - Holiday
+    //
+    // Not a real CalendarWiz category either — title-detected as a stopgap
+    // until we confirm how (or if) LaSalle's feed actually tags these.
+    private static let holidayKeywords = [
+        "holiday", "no school", "christmas", "thanksgiving",
+        "winter break", "spring break", "summer break"
+    ]
+
+    static func isHoliday(title: String) -> Bool {
+        let t = title.lowercased()
+        return holidayKeywords.contains { t.contains($0) }
     }
 }

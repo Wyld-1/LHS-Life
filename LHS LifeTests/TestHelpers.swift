@@ -68,6 +68,6 @@ func makeEvent(
 ) -> SchoolEvent {
     SchoolEvent(id: id, title: title, startDate: startDate,
                 endDate: endDate ?? startDate, isAllDay: isAllDay,
-                location: location, description: description,
+                location: location, description: description, htmlDescription: nil,
                 url: nil, category: category)
 }

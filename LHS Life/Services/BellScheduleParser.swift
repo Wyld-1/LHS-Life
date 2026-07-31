@@ -32,6 +32,43 @@ enum FinalExamParser {
         ]
     }
 
+    /// Standard La Salle Odd Block schedule periods (1,3,5,7 meet).
+    /// First bell 7:55 AM, 90-minute periods — same early start as Regular.
+    static func oddBlockPeriods(for date: Date, sourceID: String) -> [Period] {
+        func t(_ h: Int, _ m: Int) -> DateComponents {
+            var c = DateComponents(); c.hour = h; c.minute = m; return c
+        }
+        return [
+            Period(id: "\(sourceID)-odd-0",      name: "Period 0", startTime: t(6,45),  endTime: t(7,45)),
+            Period(id: "\(sourceID)-odd-1",      name: "Period 1", startTime: t(8,0),   endTime: t(9,30)),
+            Period(id: "\(sourceID)-odd-break1", name: "Break",    startTime: t(9,30),  endTime: t(9,40)),
+            Period(id: "\(sourceID)-odd-3",      name: "Period 3", startTime: t(9,45),  endTime: t(11,15)),
+            Period(id: "\(sourceID)-odd-lunch",  name: "Lunch",    startTime: t(11,15), endTime: t(11,45)),
+            Period(id: "\(sourceID)-odd-5",      name: "Period 5", startTime: t(11,50), endTime: t(13,20)),
+            Period(id: "\(sourceID)-odd-break2", name: "Break",    startTime: t(13,20), endTime: t(13,25)),
+            Period(id: "\(sourceID)-odd-7",      name: "Period 7", startTime: t(13,30), endTime: t(15,0)),
+        ]
+    }
+
+    /// Standard La Salle Even Block schedule periods (2,4,6 meet). This
+    /// school's Even Block days always run on a late start with a built-in
+    /// Advising/Clubs block — confirmed standard, not a one-off combo day,
+    /// matching the real calendar's own "Late Start/ADVISING/Even Block
+    /// Schedule" title convention.
+    static func evenBlockPeriods(for date: Date, sourceID: String) -> [Period] {
+        func t(_ h: Int, _ m: Int) -> DateComponents {
+            var c = DateComponents(); c.hour = h; c.minute = m; return c
+        }
+        return [
+            Period(id: "\(sourceID)-even-2",     name: "Period 2",       startTime: t(9,10),  endTime: t(10,40)),
+            Period(id: "\(sourceID)-even-adv",   name: "Advising/Clubs", startTime: t(10,45), endTime: t(11,15)),
+            Period(id: "\(sourceID)-even-lunch", name: "Lunch",          startTime: t(11,15), endTime: t(11,45)),
+            Period(id: "\(sourceID)-even-4",     name: "Period 4",       startTime: t(11,50), endTime: t(13,20)),
+            Period(id: "\(sourceID)-even-break", name: "Break",          startTime: t(13,20), endTime: t(13,25)),
+            Period(id: "\(sourceID)-even-6",     name: "Period 6",       startTime: t(13,30), endTime: t(15,0)),
+        ]
+    }
+
     // MARK: - Entry Point
 
     /// Parses ALL day columns from the finals HTML table, returning one BellSchedule per day.
@@ -261,6 +298,18 @@ final class BellScheduleParser {
             if !schedules.isEmpty { return schedules }
         }
         if let schedule = parseSingle(from: event) { return [schedule] }
+
+        // Mass of the Holy Spirit / back-to-school early dismissal day — falls
+        // back to last year's known sequence until CalendarWiz posts a real
+        // table for the new year. Narrow match (exact known title + release
+        // time) so a genuinely different early-dismissal day later in the year
+        // doesn't get this specific sequence by accident. Only reached once a
+        // real parse above has already failed, so a posted table always wins.
+        let titleLower = event.title.lowercased()
+        if titleLower.contains("early dismissal") && titleLower.contains("11:15") {
+            return [massOfHolySpiritSchedule(on: event.startDate, graduationYear: graduationYear)]
+        }
+
         return []
     }
 
@@ -427,5 +476,52 @@ final class BellScheduleParser {
             if let _ = Int(raw) { return "Period \(raw)" }
             return raw.capitalized
         }
+    }
+
+    // MARK: - Mass of the Holy Spirit Schedule Factory
+    //
+    // Annual back-to-school day: attendance, class meetings + photos (order
+    // swapped by grade group), then Mass together, released 11:15 AM. Grade-
+    // aware the same way seniorPresentationSchedule is above — juniors/seniors
+    // and freshmen/sophomores do the two blocks in opposite order. Falls back
+    // to a neutral combined label for both blocks if grade can't be resolved,
+    // rather than guessing which group the student is actually in.
+
+    private func massOfHolySpiritSchedule(on date: Date, graduationYear: Int?) -> BellSchedule {
+        let dayKey = DateFormatter.isoDay.string(from: date)
+        let grade  = graduationYear.flatMap { PathwaysService.gradeLevel(graduationYear: $0, on: date) }
+
+        func t(_ h: Int, _ m: Int) -> DateComponents {
+            var c = DateComponents(); c.hour = h; c.minute = m; return c
+        }
+
+        let firstBlockName: String
+        let secondBlockName: String
+        if let grade, grade >= 11 {
+            firstBlockName  = "Class Meeting"
+            secondBlockName = "Photos"
+        } else if let grade, grade <= 10 {
+            firstBlockName  = "Photos"
+            secondBlockName = "Class Meeting"
+        } else {
+            firstBlockName  = "Class Meeting / Photos"
+            secondBlockName = "Class Meeting / Photos"
+        }
+
+        let periods = [
+            Period(id: "\(dayKey)-mhs-1",    name: "Period 1",                startTime: t(8,0),  endTime: t(8,5)),
+            Period(id: "\(dayKey)-mhs-b1",   name: firstBlockName,            startTime: t(8,5),  endTime: t(9,5)),
+            Period(id: "\(dayKey)-mhs-pass", name: "Passing",                 startTime: t(9,5),  endTime: t(9,10)),
+            Period(id: "\(dayKey)-mhs-b2",   name: secondBlockName,           startTime: t(9,10), endTime: t(10,10)),
+            Period(id: "\(dayKey)-mhs-mass", name: "Mass of the Holy Spirit", startTime: t(10,10), endTime: t(11,15)),
+        ]
+
+        return BellSchedule(
+            id: "mass-holy-spirit-\(dayKey)",
+            date: date,
+            scheduleType: .earlyRelease,
+            periods: periods,
+            sourceEventID: "floor-last-year"
+        )
     }
 }

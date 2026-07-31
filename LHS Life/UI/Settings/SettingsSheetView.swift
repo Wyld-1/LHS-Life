@@ -17,6 +17,12 @@ struct SettingsSheetView: View {
     @State private var gradYearInput = ""
     @State private var isEditingGradYear = false
     @State private var apModeEnabled = false
+    @State private var debugTimeEnabled = false
+    @State private var debugTimeValue = Date()
+    @State private var debugForceTextEnabled = false
+    @State private var debugPrimaryText = "22 min left in Period 3"
+    @State private var debugSecondaryText = "Next: Lunch at 11:45"
+    @State private var debugProgress: Double = 0.6
 
     var body: some View {
         VStack(spacing: 0) {
@@ -56,7 +62,27 @@ struct SettingsSheetView: View {
             }
         }
         .background(Color.lsSurface)
-        .onAppear { apModeEnabled = settings.apModeEnabledToday }
+        .onAppear {
+            apModeEnabled = settings.apModeEnabledToday
+            // Sync FROM the DebugClock singleton, not just to it — it
+            // outlives this view (recreated fresh every time Settings
+            // opens), so without this the toggle shows "off" while an
+            // override might still silently be active underneath, and
+            // re-toggling would reset it to "right now" instead of
+            // restoring whatever was actually set before.
+            if let override = DebugClock.shared.overrideDate {
+                debugTimeEnabled = true
+                debugTimeValue = override
+            }
+            if let forced = DebugClock.shared.forcedPrimaryText {
+                debugForceTextEnabled = true
+                debugPrimaryText = forced
+                debugSecondaryText = DebugClock.shared.forcedSecondaryText ?? ""
+            }
+            if let progress = DebugClock.shared.forcedProgress {
+                debugProgress = progress
+            }
+        }
         .onDisappear { settings.save() }
     }
 
@@ -224,20 +250,14 @@ struct SettingsSheetView: View {
                     }
                     Spacer()
                     Menu {
-                        ForEach(LiveActivityMode.allCases.filter { $0 != .off }, id: \.rawValue) { mode in
-                            Button {
-                                settings.liveActivityMode = mode
-                                HapticEngine.shared.tick()
-                            } label: {
-                                Text(mode.label)
+                        Picker("Live Activities", selection: $settings.liveActivityMode) {
+                            ForEach(LiveActivityMode.allCases.filter { $0 != .off }, id: \.rawValue) { mode in
+                                Text(mode.label).tag(mode)
                             }
                         }
                         Divider()
-                        Button {
-                            settings.liveActivityMode = .off
-                            HapticEngine.shared.tick()
-                        } label: {
-                            Text(LiveActivityMode.off.label)
+                        Picker("Live Activities", selection: $settings.liveActivityMode) {
+                            Text(LiveActivityMode.off.label).tag(LiveActivityMode.off)
                         }
                     } label: {
                         HStack(spacing: LS.xs) {
@@ -254,6 +274,7 @@ struct SettingsSheetView: View {
                         .clipShape(Capsule())
                     }
                     .tint(Color.lsPrimary)
+                    .onChange(of: settings.liveActivityMode) { _, _ in HapticEngine.shared.tick() }
                 }
                 .padding(LS.md)
             }
@@ -348,6 +369,123 @@ struct SettingsSheetView: View {
         VStack(alignment: .leading, spacing: LS.sm) {
             sectionLabel("Debug")
             VStack(spacing: 0) {
+                // Screenshot tool: forces the header pill's rendered text/
+                // progress directly, bypassing the real schedule-state
+                // computation entirely. Faking a "now" that flows correctly
+                // through schedule lookup + engine + period matching is
+                // fragile for a one-off screenshot; forcing the output
+                // directly can't produce nonsense regardless of what
+                // schedule data does or doesn't exist. See DebugClock.swift.
+                Toggle(isOn: $debugForceTextEnabled) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Force Header Text")
+                            .font(.lsHeadline)
+                            .foregroundStyle(Color.lsPrimary)
+                        Text("Overrides the pill's text + progress directly")
+                            .font(.lsCaption)
+                            .foregroundStyle(Color.lsSecondary)
+                    }
+                }
+                .tint(Color.lsBlue)
+                .padding(LS.md)
+                .onChange(of: debugForceTextEnabled) { _, enabled in
+                    if enabled {
+                        DebugClock.shared.forcedPrimaryText = debugPrimaryText
+                        DebugClock.shared.forcedSecondaryText = debugSecondaryText.isEmpty ? nil : debugSecondaryText
+                        DebugClock.shared.forcedProgress = debugProgress
+                    } else {
+                        DebugClock.shared.forcedPrimaryText = nil
+                        DebugClock.shared.forcedSecondaryText = nil
+                        DebugClock.shared.forcedProgress = nil
+                    }
+                }
+
+                if debugForceTextEnabled {
+                    Divider().background(Color.lsTertiary.opacity(0.3))
+
+                    VStack(alignment: .leading, spacing: LS.sm) {
+                        TextField("Primary text", text: $debugPrimaryText)
+                            .font(.lsBody)
+                            .foregroundStyle(Color.lsPrimary)
+                            .onChange(of: debugPrimaryText) { _, newValue in
+                                DebugClock.shared.forcedPrimaryText = newValue
+                            }
+                        TextField("Secondary text (optional)", text: $debugSecondaryText)
+                            .font(.lsCaption)
+                            .foregroundStyle(Color.lsSecondary)
+                            .onChange(of: debugSecondaryText) { _, newValue in
+                                DebugClock.shared.forcedSecondaryText = newValue.isEmpty ? nil : newValue
+                            }
+                        HStack {
+                            Text("Progress")
+                                .font(.lsCaption)
+                                .foregroundStyle(Color.lsSecondary)
+                            Slider(value: $debugProgress, in: 0...1)
+                                .tint(Color.lsBlue)
+                                .onChange(of: debugProgress) { _, newValue in
+                                    DebugClock.shared.forcedProgress = newValue
+                                }
+                            Text("\(Int(debugProgress * 100))%")
+                                .font(.lsCaption)
+                                .foregroundStyle(Color.lsSecondary)
+                                .frame(width: 40, alignment: .trailing)
+                        }
+                    }
+                    .padding(LS.md)
+
+                    Divider().background(Color.lsTertiary.opacity(0.3))
+                }
+
+                // Calendar's "Now" ticker — which date it treats as today,
+                // and where vertically it sits. Separate from the text/
+                // progress force above since the calendar reads real
+                // schedule data directly, not the header pill's computation.
+                Toggle(isOn: $debugTimeEnabled) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Override Now-Ticker Date")
+                            .font(.lsHeadline)
+                            .foregroundStyle(Color.lsPrimary)
+                        Text("Shows the red Now line on this date/time")
+                            .font(.lsCaption)
+                            .foregroundStyle(Color.lsSecondary)
+                    }
+                }
+                .tint(Color.lsBlue)
+                .padding(LS.md)
+                .onChange(of: debugTimeEnabled) { _, enabled in
+                    DebugClock.shared.overrideDate = enabled ? debugTimeValue : nil
+                }
+
+                if debugTimeEnabled {
+                    Divider().background(Color.lsTertiary.opacity(0.3))
+
+                    DatePicker("Fake time", selection: $debugTimeValue, displayedComponents: [.date, .hourAndMinute])
+                        .datePickerStyle(.compact)
+                        .tint(Color.lsBlue)
+                        .padding(LS.md)
+                        .onChange(of: debugTimeValue) { _, newValue in
+                            DebugClock.shared.overrideDate = newValue
+                        }
+
+                    Divider().background(Color.lsTertiary.opacity(0.3))
+
+                    Button {
+                        store.debugInjectRegularSchedule(for: debugTimeValue)
+                    } label: {
+                        HStack {
+                            Image(systemName: "calendar.badge.plus")
+                                .foregroundStyle(Color.lsSuccess)
+                            Text("Inject Regular Schedule for This Date")
+                                .font(.lsHeadline)
+                                .foregroundStyle(Color.lsSuccess)
+                            Spacer()
+                        }
+                        .padding(LS.md)
+                    }
+
+                    Divider().background(Color.lsTertiary.opacity(0.3))
+                }
+
                 #if DEBUG
                 Button {
                     Task {

@@ -59,19 +59,9 @@ enum NotificationService {
     static func scheduleProfessionalDressNotifications(for events: [SchoolEvent]) async {
         center.removePendingNotificationRequests(withIdentifiers: events.map { "dress-\($0.id)" })
         guard await isAuthorized else { return }
-        for event in events.filter({ isProfessionalDressEvent($0) }) {
+        for event in events.filter({ $0.isProfessionalDress }) {
             await scheduleDressNotification(for: event)
         }
-    }
-
-    private static let dressKeywords = [
-        "professional dress", "formal dress", "mass attire",
-        "dress uniform", "professional attire", "formal attire"
-    ]
-
-    static func isProfessionalDressEvent(_ event: SchoolEvent) -> Bool {
-        let combined = (event.title + " " + (event.description ?? "")).lowercased()
-        return dressKeywords.contains { combined.contains($0) }
     }
 
     private static func scheduleDressNotification(for event: SchoolEvent) async {
@@ -88,6 +78,42 @@ enum NotificationService {
 
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
         try? await center.add(UNNotificationRequest(identifier: "dress-\(event.id)",
+                                                     content: content, trigger: trigger))
+    }
+
+    // MARK: - Class Orientation Day
+    //
+    // Fires two weeks before, front-loaded with the actual grade-specific
+    // time so the value is visible without even opening the app — "Class
+    // Orientation Day is in 2 weeks" alone is forgettable; knowing your
+    // exact window and that it's already on your calendar is the difference
+    // between a notification someone swipes away and one they act on.
+    static func scheduleClassOrientationNotification(events: [SchoolEvent], settings: UserSettings) async {
+        center.removePendingNotificationRequests(withIdentifiers: ["class-orientation"])
+        guard await isAuthorized else { return }
+        guard let orientation = events.first(where: {
+            $0.title.trimmingCharacters(in: .whitespaces).lowercased() == "class orientation day"
+        }) else { return }
+        guard let grade = PathwaysService.gradeLevel(graduationYear: settings.graduationYear),
+              let timeRange = ClassOrientationService.timeRangeLabel(forGrade: grade)
+        else { return }
+
+        let calendar = Calendar.current
+        guard let twoWeeksBefore = calendar.date(byAdding: .day, value: -14, to: orientation.startDate) else { return }
+        var comps = calendar.dateComponents([.year, .month, .day], from: twoWeeksBefore)
+        comps.hour = 9; comps.minute = 0
+        guard let fireDate = calendar.date(from: comps), fireDate > Date() else { return }
+
+        let gradeLabel = ClassOrientationService.gradeLabel(forGrade: grade)
+        let location = orientation.location ?? "Gamache Commons"
+
+        let content = UNMutableNotificationContent()
+        content.title = "Class Orientation Day is in 2 weeks"
+        content.body  = "\(gradeLabel) report \(timeRange) at \(location). It's already on your calendar."
+        content.sound = .default
+
+        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+        try? await center.add(UNNotificationRequest(identifier: "class-orientation",
                                                      content: content, trigger: trigger))
     }
 

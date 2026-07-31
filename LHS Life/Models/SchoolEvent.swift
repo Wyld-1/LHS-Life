@@ -22,9 +22,28 @@ struct SchoolEvent: Identifiable, Hashable, Codable {
 
     // MARK: - Derived
 
-    /// True if this event carries bell schedule information.
+    /// True if this event carries bell schedule information. CATEGORIES:Schedules
+    /// (LaSalle's real CalendarWiz taxonomy) is the primary signal; the title
+    /// keyword check is a fallback for the rare event missing a CATEGORIES tag.
     var hasBellSchedule: Bool {
-        category == .bellSchedule || BellScheduleDetector.looksLikeBellSchedule(title: title, description: description)
+        category == .schedules || BellScheduleDetector.looksLikeBellSchedule(title: title, description: description)
+    }
+
+    /// Professional Dress isn't its own CalendarWiz category — LaSalle tags
+    /// "Professional Dress Day" itself as Student Activities, same as everything
+    /// else in that bucket. This stays a title-based flag layered on top of the
+    /// real category, not a category itself, so the schedule "floor rule" and
+    /// the Siri intent both still have something reliable to key off of.
+    var isProfessionalDress: Bool {
+        BellScheduleDetector.isProfessionalDress(title: title)
+    }
+
+    /// Holiday also isn't its own CalendarWiz category in LaSalle's real
+    /// taxonomy (no "Holiday" appeared anywhere in the 14 real categories) —
+    /// title-detected the same way professional dress is, until we know how
+    /// LaSalle actually tags these, if at all.
+    var isHoliday: Bool {
+        BellScheduleDetector.isHoliday(title: title)
     }
 
     /// Calendar-day identifier (yyyy-MM-dd) for grouping.
@@ -35,16 +54,27 @@ struct SchoolEvent: Identifiable, Hashable, Codable {
 
 // MARK: - EventCategory
 
-/// Broad category buckets. CalendarWiz doesn't expose category IDs in the public iCal feed,
-/// so we derive this from title/description heuristics at parse time.
+/// LaSalle's real CalendarWiz category taxonomy — rawValues match the
+/// CATEGORIES: property in the iCal feed exactly, so parsing is a direct
+/// EventCategory(rawValue:) lookup. `.other` only exists as a fallback for
+/// the rare event with no CATEGORIES tag at all (parsed via a title-keyword
+/// heuristic in BellScheduleDetector, not a real LaSalle category).
 enum EventCategory: String, Codable, CaseIterable {
-    case bellSchedule    = "Bell Schedule"
-    case athletic        = "Athletic"
-    case academic        = "Academic"
-    case liturgy         = "Liturgy"
-    case holiday         = "Holiday"
-    case professionalDress = "Professional Dress"
-    case other           = "Other"
+    case academics              = "Academics"
+    case admissions             = "Admissions"
+    case advancementDevelopment = "Advancement/Development"
+    case alumni                 = "Alumni"
+    case athletics               = "Athletics"
+    case campusMinistry         = "Campus Ministry"
+    case counselingGuidance     = "Counseling/Guidance"
+    case facilities              = "Facilities"
+    case facultyStaff           = "Faculty/Staff"
+    case parentAssociation      = "Parent Association"
+    case schedules                = "Schedules"
+    case service                 = "Service"
+    case studentActivities       = "Student Activities"
+    case visualPerformingArts    = "Visual and Performing Arts"
+    case other                   = "Other"
 }
 
 // MARK: - DateFormatter convenience

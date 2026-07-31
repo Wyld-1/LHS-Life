@@ -64,12 +64,14 @@ struct ScheduleHeaderPill: View {
         HStack {
             Spacer()
             VStack(spacing: 2) {
-                Text(primaryText)
+                Text(DebugClock.shared.forcedPrimaryText ?? primaryText)
                     .font(.lsHeadline)
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
-                if let sub = secondaryText {
+                if let sub = DebugClock.shared.forcedPrimaryText != nil
+                    ? DebugClock.shared.forcedSecondaryText
+                    : secondaryText {
                     Text(sub)
                         .font(.lsCaption)
                         .foregroundStyle(.secondary)
@@ -82,7 +84,14 @@ struct ScheduleHeaderPill: View {
         .padding(.vertical, LS.sm)
         .frame(minHeight: 44)
         .overlay(alignment: .leading) {
-            if !settings.apModeEnabledToday {
+            if let forced = DebugClock.shared.forcedProgress {
+                GeometryReader { geo in
+                    Capsule()
+                        .fill(Color.lsBlue)
+                        .opacity(0.18)
+                        .frame(width: geo.size.width * forced)
+                }
+            } else if !settings.apModeEnabledToday {
                 if state.dayState == .inSession, let slot = state.currentSlot {
                     GeometryReader { geo in
                         Capsule()
@@ -119,7 +128,7 @@ struct ScheduleHeaderPill: View {
             }
         }
         .ifTrue(!suppressGlass) { $0.modifier(CapsuleGlassModifier()) }
-        .onAppear  { startTimer() }
+        .onAppear  { now = DebugClock.shared.now; startTimer() }
         .onDisappear { stopTimer() }
     }
 
@@ -200,7 +209,7 @@ struct ScheduleHeaderPill: View {
             return nil
         case .holiday:
             return store.events(on: DateFormatter.isoDay.string(from: now))
-                .first { $0.category == .holiday }.map { $0.title }
+                .first { $0.isHoliday }.map { $0.title }
         case .afterSchool, .noSchedule:
             switch weekday {
             case 6:  return saturdaySecondary
@@ -216,29 +225,29 @@ struct ScheduleHeaderPill: View {
         let cal = Calendar.current
         guard let sat = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
         return store.events(on: DateFormatter.isoDay.string(from: sat))
-            .first { $0.category != .bellSchedule }.map { upcomingEventText($0) }
+            .first { $0.category != .schedules }.map { upcomingEventText($0) }
     }
 
     private var saturdayOrSundaySecondary: String? {
         let cal = Calendar.current
         let todayKey = DateFormatter.isoDay.string(from: now)
-        if let event = store.events(on: todayKey).first(where: { $0.category != .bellSchedule && $0.startDate > now }) {
+        if let event = store.events(on: todayKey).first(where: { $0.category != .schedules && $0.startDate > now }) {
             return upcomingEventText(event)
         }
         guard let sun = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
         return store.events(on: DateFormatter.isoDay.string(from: sun))
-            .first { $0.category != .bellSchedule }.map { upcomingEventText($0) }
+            .first { $0.category != .schedules }.map { upcomingEventText($0) }
     }
 
     private var sundaySecondary: String? {
         let cal = Calendar.current
         let todayKey = DateFormatter.isoDay.string(from: now)
-        if let event = store.events(on: todayKey).first(where: { $0.category != .bellSchedule && $0.startDate > now }) {
+        if let event = store.events(on: todayKey).first(where: { $0.category != .schedules && $0.startDate > now }) {
             return upcomingEventText(event)
         }
         guard let mon = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
         let monKey = DateFormatter.isoDay.string(from: mon)
-        return store.events(on: monKey).first { $0.category != .bellSchedule }.map { upcomingEventText($0) }
+        return store.events(on: monKey).first { $0.category != .schedules }.map { upcomingEventText($0) }
             ?? scheduleLabelFor(dayKey: monKey).map { "Tomorrow: \($0)" }
     }
 
@@ -246,7 +255,7 @@ struct ScheduleHeaderPill: View {
         let cal = Calendar.current
         guard let tom = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
         return store.events(on: DateFormatter.isoDay.string(from: tom))
-            .first { $0.category != .bellSchedule }.map { upcomingEventText($0) }
+            .first { $0.category != .schedules }.map { upcomingEventText($0) }
     }
 
     private var tappableEvent: SchoolEvent? {
@@ -262,7 +271,7 @@ struct ScheduleHeaderPill: View {
             }
         case .holiday:
             return store.events(on: DateFormatter.isoDay.string(from: now))
-                .first { $0.category == .holiday }
+                .first { $0.isHoliday }
         default: return nil
         }
     }
@@ -270,23 +279,23 @@ struct ScheduleHeaderPill: View {
     private func eventOn(daysAhead: Int) -> SchoolEvent? {
         let cal = Calendar.current
         guard let d = cal.date(byAdding: .day, value: daysAhead, to: cal.startOfDay(for: now)) else { return nil }
-        return store.events(on: DateFormatter.isoDay.string(from: d)).first { $0.category != .bellSchedule }
+        return store.events(on: DateFormatter.isoDay.string(from: d)).first { $0.category != .schedules }
     }
 
     private var saturdayOrSundayEvent: SchoolEvent? {
         let cal = Calendar.current
         let todayKey = DateFormatter.isoDay.string(from: now)
-        if let event = store.events(on: todayKey).first(where: { $0.category != .bellSchedule && $0.startDate > now }) { return event }
+        if let event = store.events(on: todayKey).first(where: { $0.category != .schedules && $0.startDate > now }) { return event }
         guard let sun = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
-        return store.events(on: DateFormatter.isoDay.string(from: sun)).first { $0.category != .bellSchedule }
+        return store.events(on: DateFormatter.isoDay.string(from: sun)).first { $0.category != .schedules }
     }
 
     private var sundayEvent: SchoolEvent? {
         let cal = Calendar.current
         let todayKey = DateFormatter.isoDay.string(from: now)
-        if let event = store.events(on: todayKey).first(where: { $0.category != .bellSchedule && $0.startDate > now }) { return event }
+        if let event = store.events(on: todayKey).first(where: { $0.category != .schedules && $0.startDate > now }) { return event }
         guard let mon = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
-        return store.events(on: DateFormatter.isoDay.string(from: mon)).first { $0.category != .bellSchedule }
+        return store.events(on: DateFormatter.isoDay.string(from: mon)).first { $0.category != .schedules }
     }
 
     private func upcomingEventText(_ event: SchoolEvent) -> String {
@@ -320,7 +329,7 @@ struct ScheduleHeaderPill: View {
     private func startTimer() {
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
             Task { @MainActor in
-                self.now = Date()
+                self.now = DebugClock.shared.now
                 LiveActivityService.shared.endIfSchoolOver(state: self.store.todayState(at: self.now))
             }
         }

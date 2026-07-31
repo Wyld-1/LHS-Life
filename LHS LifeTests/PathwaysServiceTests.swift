@@ -100,4 +100,20 @@ final class PathwaysServiceTests: XCTestCase {
         XCTAssertFalse(PathwaysService.isPathwaysDay(on: dayKey, events: [],
                                                      graduationYear: 2026, referenceDate: ref))
     }
+
+    // MARK: 6.12 Grade level advances July 1, not August — a rising senior
+    // (grad year 2027) in July counts as a senior, even though the school
+    // year itself doesn't technically start until August.
+
+    func test_gradeLevel_julyAdvancesToSenior() {
+        let july = makeDate(year: 2026, month: 7, day: 15, hour: 12, minute: 0)
+        XCTAssertEqual(PathwaysService.gradeLevel(graduationYear: 2027, on: july), 12)
+    }
+
+    // MARK: 6.13 Same graduation year in June is still the prior grade (junior)
+
+    func test_gradeLevel_juneIsStillJunior() {
+        let june = makeDate(year: 2026, month: 6, day: 15, hour: 12, minute: 0)
+        XCTAssertEqual(PathwaysService.gradeLevel(graduationYear: 2027, on: june), 11)
+    }
 }

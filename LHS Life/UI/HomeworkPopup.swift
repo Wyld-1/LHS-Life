@@ -173,20 +173,14 @@ struct HomeworkPopup: View {
 
     private var classMenu: some View {
         Menu {
-            ForEach(enabledPeriods) { config in
-                Button {
-                    selectedPeriodID = config.id
-                    HapticEngine.shared.tick()
-                } label: {
-                    Text(config.displayName)
+            Picker("Class", selection: $selectedPeriodID) {
+                ForEach(enabledPeriods) { config in
+                    Text(config.displayName).tag(Optional(config.id))
                 }
             }
             Divider()
-            Button {
-                selectedPeriodID = nil
-                HapticEngine.shared.tick()
-            } label: {
-                Text("None")
+            Picker("Class", selection: $selectedPeriodID) {
+                Text("None").tag(Optional<Int>.none)
             }
         } label: {
             HStack(spacing: LS.sm) {
@@ -216,6 +210,7 @@ struct HomeworkPopup: View {
             .clipShape(Capsule())
         }
         .tint(Color.lsPrimary)
+        .onChange(of: selectedPeriodID) { _, _ in HapticEngine.shared.tick() }
     }
 
     // MARK: - Priority Button

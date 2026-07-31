@@ -56,6 +56,7 @@ struct AppDock: View {
 @available(iOS 26, *)
 private struct SystemTabDock: View {
     @Binding var selectedTab: AppTab
+    @Environment(CalendarUIState.self) private var uiState
     let lunchState:       EmbeddedWebState
     let powerschoolState: EmbeddedWebState
     let schoologyState:   EmbeddedWebState
@@ -99,7 +100,7 @@ private struct SystemTabDock: View {
                 Label("Schoology", image: "schoology-logo")
             }
         }
-        .tabBarMinimizeBehavior(.onScrollDown)
+        .tabBarMinimizeBehavior(uiState.viewMode == .day ? .onScrollDown : .never)
         .tint(Color.lsBlue)
         .tabViewBottomAccessory {
             HomeworkAccessory(action: onHomeworkTap)

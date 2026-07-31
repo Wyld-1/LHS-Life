@@ -45,8 +45,8 @@ final class BellScheduleParserTests: XCTestCase {
         SchoolEvent(id: "test-event", title: title,
                     startDate: makeDate(year: 2026, month: 5, day: 5, hour: 0, minute: 0),
                     endDate: makeDate(year: 2026, month: 5, day: 5, hour: 0, minute: 0),
-                    isAllDay: true, location: nil, description: description,
-                    url: nil, category: .bellSchedule)
+                    isAllDay: true, location: nil, description: description, htmlDescription: nil,
+                    url: nil, category: .schedules)
     }
 
     // MARK: 4.1 Parses all periods from reference description

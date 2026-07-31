@@ -44,4 +44,7 @@ final class HapticEngine {
 
     /// Success — save, done
     func success() { notification.notificationOccurred(.success); notification.prepare() }
+
+    /// Error — failed save, denied permission
+    func error() { notification.notificationOccurred(.error); notification.prepare() }
 }

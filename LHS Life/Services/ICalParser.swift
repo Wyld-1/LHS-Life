@@ -87,6 +87,12 @@ enum ICalParser {
         let urlString       = block["URL"]
         let url             = urlString.flatMap { URL(string: $0) }
 
+        // Real category first — CATEGORIES: matches LaSalle's CalendarWiz
+        // taxonomy directly (confirmed against their actual feed). Falls back
+        // to the title/description heuristic only if CATEGORIES is missing.
+        let category = block["CATEGORIES"].flatMap { EventCategory(rawValue: $0) }
+            ?? BellScheduleDetector.category(title: title, description: description)
+
         return SchoolEvent(
             id: uid,
             title: title,
@@ -97,7 +103,7 @@ enum ICalParser {
             description: description,
             htmlDescription: htmlDescription,
             url: url,
-            category: BellScheduleDetector.category(title: title, description: description)
+            category: category
         )
     }
 

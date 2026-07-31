@@ -13,5 +13,18 @@
 		<string>fetch</string>
 		<string>processing</string>
 	</array>
+	<key>INAlternativeAppNames</key>
+	<array>
+		<dict>
+			<key>INAlternativeAppName</key>
+			<string>LaSalle</string>
+			<key>INAlternativeAppNamePronunciationHint</key>
+			<string>luh-SAL</string>
+		</dict>
+	</array>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>LHS Life saves school events to your calendar when you tap Save to Calendar.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>LHS Life saves your homework assignments to a Reminders list when you add them.</string>
 </dict>
 </plist>

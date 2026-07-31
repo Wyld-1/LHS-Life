@@ -62,10 +62,12 @@ final class PeriodConfigTests: XCTestCase {
         }
     }
 
-    // MARK: 7.9 defaults — color indices match rainbow order
+    // MARK: 7.9 defaults — color indices avoid Slate (index 0), LaSalle Blue
+    // fills the "no custom color" slots instead. Was [0,1,2,3,4,5,6,7,0] before
+    // Lion asked for gray removed as a default/pickable color this session.
 
     func test_defaults_colorIndices() {
-        let expected = [0, 1, 2, 3, 4, 5, 6, 7, 0]
+        let expected = [6, 1, 2, 3, 4, 5, 6, 7, 6]
         for (i, expectedIndex) in expected.enumerated() {
             XCTAssertEqual(PeriodConfig.defaults[i].colorIndex, expectedIndex,
                            "Period \(i) colorIndex should be \(expectedIndex)")

@@ -65,6 +65,7 @@ struct AppTabContainer: View {
     @State private var showHomework = false
     @State private var isLaunching  = true
     @State private var calendarUI   = CalendarUIState()
+    @State private var navCoordinator = AppNavigationCoordinator.shared
 
     @State private var lunchState = EmbeddedWebState(
         url: URL(string: "https://lhs.plan.tech/lunch/")!,
@@ -106,6 +107,15 @@ struct AppTabContainer: View {
             } else {
                 previousTab = new
             }
+        }
+        .onChange(of: navCoordinator.pendingTab) { _, target in
+            guard let target else { return }
+            if target == .homework {
+                withAnimation(.lsSpring) { showHomework = true }
+            } else {
+                selectedTab = target
+            }
+            navCoordinator.pendingTab = nil
         }
         .task {
             async let l: () = lunchState.initialize()

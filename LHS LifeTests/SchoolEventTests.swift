@@ -16,11 +16,11 @@ final class SchoolEventTests: XCTestCase {
         XCTAssertEqual(event.dayKey, "2026-05-05")
     }
 
-    // MARK: 10.2 hasBellSchedule true for bellSchedule category
+    // MARK: 10.2 hasBellSchedule true for schedules category
 
-    func test_hasBellSchedule_bellScheduleCategory() {
+    func test_hasBellSchedule_schedulesCategory() {
         let date  = makeDate(year: 2026, month: 5, day: 5, hour: 8, minute: 0)
-        let event = makeEvent(title: "Anything", startDate: date, category: .bellSchedule)
+        let event = makeEvent(title: "Anything", startDate: date, category: .schedules)
         XCTAssertTrue(event.hasBellSchedule)
     }
 

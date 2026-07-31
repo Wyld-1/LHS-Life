@@ -80,6 +80,12 @@ final class CalendarUIState {
 @Observable
 final class CalendarStore {
 
+    // Single shared instance so the UI and App Intents (Siri/Shortcuts) always
+    // read the exact same live data — no AppDependencyManager registration,
+    // no timing race on background-launched intents. Same pattern UserSettings
+    // already used.
+    static let shared = CalendarStore()
+
     // MARK: - State
     private(set) var events: [SchoolEvent] = []
     private(set) var bellSchedules: [String: BellSchedule] = [:]
@@ -133,6 +139,7 @@ final class CalendarStore {
             }
             await NotificationService.scheduleAbnormalScheduleNotifications(settings: settings, store: self)
             await NotificationService.scheduleLiveActivityReminderNotifications(settings: settings, store: self)
+            await NotificationService.scheduleClassOrientationNotification(events: fetched, settings: settings)
         } catch {
             self.error = AppError(underlying: error)
         }
@@ -148,7 +155,7 @@ final class CalendarStore {
     func summary(for dayKey: String) -> DaySummary {
         let schedule = bellSchedules[dayKey]
         let dayEvents = events(on: dayKey)
-        let cats = Set(dayEvents.filter { !$0.isAllDay && $0.category != .bellSchedule }.map { $0.category })
+        let cats = Set(dayEvents.filter { !$0.isAllDay && $0.category != .schedules }.map { $0.category })
         return DaySummary(scheduleType: schedule?.scheduleType, eventCategories: cats)
     }
 
@@ -159,10 +166,27 @@ final class CalendarStore {
         }
     }
 
+    /// Debug-only (screenshot tool). Injects a synthetic "Regular Schedule"
+    /// for the given date using the app's own existing regular-period
+    /// generator — the same one already used as the Pro Dress "floor rule"
+    /// fallback — so screenshots can show a normal school day even when no
+    /// real bell-schedule data is loaded for that date (e.g. over summer).
+    func debugInjectRegularSchedule(for date: Date) {
+        let dayKey = DateFormatter.isoDay.string(from: date)
+        bellSchedules[dayKey] = BellSchedule(
+            id: "debug-regular-\(dayKey)",
+            date: date,
+            scheduleType: .regular,
+            periods: FinalExamParser.regularPeriods(for: date, sourceID: "debug"),
+            sourceEventID: "debug"
+        )
+        cachedTodayKey = ""  // force todayState to recompute against the new schedule
+    }
+
     func todayState(at date: Date = Date()) -> ScheduleEngine.ScheduleState {
         let dayKey = DateFormatter.isoDay.string(from: date)
         if dayKey != cachedTodayKey {
-            cachedTodayIsHoliday  = events.contains { $0.dayKey == dayKey && $0.category == .holiday }
+            cachedTodayIsHoliday  = events.contains { $0.dayKey == dayKey && $0.isHoliday }
             cachedTodayIsPathways = PathwaysService.isPathwaysDay(
                 on: dayKey, events: events, graduationYear: settings.graduationYear
             )
@@ -180,7 +204,11 @@ final class CalendarStore {
 
     // MARK: - Private
     private func applyEvents(_ fetched: [SchoolEvent]) {
-        events = fetched.sorted { $0.startDate < $1.startDate }
+        // Personalizes "Class Orientation Day" to the student's grade-specific
+        // time window before anything else touches the array — same UID, so
+        // tap-to-detail and the notification both resolve to the same event.
+        let personalized = ClassOrientationService.personalize(events: fetched, graduationYear: settings.graduationYear)
+        events = personalized.sorted { $0.startDate < $1.startDate }
         var schedules: [String: BellSchedule] = [:]
 
         for event in events where event.hasBellSchedule {
@@ -199,12 +227,68 @@ final class CalendarStore {
                 schedules[schedule.dayKey] = schedule
             }
         }
+        // Post-processing: bare schedule-marker floor rule. Runs BEFORE the
+        // Pro Dress floor rule below on purpose — a day can have both a Pro
+        // Dress event AND a specific schedule marker (e.g. "Odd Block
+        // Schedule", or the Mass of the Holy Spirit day, which is itself both
+        // Pro Dress and an early-dismissal schedule day). The specific,
+        // title-matched schedule should always win over Pro Dress's generic
+        // "just assume Regular" fallback, not get overwritten by it.
+        //
+        // LaSalle's real feed confirms routine days carry a CATEGORIES:Schedules
+        // marker event with NO description at all — only special days (Late
+        // Start, Early Release, etc. that need explanation) get a real time
+        // table. Without this, hasBellSchedule correctly detects the day as a
+        // schedule day but BellScheduleParser has nothing to parse, so the day
+        // silently gets zero periods. Tries the three standard schedule types
+        // in order, most-specific title match first — each guards against the
+        // others' keywords so a genuinely different/special variant (anything
+        // with "liturgy", or Regular Liturgy specifically) still falls through
+        // to needing a real table rather than getting a guessed-wrong synthetic one.
+        for event in fetched where event.hasBellSchedule {
+            let dayKey = event.dayKey
+            guard schedules[dayKey] == nil else { continue }
+            let t = event.title.lowercased()
+            guard !t.contains("liturgy") else { continue }
+
+            let periods: [Period]?
+            let scheduleType: ScheduleType?
+            if t.contains("odd") && t.contains("block") {
+                periods = FinalExamParser.oddBlockPeriods(for: event.startDate, sourceID: "floor")
+                scheduleType = .oddBlock
+            } else if t.contains("even") && t.contains("block") {
+                periods = FinalExamParser.evenBlockPeriods(for: event.startDate, sourceID: "floor")
+                scheduleType = .evenBlock
+            } else if t.contains("regular") && !t.contains("block") && !t.contains("early") && !t.contains("late") {
+                periods = FinalExamParser.regularPeriods(for: event.startDate, sourceID: "floor")
+                scheduleType = .regular
+            } else {
+                periods = nil
+                scheduleType = nil
+            }
+            guard let periods, let scheduleType else { continue }
+
+            let isPathways = PathwaysService.isPathwaysDay(
+                on: dayKey, events: fetched, graduationYear: settings.graduationYear
+            )
+            guard !isPathways else { continue }
+            schedules[dayKey] = BellSchedule(
+                id: "\(scheduleType.rawValue)-floor-\(dayKey)",
+                date: event.startDate,
+                scheduleType: scheduleType,
+                periods: periods,
+                sourceEventID: "floor"
+            )
+        }
+
         // Post-processing: Pro Dress floor rule.
-        // If a day has a Professional Dress event but no schedule was parsed,
-        // school is in session — apply a regular schedule as the floor.
-        // Exception: Pathways Day students have no regular schedule.
+        // If a day has a Professional Dress event but still no schedule after
+        // everything above (real parsing, and the specific-marker floor rule
+        // just above), school is in session — apply a regular schedule as the
+        // absolute last-resort floor. Exception: Pathways Day students have
+        // no regular schedule.
         let proDressDays = fetched
-            .filter { $0.category == .professionalDress }
+            .filter { $0.isProfessionalDress }
             .map { DateFormatter.isoDay.string(from: $0.startDate) }
         for dayKey in proDressDays where schedules[dayKey] == nil {
             let isPathways = PathwaysService.isPathwaysDay(
@@ -263,13 +347,23 @@ extension ScheduleType {
 extension EventCategory {
     var pillColor: Color {
         switch self {
-        case .bellSchedule:     return Color.lsTertiary
-        case .athletic:         return Color.lsGold
-        case .academic:         return Color.lsSuccess
-        case .liturgy:          return Color.lsBlue
-        case .holiday:          return Color.lsOrange
-        case .professionalDress: return Color.lsGold
-        case .other:            return Color.lsSecondary
+        // Tier 1 — vivid, distinct. Things students actually look for.
+        case .academics:            return Color.lsGold
+        case .athletics:             return Color.lsDestructive
+        case .facultyStaff:         return Color.lsBlue
+        case .campusMinistry:       return Color.lsPurple
+        case .studentActivities:     return Color.lsOrange
+        case .service:               return Color.lsSuccess
+        case .visualPerformingArts:  return Color.lsRose
+        case .counselingGuidance:   return Color.lsTeal
+        // Tier 2 — shared muted neutral. Rare, admin-facing, students rarely
+        // see these day-to-day.
+        case .admissions, .advancementDevelopment, .alumni, .facilities, .parentAssociation:
+            return Color.lsSecondary
+        // Schedule metadata, not a real "thing happening" — stays hidden from
+        // event surfaces entirely (see AllDayStrip/DayColumn filtering).
+        case .schedules:              return Color.lsTertiary
+        case .other:                 return Color.lsSecondary
         }
     }
 }

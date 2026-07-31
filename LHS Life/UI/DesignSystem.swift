@@ -31,6 +31,8 @@ extension Color {
     static let lsSuccess        = Color(light: "#1F9968", dark: "#34C78A")
     static let lsOrange         = Color(light: "#C9691F", dark: "#FB923C")
     static let lsPurple         = Color(light: "#6425C4", dark: "#7C3AED")
+    static let lsRose           = Color(light: "#B8368A", dark: "#F472B6")  // Visual & Performing Arts
+    static let lsTeal           = Color(light: "#0E8C7A", dark: "#2DD4BF")  // Counseling/Guidance
 
     // Header gradient stops
     static let lsHeaderTop      = Color(light: "#FAFBFC", dark: "#0D1220")

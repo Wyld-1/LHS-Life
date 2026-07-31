@@ -43,18 +43,12 @@ struct EventsTabView: View {
     @Environment(CalendarUIState.self) private var uiState
 
     var body: some View {
-        ZStack {
-            // All three views stay mounted — opacity switch is instant,
-            // no rebuild cost on mode change.
-            DayView()
-                .opacity(uiState.viewMode == .day ? 1 : 0)
-                .allowsHitTesting(uiState.viewMode == .day)
-            MonthView()
-                .opacity(uiState.viewMode == .month ? 1 : 0)
-                .allowsHitTesting(uiState.viewMode == .month)
-            YearView()
-                .opacity(uiState.viewMode == .year ? 1 : 0)
-                .allowsHitTesting(uiState.viewMode == .year)
+        Group {
+            switch uiState.viewMode {
+            case .day:   DayView()
+            case .month: MonthView()
+            case .year:  YearView()
+            }
         }
         .simultaneousGesture(
             MagnificationGesture(minimumScaleDelta: 0.2)
@@ -80,6 +74,7 @@ private struct DayView: View {
     @Environment(CalendarStore.self)   private var store
     @Environment(UserSettings.self)    private var settings
     @Environment(CalendarUIState.self) private var uiState
+    @State private var selectedDetail: EventDetailItem?
 
     private let cal      = Calendar.current
     private let dayRange = -365...365
@@ -119,7 +114,9 @@ private struct DayView: View {
                     .padding(.bottom, LS.xs)
 
                 // All-day strip — collapses when empty
-                AllDayStrip(store: store, date: uiState.selectedDate, columnWidth: geo.size.width - Grid.gutterWidth)
+                AllDayStrip(store: store, date: uiState.selectedDate, columnWidth: geo.size.width - Grid.gutterWidth) { detail in
+                    selectedDetail = detail
+                }
 
                 ScrollViewReader { proxy in
                 ScrollView(.vertical, showsIndicators: false) {
@@ -162,7 +159,8 @@ private struct DayView: View {
                                                 date:     dayDate(offset),
                                                 store:    store,
                                                 settings: settings,
-                                                width:    columnWidth
+                                                width:    columnWidth,
+                                                onSelect: { detail in selectedDetail = detail }
                                             )
                                             .id(offset)
                                             .containerRelativeFrame(.horizontal)
@@ -238,6 +236,9 @@ private struct DayView: View {
             }
         }
         .ignoresSafeArea(edges: .top)
+        .sheet(item: $selectedDetail) { detail in
+            EventDetailSheet(item: detail)
+        }
     }
 }
 
@@ -323,9 +324,9 @@ private struct TimeGutter: View {
         }
         .frame(width: Grid.gutterWidth, height: Grid.totalHeight, alignment: .topLeading)
         .onAppear {
-            now = Date()
+            now = DebugClock.shared.now
             timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
-                Task { @MainActor in self.now = Date() }
+                Task { @MainActor in self.now = DebugClock.shared.now }
             }
         }
         .onDisappear { timer?.invalidate(); timer = nil }
@@ -339,11 +340,12 @@ private struct DayColumn: View {
     let store: CalendarStore
     let settings: UserSettings
     let width: CGFloat
+    let onSelect: (EventDetailItem) -> Void
 
     @State private var now: Date = Date()
     @State private var timer: Timer? = nil
 
-    private var isToday: Bool { Calendar.current.isDateInToday(date) }
+    private var isToday: Bool { Calendar.current.isDate(date, inSameDayAs: DebugClock.shared.now) }
     private var dayKey: String { DateFormatter.isoDay.string(from: date) }
     private var schedule: BellSchedule? { store.bellSchedules[dayKey] }
     private var events: [SchoolEvent] { store.events(on: dayKey) }
@@ -360,7 +362,7 @@ private struct DayColumn: View {
     }
 
     private var timedEvents: [SchoolEvent] {
-        events.filter { $0.category != .bellSchedule && !$0.isAllDay }
+        events.filter { $0.category != .schedules && !$0.isAllDay }
     }
 
     // Greedy column assignment for timed events, period-aware.
@@ -469,7 +471,16 @@ private struct DayColumn: View {
                     date:     date,
                     now:      now,
                     isToday:  isToday,
-                    settings: settings
+                    settings: settings,
+                    onTap: {
+                        onSelect(.period(
+                            item.period,
+                            config: periodNum(item.period.name).flatMap { settings.config(for: $0) },
+                            start: item.start,
+                            end: item.end,
+                            scheduleLabel: schedule?.scheduleType.scheduleLabel ?? "schedule"
+                        ))
+                    }
                 )
                 .padding(.leading, 4)
                 .padding(.trailing, LS.sm)
@@ -481,7 +492,7 @@ private struct DayColumn: View {
             ForEach(layoutEvents, id: \.event.id) { item in
                 let colWidth = (width - LS.sm) / CGFloat(item.totalCols)
                 let xOffset  = CGFloat(item.col) * colWidth + (item.col > 0 ? 2 : 4)
-                EventBlock(event: item.event)
+                EventBlock(event: item.event, onTap: { onSelect(.schoolEvent(item.event)) })
                     .frame(width: colWidth - (item.col > 0 ? 2 : 0))
                     .offset(x: xOffset, y: Grid.y(for: item.event.startDate, on: date))
             }
@@ -517,9 +528,9 @@ private struct DayColumn: View {
         .frame(width: width, height: Grid.totalHeight, alignment: .topLeading)
         .clipped()
         .onAppear {
-            now = Date()
+            now = DebugClock.shared.now
             timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
-                Task { @MainActor in self.now = Date() }
+                Task { @MainActor in self.now = DebugClock.shared.now }
             }
         }
         .onDisappear { timer?.invalidate(); timer = nil }
@@ -542,6 +553,7 @@ private struct PeriodBlock: View {
     let now: Date
     let isToday: Bool
     let settings: UserSettings
+    let onTap: () -> Void
 
     private var blockHeight: CGFloat {
         Grid.height(minutes: end.timeIntervalSince(start) / 60)
@@ -557,25 +569,28 @@ private struct PeriodBlock: View {
     private var isCurrent: Bool { isToday && now >= start && now < end }
 
     var body: some View {
-        HStack(spacing: 0) {
-            Capsule()
-                .fill(color)
-                .frame(width: 4)
-                .padding(.vertical, 4)
-                .padding(.horizontal, 4)
-            Text(displayName)
-                .font(.system(size: blockHeight > 28 ? 12 : 10, weight: .bold, design: .rounded))
-                .foregroundStyle(color)
-                .lineLimit(1)
-                .padding(.vertical, 3)
-            Spacer()
+        Button(action: onTap) {
+            HStack(spacing: 0) {
+                Capsule()
+                    .fill(color)
+                    .frame(width: 4)
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 4)
+                Text(displayName)
+                    .font(.system(size: blockHeight > 28 ? 13 : 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(color)
+                    .lineLimit(1)
+                    .padding(.vertical, 3)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: blockHeight)
+            .background(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(color.opacity(0.3))
+            )
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: blockHeight)
-        .background(
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .fill(color.opacity(0.3))
-        )
+        .buttonStyle(.plain)
     }
 }
 
@@ -583,43 +598,39 @@ private struct PeriodBlock: View {
 
 private struct EventBlock: View {
     let event: SchoolEvent
+    let onTap: () -> Void
 
     private var blockHeight: CGFloat {
         max(Grid.height(minutes: event.endDate.timeIntervalSince(event.startDate) / 60), 18)
     }
-    private var color: Color {
-        switch event.category {
-        case .athletic:          return Color.lsGold
-        case .liturgy:           return Color.lsBlue
-        case .academic:          return Color.lsSuccess
-        case .holiday:           return Color.lsOrange
-        case .professionalDress: return Color.lsGold
-        default:                 return Color.lsSecondary
-        }
-    }
+    private var color: Color { event.category.pillColor }
 
     var body: some View {
-        HStack(spacing: 0) {
-            Capsule()
-                .fill(color)
-                .frame(width: 4)
-                .padding(.vertical, 3)
-                .padding(.leading, 0)
-                .padding(.trailing, 4)
-            Text(event.title)
-                .font(.system(size: blockHeight > 28 ? 12 : 10, weight: .bold, design: .rounded))
-                .foregroundStyle(color)
-                .lineLimit(blockHeight > 28 ? 2 : 1)
-                .padding(.vertical, 3)
-            Spacer(minLength: 0)
+        Button(action: onTap) {
+            HStack(spacing: 0) {
+                Capsule()
+                    .fill(color)
+                    .frame(width: 4)
+                    .padding(.vertical, 3)
+                    .padding(.leading, 4)
+                    .padding(.trailing, 4)
+                Text(event.title)
+                    .font(.system(size: blockHeight > 28 ? 13 : 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(color)
+                    .lineLimit(blockHeight > 28 ? 2 : 1)
+                    .padding(.vertical, 3)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: blockHeight)
+            .background(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(color.opacity(0.18))
+                    .shadow(color: color, radius: 5)
+            )
+            .padding(.trailing, 2)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: blockHeight)
-        .background(
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .fill(color.opacity(0.18))
-        )
-        .padding(.trailing, 2)
+        .buttonStyle(.plain)
     }
 }
 
@@ -629,22 +640,14 @@ private struct AllDayStrip: View {
     let store: CalendarStore
     let date: Date
     let columnWidth: CGFloat
+    let onSelect: (EventDetailItem) -> Void
 
     private var dayKey: String { DateFormatter.isoDay.string(from: date) }
     private var allDayEvents: [SchoolEvent] {
-        store.events(on: dayKey).filter { $0.isAllDay && $0.category != .bellSchedule }
+        store.events(on: dayKey).filter { $0.isAllDay && $0.category != .schedules }
     }
 
-    private func color(for event: SchoolEvent) -> Color {
-        switch event.category {
-        case .athletic:          return Color.lsGold
-        case .liturgy:           return Color.lsBlue
-        case .academic:          return Color.lsSuccess
-        case .holiday:           return Color.lsOrange
-        case .professionalDress: return Color.lsGold
-        default:                 return Color.lsSecondary
-        }
-    }
+    private func color(for event: SchoolEvent) -> Color { event.category.pillColor }
 
     var body: some View {
         if !allDayEvents.isEmpty {
@@ -653,13 +656,19 @@ private struct AllDayStrip: View {
                     ForEach(allDayEvents, id: \.id) { event in
                         let c = color(for: event)
                         Text(event.title)
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
                             .foregroundStyle(c)
                             .lineLimit(1)
                             .padding(.horizontal, LS.sm)
                             .padding(.vertical, 5)
                             .background(c.opacity(0.18))
                             .clipShape(RoundedRectangle(cornerRadius: LS.radiusSm, style: .continuous))
+                            .contentShape(Rectangle())
+                            .highPriorityGesture(
+                                TapGesture().onEnded {
+                                    onSelect(.schoolEvent(event))
+                                }
+                            )
                     }
                 }
                 .padding(.horizontal, Grid.gutterWidth)
