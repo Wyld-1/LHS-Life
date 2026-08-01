@@ -37,6 +37,31 @@ struct PhoneLayout: View {
         return !settings.apBadgeCleared
     }
 
+    /// Everything the per-tab nav bar needs. Built here (where store,
+    /// settings and calendarUI live) and handed down through AppDock, since
+    /// each Tab owns its own NavigationStack and therefore its own bar.
+    private var toolbarConfig: PhoneToolbarConfig {
+        PhoneToolbarConfig(
+            cycleLabel: calendarUI.zoomOutLabel,
+            onCycle: { calendarUI.zoomOutAction() },
+            canGoBack: selectedTab == .powerschool ? powerschoolState.canGoBack : schoologyState.canGoBack,
+            onBack: {
+                if selectedTab == .powerschool { powerschoolState.webView?.goBack() }
+                else if selectedTab == .schoology { schoologyState.webView?.goBack() }
+            },
+            showSettingsBadge: showBadge,
+            onSettings: {
+                settings.apBadgeCleared = true
+                showSettings = true
+            },
+            onPillTap: { withAnimation(.lsSnappy) { selectedTab = .events } },
+            onEventTap: { event in
+                withAnimation(.lsSnappy) { selectedTab = .events }
+                calendarUI.navigateTo(event: event)
+            }
+        )
+    }
+
     var body: some View {
         ZStack {
             AppDock(
@@ -44,6 +69,7 @@ struct PhoneLayout: View {
                 lunchState: lunchState,
                 powerschoolState: powerschoolState,
                 schoologyState: schoologyState,
+                toolbarConfig: toolbarConfig,
                 onSameTabTap: { tab in
                     switch tab {
                     case .events:      calendarUI.goToToday()
@@ -59,58 +85,25 @@ struct PhoneLayout: View {
             )
             .environment(calendarUI)
 
-            VStack {
-                PhoneHeaderRow(
-                    selectedTab: selectedTab,
-                    cycleLabel: calendarUI.zoomOutLabel,
-                    onCycle: { calendarUI.zoomOutAction() },
-                    canGoBack: selectedTab == .powerschool ? powerschoolState.canGoBack : schoologyState.canGoBack,
-                    onBack: {
-                        if selectedTab == .powerschool { powerschoolState.webView?.goBack() }
-                        else if selectedTab == .schoology { schoologyState.webView?.goBack() }
-                    },
-                    showSettingsBadge: showBadge,
-                    onSettings: {
-                        settings.apBadgeCleared = true
-                        showSettings = true
-                    },
-                    onPillTap: { withAnimation(.lsSnappy) { selectedTab = .events } },
-                    onEventTap: { event in
-                        withAnimation(.lsSnappy) { selectedTab = .events }
-                        calendarUI.navigateTo(event: event)
-                    }
-                )
-                .padding(.horizontal, LS.md)
-
-                Spacer()
-
-                HStack(alignment: .bottom) {
+            // Header is gone from this layer entirely — it's a real nav bar now,
+            // applied per-tab inside AppDock (see PhoneToolbar). The top gradient
+            // that used to fade content out behind the floating pill went with it;
+            // the nav bar's own scroll-edge material does that job natively.
+            // What remains here is only the pre-26 homework FAB, which has no
+            // system equivalent below iOS 26 (26+ uses tabViewBottomAccessory).
+            if #unavailable(iOS 26) {
+                VStack {
                     Spacer()
-                    VStack(spacing: LS.sm) {
-                        if #unavailable(iOS 26) {
-                            HomeworkFAB {
-                                withAnimation(.lsSpring) { showHomework = true }
-                            }
+                    HStack(alignment: .bottom) {
+                        Spacer()
+                        HomeworkFAB {
+                            withAnimation(.lsSpring) { showHomework = true }
                         }
                     }
+                    .padding(.trailing, LS.md)
+                    .padding(.bottom, LS.xxl)
                 }
-                .padding(.trailing, LS.md)
-                .padding(.bottom, LS.xxl)
-            }
-            .safeAreaPadding(.bottom)
-            .background(alignment: .top) {
-                LinearGradient(
-                    stops: [
-                        .init(color: Color.lsBackground,            location: 0),
-                        .init(color: Color.lsBackground,            location: 0.3),
-                        .init(color: Color.lsBackground.opacity(0), location: 1)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: LS.contentTopInset)
-                .ignoresSafeArea(edges: .top)
-                .allowsHitTesting(false)
+                .safeAreaPadding(.bottom)
             }
 
             if showHomework {

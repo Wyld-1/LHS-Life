@@ -14,6 +14,7 @@
 //
 
 import SwiftUI
+internal import os
 
 // MARK: - Grid
 
@@ -106,6 +107,7 @@ private struct DayView: View {
             ZStack {
             VStack(spacing: 0) {
                 // Fixed header
+                // Dynamic spacing tried and failed: Color.clear.frame(height: geo.safeAreaInsets.top)
                 Color.clear.frame(height: LS.contentTopInset)
                 WeekStrip(selectedDate: Binding(
                     get: { uiState.selectedDate },

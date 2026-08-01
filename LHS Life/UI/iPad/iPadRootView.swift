@@ -133,10 +133,18 @@ struct iPadRootView: View {
         }
     }
 
-    /// Plain data holder — systemName/enabled/action only. No glass baked
-    /// in here (that lived in ToolbarCapsule's rendering, not this spec),
-    /// so it's safe to render as a native plain toolbar Button above.
-    private var contextualToolbarButton: ToolbarCapsule.ButtonSpec? {
+    /// Plain data holder — systemName/enabled/action only. Previously
+    /// ToolbarCapsule.ButtonSpec; that view is gone (both iPhone and iPad now
+    /// use native toolbars, which supply their own glass), and this was the only
+    /// part of it still in use. No glass baked in here, so it renders safely as
+    /// a plain toolbar Button above.
+    struct ToolbarButtonSpec {
+        let systemName: String
+        var enabled: Bool = true
+        let action: () -> Void
+    }
+
+    private var contextualToolbarButton: ToolbarButtonSpec? {
         switch selectedTab {
         case .events:
             return .init(

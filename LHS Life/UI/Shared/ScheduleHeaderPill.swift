@@ -30,8 +30,11 @@ struct ScheduleHeaderPill: View {
 
     var onPillTap: (() -> Void)? = nil
     var onEventTap: ((SchoolEvent) -> Void)? = nil
-    /// When true, suppresses the pill's own glassEffect — use when the system
-    /// (e.g. tabViewBottomAccessory) already provides the glass surface.
+    /// When true, suppresses the pill's own background/glass surface — use when
+    /// the system already provides one (nav bar toolbar item,
+    /// tabViewBottomAccessory). Covers BOTH the iOS 26 glassEffect and the
+    /// pre-26 frosted Capsule + shadow; either one double-applies material when
+    /// the pill sits inside a surface the system already drew.
     var suppressGlass: Bool = false
 
     @State private var now: Date = Date()
@@ -75,14 +78,19 @@ struct ScheduleHeaderPill: View {
                     Text(sub)
                         .font(.lsCaption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                 }
             }
             Spacer()
         }
         .padding(.horizontal, LS.md)
-        .padding(.vertical, LS.sm)
-        .frame(minHeight: 44)
+        // Fixed 44 (not minHeight) — a nav bar constrains principal-item height
+        // strictly, so the pill must commit to one. 17pt headline + 2 spacing +
+        // 12pt caption ≈ 31pt of text, which clears 44 comfortably; the vertical
+        // padding that used to push this to ~47 is gone. Subtitle is lineLimit(1)
+        // for the same reason — two caption lines would overflow 44.
+        .frame(height: 44)
         .overlay(alignment: .leading) {
             if let forced = DebugClock.shared.forcedProgress {
                 GeometryReader { geo in
@@ -112,7 +120,7 @@ struct ScheduleHeaderPill: View {
         }
         .clipShape(Capsule())
         .background {
-            if #available(iOS 26, *) { Color.clear } else {
+            if #available(iOS 26, *) { Color.clear } else if suppressGlass { Color.clear } else {
                 Capsule()
                     .fill(.ultraThinMaterial)
                     .overlay { Capsule().strokeBorder(Color.white.opacity(0.07), lineWidth: 0.5) }

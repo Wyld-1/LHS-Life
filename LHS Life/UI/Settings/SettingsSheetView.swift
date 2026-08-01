@@ -60,6 +60,7 @@ struct SettingsSheetView: View {
                 }
                 .padding(.horizontal, LS.md)
                 .padding(.top, LS.md)
+                .padding(.bottom, LS.sm)
             }
         }
         .background(Color.lsSurface)

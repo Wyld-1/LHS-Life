@@ -26,20 +26,34 @@ LHS Life (app target)
 │   ├── ColorPalette.swift             — 10-color palette as hex strings (shared)
 │   ├── BellScheduleDetector.swift     — keyword heuristics for event categorization
 │   ├── PathwaysService.swift          — graduation year + event keyword logic
+│   ├── APExamService.swift            — AP exam day state + settings badge
+│   ├── ClassOrientationService.swift  — class orientation logic
+│   ├── DateHelpers.swift              — shared date formatters
+│   ├── DebugClock.swift               — forced date/time override for testing
+│   ├── LHSLogger.swift                — os.Logger wrappers, subsystem "lhslife"
 │   └── HapticEngine.swift             — centralized UIImpactFeedbackGenerator wrapper
 └── UI/
     ├── DesignSystem.swift             — all colors, fonts, spacing, animations, modifiers
-    ├── AppTabContainer.swift          — root container: two-layer ZStack
-    ├── AppDock.swift                  — tab switcher, iOS 26 / legacy branch
+    ├── AppTabContainer.swift          — root container; branches iPhone vs iPad
+    ├── AccessGuardView.swift          — access gate
     ├── HomeworkPopup.swift            — floating homework entry card
     ├── LaunchScreen.swift             — startup loading screen
-    ├── HomeworkSheet.swift            — full homework sheet (legacy fallback)
     ├── ContentView.swift              — entry point view, hosts AppTabContainer
-    ├── Components/
-    │   ├── ScheduleHeader.swift       — floating pill header + 1s timer
-    │   └── WebNavButtons.swift        — home/back buttons for web tabs
+    ├── iPhone/
+    │   ├── PhoneLayout.swift          — iPhone root: AppDock + popup/launch overlays
+    │   ├── PhoneTabDock.swift         — tab switcher, iOS 26 / legacy branch
+    │   └── PhoneToolbar.swift         — native nav bar (principal pill + trailing buttons)
+    ├── iPad/
+    │   ├── iPadRootView.swift         — NavigationSplitView root + detail toolbar
+    │   └── iPadSidebar.swift          — Today module, nav rows, pinned Settings
+    ├── Shared/
+    │   ├── ScheduleHeaderPill.swift   — schedule pill + 1s timer (nav bar / sidebar)
+    │   ├── ToolbarCapsule.swift       — DELETED (both platforms use native toolbars)
+    │   ├── APExamBanner.swift         — AP exam day banner
+    │   ├── EventDetailSheet.swift     — event detail presentation
+    │   └── HomeworkFAB.swift          — floating homework button (pre-26 iPhone)
     ├── Tabs/
-    │   ├── EventsTabView.swift        — merged Today + Calendar tab
+    │   ├── EventsTabView.swift        — merged Today + Calendar tab (Day/Month/Year)
     │   ├── LunchTabView.swift         — thin wrapper over EmbeddedWebView
     │   ├── PowerSchoolTabView.swift   — thin wrapper over EmbeddedWebView
     │   └── SchoologyTabView.swift     — thin wrapper over EmbeddedWebView
@@ -67,7 +81,7 @@ Shared files (added to both targets):
 
 The app uses the `@Observable` macro (iOS 17+, `Observation` framework) throughout. This replaces `ObservableObject` + `@Published`.
 
-**Why:** With `ObservableObject`, any view holding `@EnvironmentObject` re-renders when any published property changes. With `@Observable`, SwiftUI tracks exactly which properties each view body reads, and only re-renders that view when those specific properties change. The header timer ticks every second — with the old model this would re-render every view in the app. With `@Observable` it re-renders only `ScheduleHeader`.
+**Why:** With `ObservableObject`, any view holding `@EnvironmentObject` re-renders when any published property changes. With `@Observable`, SwiftUI tracks exactly which properties each view body reads, and only re-renders that view when those specific properties change. The header timer ticks every second — with the old model this would re-render every view in the app. With `@Observable` it re-renders only `ScheduleHeaderPill`.
 
 **Ownership pattern:**
 - `CalendarStore` and `UserSettings` are created once in `LaSalle_ScheduleApp` using `@State` at the `App` level (safe — `App` is never rebuilt by SwiftUI).
@@ -126,19 +140,42 @@ Given a `BellSchedule`, `UserSettings`, current `Date`, and flags (`isPathwaysDa
 
 ## UI Structure
 
-### AppTabContainer — Two-Layer ZStack
+### AppTabContainer — platform branch
+
+`AppTabContainer` picks `PhoneLayout` or `iPadRootView` by idiom. Both platforms
+now use **native toolbars** — there is no floating header layer on either.
 
 ```
-ZStack
-├── Layer 0: AppDock                    — owns all tab content and the tab switcher
-└── Layer 1: VStack (floating chrome)
-    ├── top: ScheduleHeader + gear button
-    └── bottom: WebNavButtons (conditional) + HomeworkFAB (legacy only)
-    [+ HomeworkPopup overlay at zIndex 10]
-    [+ LaunchScreen overlay at zIndex 20]
+PhoneLayout                                iPadRootView
+└── ZStack                                 └── ZStack
+    ├── AppDock (tabs + content)               ├── NavigationSplitView
+    ├── HomeworkFAB (pre-26 only)              │   ├── iPadSidebar
+    ├── HomeworkPopup   [zIndex 10]            │   └── detail + .toolbar
+    └── LaunchScreen    [zIndex 20]            ├── HomeworkPopup   [zIndex 10]
+                                               └── LaunchScreen    [zIndex 20]
 ```
 
-`AppTabContainer` has zero `#available` checks. All OS-version branching is in child components.
+### Toolbars
+
+Each iPhone tab wraps its content in its own `NavigationStack` and applies
+`.phoneToolbar(tab:config:)` (`PhoneToolbar.swift`):
+
+- `.principal` — `ScheduleHeaderPill(suppressGlass: true)`, fixed 44pt height.
+- `.topBarTrailing` — contextual button (zoom-out in Events, back in the web
+  tabs, none in Lunch) tinted `lsPrimary`, plus the settings button tinted
+  `lsBlue` with its AP badge overlay.
+
+`PhoneToolbarConfig` carries the actions; it is built in `PhoneLayout` (which
+has the store/settings/calendarUI dependencies) and passed down through
+`AppDock` to each tab.
+
+**`suppressGlass` matters:** a toolbar item already sits on the system's own
+material. `ScheduleHeaderPill` self-applies glass (iOS 26) or a frosted capsule
+(pre-26) when standalone, so both are suppressed inside a toolbar to avoid
+double-applied material. Same reason iPad renders its toolbar button plain.
+
+iPad uses `navigationTitle` + `.toolbar` directly in `iPadRootView`; its
+schedule pill lives in `iPadSidebar`, not the toolbar.
 
 ### AppDock
 
@@ -148,8 +185,9 @@ ZStack
 AppDock
 ├── if iOS 26+: SystemTabDock
 │   └── TabView (native, liquid glass)
-│       ├── Events, Lunch, Grades, Schoology tabs
-│       └── Homework tab with role: .search (detached circle button)
+│       ├── Events, Lunch, Grades, Schoology tabs (each in a NavigationStack)
+│       ├── .tabBarMinimizeBehavior(.onScrollDown) in Day view
+│       └── .tabViewBottomAccessory — HomeworkAccessory
 └── else: LegacyTabDock
     ├── ZStack of all four tab views (opacity-switched)
     └── LegacyDockBar (frosted capsule, bottom-left)
@@ -157,7 +195,9 @@ AppDock
 
 **Opacity switching (legacy):** All four tab views are always mounted in the ZStack. They are shown/hidden by `.opacity()` and `.allowsHitTesting()`. This keeps `WKWebView` instances alive across tab switches. Removing and re-adding a view would destroy and recreate the web view, losing page state.
 
-**Same-tab-tap home:** `LegacyDockBar` detects when the tapped tab is already selected and calls `onSameTabTap(tab)` instead of updating `selectedTab`. `AppTabContainer` handles this by calling `.reload()` on the appropriate `EmbeddedWebState`.
+**Same-tab-tap home:** Both docks detect a tap on the already-selected tab and
+call `onSameTabTap(tab)` instead of changing selection. `PhoneLayout` /
+`iPadRootView` handle it: Events jumps to today, the three web tabs `.reload()`.
 
 **Homework tab interception:** `AppTabContainer` observes `selectedTab` via `.onChange`. When it becomes `.homework`, it immediately sets `selectedTab = previousTab` (before SwiftUI renders the homework view) and sets `showHomework = true`. The content view never changes; the popup appears over whatever tab was active.
 
@@ -175,7 +215,44 @@ All three embedded web views (Lunch, PowerSchool, Schoology) use `EmbeddedWebSta
 
 **Dark CSS (Lunch only):** A `WKUserScript` injected at `documentEnd` applies `!important` CSS overrides to force white text and dark backgrounds matching the app's color scheme.
 
-**Content insets:** `wv.scrollView.contentInsetAdjustmentBehavior = .never`. Content insets are applied manually via `applyInsets(top:bottom:)`, called from the view's `.onAppear`. This allows content to scroll behind the header and dock without the system safe area system interfering.
+**Content insets — obscuredContentInsets, not contentInset:**
+
+`WKWebView` derives its layout viewport from its **frame** and ignores
+`scrollView.contentInset` entirely. Setting `contentInset` therefore creates a
+region WebKit knows nothing about: `contentSize` stays inflated by the inset
+height (a dead band you can scroll into with no content in it), and WebKit's
+notion of "scrolled to top" (offset 0) permanently disagrees with the app's
+(offset `-inset`). Any correction applied after the fact loses, because WebKit
+re-derives position from its own model on every reflow — and reflows are
+asynchronous and out-of-process, landing after the SwiftUI update pass.
+
+The current implementation states the obscured region once, declaratively:
+
+```
+initialize()
+    → applyObscuredInsets(to:)      — BEFORE load()
+        iOS 26+ : wv.obscuredContentInsets = insets
+        iOS 16+ : wv.setMinimumViewportInset(_:maximumViewportInset:)
+        + verticalScrollIndicatorInsets (indicator geometry is separate)
+    → scrollView.contentInsetAdjustmentBehavior = .always
+```
+
+Both halves are required. `obscuredContentInsets` fixes the **layout viewport**;
+`.always` lets UIKit adjust the **scroll view's** resting position to match.
+With `.never` ("do not adjust the scroll view insets") the scroll view clamps at
+offset 0 — content parks behind the toolbar, refuses to be pulled down, and
+snaps back on any scroll attempt.
+
+**Per-idiom inset:** iPhone uses `LS.contentTopInset` (the floating toolbar
+overlays content). iPad uses **0** — the `NavigationSplitView` detail column
+already lays the web view out below its nav bar, so an inset there is pure
+phantom scroll space.
+
+**Frame ownership:** `translatesAutoresizingMaskIntoConstraints` is left at its
+UIKit default (`true`). Setting it `false` zeroes the frame the moment it's
+applied, causing the first page to load into a 0×0 viewport and reflow on first
+mount. `updateUIView` assigns `frame` explicitly from `GeometryReader`, which is
+what sizes the view for iPad's narrower detail column.
 
 ---
 
@@ -201,7 +278,7 @@ SharedStore.write()         →   SharedStore.read*()
 `LiveActivityService` is a `@MainActor` singleton driven by the 1-second header timer.
 
 ```
-ScheduleHeader timer (1s)
+ScheduleHeaderPill timer (1s)
     → LiveActivityService.update(state:settings:)
         if liveActivityEnabled == false → end()
         if dayState is school hours:
@@ -237,7 +314,7 @@ All notifications are scheduled by `NotificationService` (a static enum) from wi
 
 | Timer | Owner | Interval | Purpose |
 |---|---|---|---|
-| Header timer | `ScheduleHeader.onAppear` | 1 second | Updates `now`, drives header text and progress, calls `LiveActivityService.update()` |
+| Header timer | `ScheduleHeaderPill.onAppear` | 1 second | Updates `now`, drives pill text and progress, calls `LiveActivityService.update()` |
 | LiveActivity update | `LiveActivityService` | 30 seconds | Calls `Activity.update()` — stays within ActivityKit rate limit |
 | ASB notification window | `NotificationService` | 14 days lookahead | How far ahead ASB notifications are pre-scheduled on each refresh |
 

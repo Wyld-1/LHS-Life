@@ -26,6 +26,4 @@ enum LHSLogger {
     static let engine   = Logger(subsystem: "lhslife", category: "engine")
     /// Grad-year / Pathways / senior checks
     static let gradYear = Logger(subsystem: "lhslife", category: "gradYear")
-    /// EmbeddedWebState / WebViewRepresentable frame + scroll-offset corrections
-    static let webview  = Logger(subsystem: "lhslife", category: "webview")
 }

@@ -24,6 +24,7 @@ struct AppDock: View {
     let lunchState:       EmbeddedWebState
     let powerschoolState: EmbeddedWebState
     let schoologyState:   EmbeddedWebState
+    var toolbarConfig: PhoneToolbarConfig = PhoneToolbarConfig()
     var onSameTabTap: (AppTab) -> Void = { _ in }
     var onHomeworkTap: () -> Void = {}
 
@@ -35,6 +36,7 @@ struct AppDock: View {
                 lunchState: lunchState,
                 powerschoolState: powerschoolState,
                 schoologyState: schoologyState,
+                toolbarConfig: toolbarConfig,
                 onSameTabTap: onSameTabTap,
                 onHomeworkTap: onHomeworkTap
             )
@@ -45,6 +47,7 @@ struct AppDock: View {
                 lunchState: lunchState,
                 powerschoolState: powerschoolState,
                 schoologyState: schoologyState,
+                toolbarConfig: toolbarConfig,
                 onSameTabTap: onSameTabTap
             )
         }
@@ -60,6 +63,7 @@ private struct SystemTabDock: View {
     let lunchState:       EmbeddedWebState
     let powerschoolState: EmbeddedWebState
     let schoologyState:   EmbeddedWebState
+    var toolbarConfig: PhoneToolbarConfig = PhoneToolbarConfig()
     var onSameTabTap: (AppTab) -> Void = { _ in }
     var onHomeworkTap: () -> Void = {}
 
@@ -85,17 +89,21 @@ private struct SystemTabDock: View {
         TabView(selection: selection) {
             Tab("Events", systemImage: "calendar", value: AppTab.events) {
                 EventsTabView()
+                    .phoneToolbar(tab: .events, config: toolbarConfig)
             }
             Tab("Order", systemImage: "fork.knife", value: AppTab.lunch) {
                 LunchTabView(webState: lunchState)
+                    .phoneToolbar(tab: .lunch, config: toolbarConfig)
             }
             Tab(value: AppTab.powerschool) {
                 PowerSchoolTabView(webState: powerschoolState)
+                    .phoneToolbar(tab: .powerschool, config: toolbarConfig)
             } label: {
                 Label("Grades", image: "powerschool-logo")
             }
             Tab(value: AppTab.schoology) {
                 SchoologyTabView(webState: schoologyState)
+                    .phoneToolbar(tab: .schoology, config: toolbarConfig)
             } label: {
                 Label("Schoology", image: "schoology-logo")
             }
@@ -142,21 +150,26 @@ private struct LegacyTabDock: View {
     let lunchState:       EmbeddedWebState
     let powerschoolState: EmbeddedWebState
     let schoologyState:   EmbeddedWebState
+    var toolbarConfig: PhoneToolbarConfig = PhoneToolbarConfig()
     var onSameTabTap: (AppTab) -> Void = { _ in }
 
     var body: some View {
         ZStack {
             // Content — all four always mounted so web views stay alive
             EventsTabView()
+                .phoneToolbar(tab: .events, config: toolbarConfig)
                 .opacity(selectedTab == .events      ? 1 : 0)
                 .allowsHitTesting(selectedTab == .events)
             LunchTabView(webState: lunchState)
+                .phoneToolbar(tab: .lunch, config: toolbarConfig)
                 .opacity(selectedTab == .lunch       ? 1 : 0)
                 .allowsHitTesting(selectedTab == .lunch)
             PowerSchoolTabView(webState: powerschoolState)
+                .phoneToolbar(tab: .powerschool, config: toolbarConfig)
                 .opacity(selectedTab == .powerschool ? 1 : 0)
                 .allowsHitTesting(selectedTab == .powerschool)
             SchoologyTabView(webState: schoologyState)
+                .phoneToolbar(tab: .schoology, config: toolbarConfig)
                 .opacity(selectedTab == .schoology   ? 1 : 0)
                 .allowsHitTesting(selectedTab == .schoology)
 
