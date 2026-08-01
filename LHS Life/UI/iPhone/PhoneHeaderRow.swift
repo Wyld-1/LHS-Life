@@ -55,7 +55,7 @@ struct PhoneHeaderRow: View {
             ))
         }
         specs.append(.init(
-            systemName: "person.fill",
+            systemName: "person.crop.circle",
             tint: Color.lsBlue,
             showBadge: showSettingsBadge,
             action: onSettings

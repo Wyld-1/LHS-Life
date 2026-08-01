@@ -23,6 +23,7 @@ struct SettingsSheetView: View {
     @State private var debugPrimaryText = "22 min left in Period 3"
     @State private var debugSecondaryText = "Next: Lunch at 11:45"
     @State private var debugProgress: Double = 0.6
+    @State private var showSignOutDialog = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -53,12 +54,12 @@ struct SettingsSheetView: View {
                     gradYearSection
                     periodsSection
                     notificationsSection   // includes Live Activity
-                    asbSection             // moved to bottom — power user feature
+                    asbSection
                     debugSection
+                    signOutSection
                 }
                 .padding(.horizontal, LS.md)
                 .padding(.top, LS.md)
-                .padding(.bottom, LS.xxl)
             }
         }
         .background(Color.lsSurface)
@@ -84,6 +85,22 @@ struct SettingsSheetView: View {
             }
         }
         .onDisappear { settings.save() }
+        .confirmationDialog(
+            "Sign Out of LHS Life?",
+            isPresented: $showSignOutDialog,
+            titleVisibility: .visible
+        ) {
+            Button("Delete All Data", role: .destructive) {
+                HapticEngine.shared.success()
+                settings.deleteAllData()
+            }
+            Button("Sign Out", role: .destructive) {
+                HapticEngine.shared.success()
+                settings.signOut()
+            }
+        } message: {
+            Text("Sign Out clears your email and grad year. Delete All Data resets all customizations.")
+        }
     }
 
     // MARK: - AP Exam Banner (top of settings)
@@ -588,6 +605,25 @@ struct SettingsSheetView: View {
             .foregroundStyle(Color.lsSecondary)
             .tracking(1)
             .padding(.leading, LS.xs)
+    }
+
+    // MARK: - Sign Out
+
+    private var signOutSection: some View {
+        Button {
+            HapticEngine.shared.tap()
+            showSignOutDialog = true
+        } label: {
+            HStack {
+                Spacer()
+                Text("Sign Out")
+                    .font(.lsHeadline)
+                    .foregroundStyle(Color.lsDestructive)
+                Spacer()
+            }
+            .padding(LS.md)
+        }
+        .lsCard()
     }
 }
 

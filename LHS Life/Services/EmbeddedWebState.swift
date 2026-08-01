@@ -8,6 +8,7 @@
 
 import SwiftUI
 internal import WebKit
+internal import os
 
 // MARK: - Navigation Delegate
 
@@ -152,8 +153,38 @@ final class EmbeddedWebState {
         // narrower NavigationSplitView detail column when the iPad sidebar
         // is expanded). Turning this off lets SwiftUI's constraints fully
         // own sizing.
-        wv.translatesAutoresizingMaskIntoConstraints = false
+        // NOTE: translatesAutoresizingMaskIntoConstraints is deliberately NOT
+        // turned off here — see makeUIView, which flips it at the moment SwiftUI
+        // actually takes over sizing. Turning it off at this point discarded the
+        // explicit UIScreen.main.bounds frame above: the view isn't in any
+        // SwiftUI hierarchy yet during preload, so with the flag off and no
+        // constraints to satisfy, Auto Layout sized it to 0×0 — and load() below
+        // then rendered the entire first page into a zero-width viewport. Tapping
+        // the tab later jumped the frame 0×0 -> real size, forcing WebKit to
+        // reflow the whole document out-of-process, and scroll position does not
+        // survive that reflow (no synchronous correction can, since the reflow
+        // lands after the SwiftUI update pass). Keeping the real frame through
+        // preload means the page lays out at the right width from the first byte;
+        // on iPhone the eventual SwiftUI size equals UIScreen.main.bounds, so
+        // there is no resize and no reflow at all.
         webView = wv
+        // Content insets are applied HERE, before load() fires — not deferred to
+        // EmbeddedWebView.onAppear. A tab the user hasn't opened yet has never
+        // appeared, so onAppear has never run, so contentInset.top was still 0
+        // for the whole first load: the network fetch, didFinish,
+        // correctScrollPosition (which computes -contentInset.top, i.e. -0, a
+        // no-op), and WebKit's own initial layout all settled against a zero
+        // inset. The inset only became 124 when the tab was finally tapped —
+        // after everything had already come to rest — leaving content parked one
+        // inset-height too high, behind the floating header. Every later visit
+        // was consistent because the inset was already correct by then. That
+        // asymmetry was the whole bug. LS.contentTopInset is a constant known
+        // at init, so there is no reason to learn it late.
+        let initialInsets = UIEdgeInsets(top: LS.contentTopInset, left: 0, bottom: 0, right: 0)
+        wv.scrollView.contentInset = initialInsets
+        wv.scrollView.verticalScrollIndicatorInsets = initialInsets
+        wv.scrollView.contentOffset = CGPoint(x: 0, y: -LS.contentTopInset)
+        LHSLogger.webview.notice("\(self.siteName, privacy: .public) initialize — inset.top set to \(LS.contentTopInset, privacy: .public) before load()")
         isLoading = true
         wv.load(URLRequest(url: url))
         // isReady is deliberately NOT set here. It used to flip true the
@@ -225,6 +256,7 @@ final class EmbeddedWebState {
     @MainActor
     func correctScrollPosition(in webView: WKWebView) {
         let target = CGPoint(x: 0, y: -webView.scrollView.contentInset.top)
+        LHSLogger.webview.notice("\(self.siteName, privacy: .public) correctScrollPosition — inset.top=\(webView.scrollView.contentInset.top, privacy: .public) offset.y=\(webView.scrollView.contentOffset.y, privacy: .public) -> target.y=\(target.y, privacy: .public)")
         webView.scrollView.setContentOffset(target, animated: false)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak webView] in
             webView?.scrollView.setContentOffset(target, animated: false)
@@ -287,10 +319,10 @@ struct EmbeddedWebView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let _ = print("[WEBVIEW-SIZE] \(webState.siteName) GeometryReader geo.size=\(geo.size)")
+            let _ = LHSLogger.webview.notice("\(webState.siteName, privacy: .public) GeometryReader geo.size=\(String(describing: geo.size), privacy: .public)")
             ZStack(alignment: .top) {
                 if let wv = webState.webView {
-                    WebViewRepresentable(webView: wv, size: geo.size)
+                    WebViewRepresentable(webView: wv, size: geo.size, siteName: webState.siteName)
                         .ignoresSafeArea(edges: [.top, .bottom])
                         .onAppear {
                             webState.applyInsets(top: LS.contentTopInset, bottom: 0)
@@ -351,17 +383,40 @@ struct EmbeddedWebView: View {
 struct WebViewRepresentable: UIViewRepresentable {
     let webView: WKWebView
     let size: CGSize
+    let siteName: String
 
     func makeUIView(context: Context) -> WKWebView {
-        webView
+        // Hand sizing authority to SwiftUI now — and only now. While the view was
+        // preloading outside any hierarchy it kept its explicit screen-sized
+        // frame (see initialize()); from this point on, Auto Layout constraints
+        // generated from .frame() own sizing, which is what the iPad
+        // NavigationSplitView detail column needs in order to size the web view
+        // to the narrower pane rather than full screen.
+        webView.translatesAutoresizingMaskIntoConstraints = false
+        LHSLogger.webview.notice("\(siteName, privacy: .public) makeUIView — frame at mount \(String(describing: webView.frame), privacy: .public)")
+        return webView
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {
         guard size.width > 0, size.height > 0 else { return }
         let target = CGRect(origin: .zero, size: size)
         if uiView.frame != target {
-            print("[WEBVIEW-SIZE] updateUIView — forcing frame from \(uiView.frame) to \(target)")
+            let oldFrame = uiView.frame
             uiView.frame = target
+            // A frame/bounds change on UIScrollView can renormalize contentOffset
+            // against the new bounds, silently undoing applyInsets()'s negative
+            // top offset. This is the one event that's structurally different on
+            // first mount (webview starts at initialize()'s UIScreen.main.bounds;
+            // GeometryReader's real target size can differ) vs. every later
+            // re-appearance (frame already equals target, this branch never runs
+            // again) — so it's re-snapped here on every occurrence this fires,
+            // same guarded pattern as applyInsets, not a one-time correction.
+            let top = uiView.scrollView.contentInset.top
+            let needsResnap = uiView.scrollView.contentOffset.y > -top
+            LHSLogger.webview.notice("\(siteName, privacy: .public) updateUIView forcing frame \(String(describing: oldFrame), privacy: .public) -> \(String(describing: target), privacy: .public), inset.top=\(top, privacy: .public) offset.y=\(uiView.scrollView.contentOffset.y, privacy: .public) resnap=\(needsResnap, privacy: .public)")
+            if needsResnap {
+                uiView.scrollView.setContentOffset(CGPoint(x: 0, y: -top), animated: false)
+            }
         }
     }
 }

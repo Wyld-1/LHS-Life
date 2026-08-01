@@ -241,6 +241,42 @@ final class UserSettings {
 #endif
     }
     
+    // MARK: - Sign Out / Reset
+
+    /// Light reset — clears identity (email, grad year) and returns to the
+    /// sign-in/lock screen. Deliberately keeps device-level customization
+    /// (period colors, ASB settings, Live Activity mode, Pro Dress
+    /// notifications) since this reads as "redo sign-in," not "reset the app."
+    func signOut() {
+        schoolEmail = ""
+        graduationYear = Self.defaultGradYear
+        accessApproved = false
+        save()
+    }
+
+    /// Full reset — wipes everything this app has stored, local and iCloud,
+    /// and returns to the sign-in/lock screen. Deliberately does NOT touch
+    /// anything written to the system Calendar or Reminders (Homework list,
+    /// Class Orientation Day, any "Save to Calendar" events) — those live in
+    /// the user's own Calendar/Reminders app, not in this settings store, and
+    /// silently deleting a student's own saved reminders/events would be a
+    /// much bigger, more surprising action than "reset my LHS Life profile."
+    func deleteAllData() {
+        hasCompletedOnboarding = false
+        accessApproved = false
+        schoolEmail = ""
+        graduationYear = Self.defaultGradYear
+        periodConfigs = PeriodConfig.defaults
+        professionalDressNotificationsEnabled = true
+        liveActivityMode = .off
+        liveActivityEnabledToday = false
+        isASBMember = false
+        asbWorkDays = Array(repeating: .off, count: 5)
+        apModeEnabledToday = false
+        apBadgeCleared = false
+        save()
+    }
+
     // MARK: - Helpers
     
     func config(for periodID: Int) -> PeriodConfig? {
