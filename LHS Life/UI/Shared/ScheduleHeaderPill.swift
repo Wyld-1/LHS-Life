@@ -40,6 +40,86 @@ struct ScheduleHeaderPill: View {
     @State private var now: Date = Date()
     @State private var timer: Timer? = nil
 
+    // MARK: Easter egg
+    // Hold the pill for 5 seconds on "No school today" to surface it.
+    // Appears for 2 seconds with a smooth crossfade, then returns.
+    // Not advertised anywhere. If you know, you know.
+    @State private var easterEggVisible = false
+    @State private var easterEggTimer: Timer? = nil
+    @State private var longPressProgress: CGFloat = 0
+    @State private var longPressTimer: Timer? = nil
+    private let easterEggDuration: TimeInterval = 5.0
+
+    // MARK: Easter egg quote pool
+    //
+    // Long quotes split across line1 + line2 (title + subtitle slot).
+    // Short quotes use line1 only. "Built by Lion" is rare: 1-in-20.
+    private struct EasterEggQuote {
+        let line1: String
+        let line2: String?
+        var rare: Bool = false
+    }
+
+    private static let quotes: [EasterEggQuote] = [
+        // Rare signature
+        .init(line1: "Built by Lion 🦁",          line2: nil,                                 rare: true),
+        // Yours
+        .init(line1: "Keep flying 🕊️",     line2: nil),
+        .init(line1: "Never hesitate 😝",               line2: nil),
+        .init(line1: "Fly long enough",               line2: "and the sun will rise"),
+        .init(line1: "I\u{2019}d rather cry",          line2: "than be machine"),
+        .init(line1: "If you want a Lamborghini,",    line2: "stop working like you want a Honda"),
+        // Maverick
+        .init(line1: "Let\u{2019}s turn and burn",   line2: nil),
+        // Pink Panther
+        .init(line1: "Damburger",                    line2: nil),
+        // Dune
+        .init(line1: "Fear is the mind killer",      line2: nil),
+        // Lao Tzu
+        .init(line1: "The journey of 1,000 miles",    line2: "began with a single step"),
+        // Japanese proverb
+        .init(line1: "Fall seven times,",              line2: "stand up eight"),
+        // Seneca
+        .init(line1: "Luck is when preparation",      line2: "meets opportunity"),
+        // Hitchhiker's Guide
+        .init(line1: "The answer is 42.",              line2: nil),
+        .init(line1: "So long, and thanks",            line2: "for the fish."),
+        // Carlin
+        .init(line1: "Why do they call it rush hour", line2: "when no one moves?"),
+        // Tenet
+        .init(line1: "We live in a twilight world",   line2: nil),
+        .init(line1: "I ordered my hot sauce",         line2: "an hour ago"),
+        // The Prestige
+        .init(line1: "Are you watching closely?",      line2: nil),
+        // Ford v Ferrari
+        .init(line1: "There\u{2019}s a point at 7,000 RPM\u{2026}", line2: nil),
+        // Apple
+        .init(line1: "Here\u{2019}s to the crazy ones", line2: nil),
+        .init(line1: "Stay hungry,",                   line2: "stay foolish"),
+        // Tolkien
+        .init(line1: "Not all those who wander",       line2: "are lost"),
+        // Marcus Aurelius
+        .init(line1: "The obstacle is the way",       line2: nil),
+        // Kent Beck
+        .init(line1: "Make it work, make it right,",   line2: "make it fast"),
+        // Nautical
+        .init(line1: "Ships are safe in harbor,",      line2: "but that\u{2019}s not what ships are for"),
+        // Short punchy
+        .init(line1: "Press on.",                     line2: nil),
+        // Yoda
+        .init(line1: "Do or do not.",                 line2: "There is no try."),
+    ]
+
+    private func pickQuote() -> EasterEggQuote {
+        let rare   = Self.quotes.filter { $0.rare }
+        let common = Self.quotes.filter { !$0.rare }
+        let seed   = Int(Date().timeIntervalSince1970) % 20
+        if seed == 0, let pick = rare.randomElement() { return pick }
+        return common.randomElement() ?? Self.quotes[1]
+    }
+
+    @State private var currentQuote = EasterEggQuote(line1: "", line2: nil)
+
     private var apExamState: APExamService.APExamState {
         let dayKey = DateFormatter.isoDay.string(from: now)
         return APExamService.examState(
@@ -67,21 +147,40 @@ struct ScheduleHeaderPill: View {
         HStack {
             Spacer()
             VStack(spacing: 2) {
-                Text(DebugClock.shared.forcedPrimaryText ?? primaryText)
-                    .font(.lsHeadline)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                if let sub = DebugClock.shared.forcedPrimaryText != nil
-                    ? DebugClock.shared.forcedSecondaryText
-                    : secondaryText {
-                    Text(sub)
-                        .font(.lsCaption)
-                        .foregroundStyle(.secondary)
+                // Easter egg crossfade: normal text fades out, message fades in.
+                // Only available when the pill is showing "No school today" —
+                // a quiet condition that limits accidental discovery.
+                if easterEggVisible {
+                    Text(currentQuote.line1)
+                        .font(.lsHeadline.italic())
+                        .foregroundStyle(Color.lsGold)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.85)
+                        .minimumScaleFactor(0.75)
+                    if let line2 = currentQuote.line2 {
+                        Text(line2)
+                            .font(.lsHeadline.italic())
+                            .foregroundStyle(Color.lsGold)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                    }
+                } else {
+                    Text(DebugClock.shared.forcedPrimaryText ?? primaryText)
+                        .font(.lsHeadline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                    if let sub = DebugClock.shared.forcedPrimaryText != nil
+                        ? DebugClock.shared.forcedSecondaryText
+                        : secondaryText {
+                        Text(sub)
+                            .font(.lsCaption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                    }
                 }
             }
+            .animation(.easeInOut(duration: 0.35), value: easterEggVisible)
             Spacer()
         }
         .padding(.horizontal, LS.md)
@@ -135,6 +234,22 @@ struct ScheduleHeaderPill: View {
                 onPillTap?()
             }
         }
+        // Easter egg long press — only arms on "No school today" states.
+        // Uses simultaneous gesture so it doesn't swallow taps.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    // Arm only when pill is in a no-school state and egg not
+                    // already showing. Start counting the moment finger lands.
+                    let isNoSchool = isNoSchoolState
+                    if isNoSchool && !easterEggVisible && longPressTimer == nil {
+                        startLongPressTimer()
+                    }
+                }
+                .onEnded { _ in
+                    cancelLongPressTimer()
+                }
+        )
         .ifTrue(!suppressGlass) { $0.modifier(CapsuleGlassModifier()) }
         .onAppear  { now = DebugClock.shared.now; startTimer() }
         .onDisappear { stopTimer() }
@@ -453,6 +568,47 @@ struct ScheduleHeaderPill: View {
         return max(0, min(1, now.timeIntervalSince(prevEnd) / total))
     }
 
+    // MARK: Easter egg helpers
+
+    private var isNoSchoolState: Bool {
+        switch state.dayState {
+        case .holiday, .noSchedule: return true
+        default: return false
+        }
+    }
+
+    private func startLongPressTimer() {
+        longPressProgress = 0
+        let interval = 0.05
+        var elapsed = 0.0
+        longPressTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { t in
+            elapsed += interval
+            longPressProgress = CGFloat(elapsed / easterEggDuration)
+            if elapsed >= easterEggDuration {
+                t.invalidate()
+                longPressTimer = nil
+                longPressProgress = 0
+                HapticEngine.shared.bump()
+                triggerEasterEgg()
+            }
+        }
+    }
+
+    private func cancelLongPressTimer() {
+        longPressTimer?.invalidate()
+        longPressTimer = nil
+        withAnimation(.easeOut(duration: 0.2)) { longPressProgress = 0 }
+    }
+
+    private func triggerEasterEgg() {
+        currentQuote = pickQuote()
+        withAnimation(.easeInOut(duration: 0.35)) { easterEggVisible = true }
+        easterEggTimer?.invalidate()
+        easterEggTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { _ in
+            withAnimation(.easeInOut(duration: 0.35)) { easterEggVisible = false }
+        }
+    }
+
     private func startTimer() {
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
             Task { @MainActor in
@@ -461,7 +617,11 @@ struct ScheduleHeaderPill: View {
             }
         }
     }
-    private func stopTimer() { timer?.invalidate(); timer = nil }
+    private func stopTimer() {
+        timer?.invalidate(); timer = nil
+        longPressTimer?.invalidate(); longPressTimer = nil
+        easterEggTimer?.invalidate(); easterEggTimer = nil
+    }
 }
 
 private extension DateFormatter {
