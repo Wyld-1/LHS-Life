@@ -56,7 +56,9 @@ struct SettingsSheetView: View {
                     periodsSection
                     notificationsSection
                     mapSection
+                    #if DEBUG
                     debugSection
+                    #endif
                     signOutSection
                 }
                 .padding(.horizontal, LS.md)
