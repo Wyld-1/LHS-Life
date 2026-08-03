@@ -6,6 +6,7 @@
 import SwiftUI
 import UserNotifications
 import ActivityKit
+import UIKit
 
 struct SettingsSheetView: View {
     @Bindable var settings: UserSettings
@@ -53,8 +54,8 @@ struct SettingsSheetView: View {
                     apExamBannerSection
                     gradYearSection
                     periodsSection
-                    notificationsSection   // includes Live Activity
-                    asbSection
+                    notificationsSection
+                    mapSection
                     debugSection
                     signOutSection
                 }
@@ -232,7 +233,9 @@ struct SettingsSheetView: View {
         }
     }
 
-    // MARK: - Notifications + Live Activity
+    // MARK: - Notifications + Live Activity + ASB (all under Alerts)
+
+    private static let weekdayNames = ["Mon", "Tue", "Wed", "Thu", "Fri"]
 
     private var notificationsSection: some View {
         VStack(alignment: .leading, spacing: LS.sm) {
@@ -256,7 +259,6 @@ struct SettingsSheetView: View {
 
                 Divider().background(Color.lsTertiary.opacity(0.3))
 
-                // Live Activity mode — Menu with three options
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Live Activities")
@@ -295,19 +297,9 @@ struct SettingsSheetView: View {
                     .onChange(of: settings.liveActivityMode) { _, _ in HapticEngine.shared.tick() }
                 }
                 .padding(LS.md)
-            }
-            .lsCard()
-        }
-    }
 
-    // MARK: - ASB (moved to bottom)
+                Divider().background(Color.lsTertiary.opacity(0.3))
 
-    private static let weekdayNames = ["Mon", "Tue", "Wed", "Thu", "Fri"]
-
-    private var asbSection: some View {
-        VStack(alignment: .leading, spacing: LS.sm) {
-            sectionLabel("Student Leadership")
-            VStack(spacing: 0) {
                 Toggle(isOn: $settings.isASBMember) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("ASB Member")
@@ -327,13 +319,12 @@ struct SettingsSheetView: View {
                         .background(Color.lsTertiary.opacity(0.3))
 
                     VStack(alignment: .leading, spacing: LS.md) {
-                        Text("My working days:")
+                        Text("Working days:")
                             .font(.lsCaption)
                             .foregroundStyle(Color.lsSecondary)
                             .padding(.horizontal, LS.md)
                             .padding(.top, LS.md)
 
-                        // Day buttons — tap to cycle through three states
                         HStack(spacing: LS.sm) {
                             ForEach(0..<5, id: \.self) { i in
                                 let mode = settings.asbWorkDays[i]
@@ -359,7 +350,6 @@ struct SettingsSheetView: View {
                         }
                         .padding(.horizontal, LS.md)
 
-                        // Color key
                         VStack(alignment: .leading, spacing: LS.xs) {
                             ForEach(ASBDayMode.allCases.filter { $0 != .off }, id: \.rawValue) { m in
                                 HStack(spacing: LS.xs) {
@@ -380,6 +370,59 @@ struct SettingsSheetView: View {
             }
             .lsCard()
             .animation(.lsSnappy, value: settings.isASBMember)
+        }
+    }
+
+    @State private var showMapSheet = false
+
+    // MARK: - Map
+
+    private var mapSection: some View {
+        VStack(alignment: .leading, spacing: LS.sm) {
+            sectionLabel("Map")
+            VStack(spacing: 0) {
+                Button {
+                    if settings.showMapTab {
+                        // Tab is visible — navigate to it
+                        settings.save()
+                        dismiss()
+                        AppNavigationCoordinator.shared.pendingTab = .map
+                    } else {
+                        // Tab is hidden — open as sheet so anyone can still see it
+                        showMapSheet = true
+                    }
+                } label: {
+                    HStack {
+                        Image(systemName: "map.fill")
+                            .foregroundStyle(Color.lsBlue)
+                        Text("Open Campus Map")
+                            .font(.lsHeadline)
+                            .foregroundStyle(Color.lsBlue)
+                        Spacer()
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.lsTertiary)
+                    }
+                    .padding(LS.md)
+                }
+                .sheet(isPresented: $showMapSheet) {
+                    MapTabView()
+                        .presentationDetents([.large])
+                        .presentationDragIndicator(.visible)
+                }
+
+                Divider().background(Color.lsTertiary.opacity(0.3))
+
+                Toggle(isOn: $settings.showMapTab) {
+                    Text("Show Map in Tab Bar")
+                        .font(.lsHeadline)
+                        .foregroundStyle(Color.lsPrimary)
+                }
+                .tint(Color.lsBlue)
+                .padding(LS.md)
+                .onChange(of: settings.showMapTab) { _, _ in HapticEngine.shared.tap() }
+            }
+            .lsCard()
         }
     }
 

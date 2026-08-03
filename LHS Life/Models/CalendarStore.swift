@@ -23,6 +23,35 @@ final class CalendarUIState {
     var scrollToNow: Bool = false
     var scrollToEvent: SchoolEvent? = nil
 
+    // MARK: - Stale-date correction
+    //
+    // When the app foregrounds after being backgrounded for more than two hours,
+    // snap selectedDate to today if it's from a previous calendar day. This
+    // covers the "picked up phone the next morning" case without interrupting
+    // someone who backgrounds briefly during a class to check a message.
+    //
+    // Two hours: long enough to survive a class period, short enough that
+    // you'll never wake up to yesterday.
+    //
+    // View mode is intentionally left alone — if they were in Month view,
+    // they stay in Month view. Only the selected date resets.
+    private var backgroundedAt: Date? = nil
+    private let staleThreshold: TimeInterval = 2 * 60 * 60  // 2 hours
+
+    func appDidBackground() {
+        backgroundedAt = Date()
+    }
+
+    func appDidForeground() {
+        guard let backgroundedAt,
+              Date().timeIntervalSince(backgroundedAt) >= staleThreshold
+        else { return }
+        let today = Calendar.current.startOfDay(for: Date())
+        guard !Calendar.current.isDate(selectedDate, inSameDayAs: today) else { return }
+        selectedDate = today
+        self.backgroundedAt = nil
+    }
+
     func navigateTo(event: SchoolEvent) {
         selectedDate = Calendar.current.startOfDay(for: event.startDate)
         scrollToEvent = nil  // reset first so onChange fires even for the same event

@@ -17,37 +17,34 @@ struct TodayScheduleIntent: AppIntent {
     static let title: LocalizedStringResource = "What Schedule Is Today"
     static let description = IntentDescription("Tells you what kind of bell schedule is running today.")
 
-    @MainActor
+    @Dependency var store: CalendarStore
+    @Dependency var settings: UserSettings
+
     func perform() async throws -> some IntentResult & ProvidesDialog & ShowsSnippetView {
-        let store = CalendarStore.shared
-        let settings = UserSettings.shared
-        guard settings.accessApproved else {
+        guard await MainActor.run(body: { settings.accessApproved }) else {
             return .result(dialog: AppIntentSupport.setupIncompleteDialog)
         }
         await AppIntentSupport.ensureDataLoaded(store: store, settings: settings)
+
         let dayKey = DateFormatter.isoDay.string(from: Date())
-        guard let schedule = store.bellSchedule(for: dayKey) else {
+        guard let (label, pillColor, schedType) = await MainActor.run(body: {
+            guard let schedule = store.bellSchedule(for: dayKey) else { return nil as (String, Color, ScheduleType)? }
+            let t = schedule.scheduleType
+            return (t.scheduleLabel, t.pillColor, t) as (String, Color, ScheduleType)?
+        }) else {
             return .result(dialog: "There's no bell schedule loaded for today.")
         }
 
-        let type = schedule.scheduleType
-        let label = type.scheduleLabel
-        // "Today is Finals." / "Today is Senior Presentation." read fine without
-        // an article; everything else needs "a"/"an". Flag for review — this is
-        // the one spot doing its own grammar rather than reusing existing copy.
         let dialogText: String
-        switch type {
-        case .finals, .seniorPresentation:
-            dialogText = "Today is \(label)."
-        case .assembly:
-            dialogText = "Today is an \(label)."
-        default:
-            dialogText = "Today is a \(label)."
+        switch schedType {
+        case .finals, .seniorPresentation:  dialogText = "Today is \(label)."
+        case .assembly:                     dialogText = "Today is an \(label)."
+        default:                            dialogText = "Today is a \(label)."
         }
 
         return .result(
             dialog: IntentDialog(stringLiteral: dialogText),
-            view: InfoSnippetView(title: label, symbolName: "clock", color: type.pillColor, detail: nil)
+            view: InfoSnippetView(title: label, symbolName: "clock", color: pillColor, detail: nil)
         )
     }
 }

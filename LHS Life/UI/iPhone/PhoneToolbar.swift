@@ -32,6 +32,7 @@ struct PhoneToolbarConfig {
     var onBack: () -> Void = {}
     var showSettingsBadge: Bool = false
     var onSettings: () -> Void = {}
+    var onPhone: () -> Void = {}
     var onPillTap: () -> Void = {}
     var onEventTap: (SchoolEvent) -> Void = { _ in }
 }
@@ -88,9 +89,6 @@ struct PhoneToolbar: ViewModifier {
                         Button {
                             contextualAction()
                         } label: {
-                            // Explicitly lsPrimary (white in dark mode) — without
-                            // this it inherits the bar's blue accent. Only the
-                            // settings button is meant to read as blue.
                             Image(systemName: contextualSymbol)
                                 .font(.system(size: 17, weight: .regular))
                                 .foregroundStyle(Color.lsPrimary)
@@ -98,6 +96,21 @@ struct PhoneToolbar: ViewModifier {
                         .tint(Color.lsPrimary)
                         .disabled(!contextualEnabled)
                         .opacity(contextualEnabled ? 1 : 0.35)
+                    }
+                }
+                // ToolbarSpacer is the iOS 26 API that actually forces two
+                // separate glass capsules. Two ToolbarItemGroups with the
+                // same placement are merged by the system without this.
+                if #available(iOS 26, *) {
+                    ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        config.onPhone()
+                    } label: {
+                        Image(systemName: "phone.fill")
+                            .font(.system(size: 17, weight: .regular))
+                            .foregroundStyle(Color.lsPrimary)
                     }
                     Button {
                         config.onSettings()

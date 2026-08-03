@@ -93,6 +93,13 @@ final class UserSettings {
     var isASBMember: Bool
     /// Three-state mode per weekday (Mon=0…Fri=4)
     var asbWorkDays: [ASBDayMode]  // 5 elements
+
+    // MARK: - Map
+
+    /// Whether the Map tab is visible in the tab bar.
+    /// Defaults to true for freshmen (graduation year == current year + 4),
+    /// false for all other grade levels. User can override in Settings.
+    var showMapTab: Bool
     
     // MARK: - AP Exam
     
@@ -159,6 +166,20 @@ final class UserSettings {
             self.asbWorkDays = decoded
         } else {
             self.asbWorkDays = Array(repeating: .off, count: 5)
+        }
+
+        // Map tab — if never stored, default to true for freshmen
+        if d.object(forKey: Keys.showMapTab) != nil {
+            self.showMapTab = d.bool(forKey: Keys.showMapTab)
+        } else {
+            // Freshmen: grad year == current year + 4 (Aug or later bumps by 1)
+            let cal = Calendar.current
+            let now = Date()
+            let year = cal.component(.year, from: now)
+            let month = cal.component(.month, from: now)
+            let currentSeniorYear = month >= 8 ? year + 1 : year
+            let storedYear = d.integer(forKey: Keys.gradYear)
+            self.showMapTab = storedYear == currentSeniorYear + 4
         }
         
         // Per-day Live Activity override — check if it's still today
@@ -230,6 +251,7 @@ final class UserSettings {
         store.set(professionalDressNotificationsEnabled, forKey: Keys.dressNotifs)
         store.set(liveActivityMode.rawValue, forKey: Keys.liveActivityMode)
         store.set(isASBMember, forKey: Keys.asbMember)
+        store.set(showMapTab, forKey: Keys.showMapTab)
         if let data = try? JSONEncoder().encode(periodConfigs) {
             store.set(data, forKey: Keys.periodConfigs)
         }
@@ -272,6 +294,7 @@ final class UserSettings {
         liveActivityEnabledToday = false
         isASBMember = false
         asbWorkDays = Array(repeating: .off, count: 5)
+        showMapTab = false
         apModeEnabledToday = false
         apBadgeCleared = false
         save()
@@ -311,6 +334,7 @@ final class UserSettings {
         static let paletteVersion       = "palette_version"
         static let asbMember            = "asb_member"
         static let asbWorkDays          = "asb_work_days"
+        static let showMapTab           = "show_map_tab"
     }
     
     private static let currentPaletteVersion = 2

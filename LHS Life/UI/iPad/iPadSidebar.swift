@@ -29,6 +29,11 @@ struct iPadSidebar: View {
     var onSameTabTap: (AppTab) -> Void = { _ in }
     let onSettingsTap: () -> Void
     let showSettingsBadge: Bool
+    /// Mirrors the iPhone tab bar's `settings.showMapTab` gate, so turning
+    /// the Map off in Settings hides it on both idioms.
+    var showMapRow: Bool = true
+    var onPillTap: (() -> Void)? = nil
+    var onEventTap: ((SchoolEvent) -> Void)? = nil
 
     /// Same reselect-detection trick as the iPhone tab bar: the setter
     /// fires even when tapping the already-selected row, so we can treat
@@ -46,17 +51,24 @@ struct iPadSidebar: View {
         )
     }
 
+    private var destinations: [AppTab] {
+        AppTab.sidebarTabs.filter { $0 != .map || showMapRow }
+    }
+
     var body: some View {
         List(selection: selection) {
             Section {
-                ScheduleHeaderPill()
+                ScheduleHeaderPill(
+                    onPillTap: onPillTap,
+                    onEventTap: onEventTap
+                )
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
 
             Section {
-                ForEach(AppTab.dockTabs, id: \.self) { tab in
+                ForEach(destinations, id: \.self) { tab in
                     NavRow(tab: tab, isSelected: tab == selectedTab).tag(tab)
                 }
             }

@@ -20,30 +20,41 @@ struct NextBellIntent: AppIntent {
         "Tells you how much time is left in your current class, or when the next one starts."
     )
 
-    @MainActor
+    @Dependency var store: CalendarStore
+    @Dependency var settings: UserSettings
+
     func perform() async throws -> some IntentResult & ProvidesDialog & ShowsSnippetView {
-        let store = CalendarStore.shared
-        let settings = UserSettings.shared
-        guard settings.accessApproved else {
+        guard await MainActor.run(body: { settings.accessApproved }) else {
             return .result(dialog: AppIntentSupport.setupIncompleteDialog)
         }
         await AppIntentSupport.ensureDataLoaded(store: store, settings: settings)
-        let state = store.todayState()
-        let dialog: IntentDialog = "\(ScheduleEngine.headerPrimaryText(for: state))"
+
+        let (state, dialogText, currentName, currentMins, currentProg, currentColor, nextName, nextStart, nextColor) = await MainActor.run {
+            let s        = store.todayState()
+            let primary  = ScheduleEngine.headerPrimaryText(for: s)
+            let curName  = s.currentSlot?.displayName ?? ""
+            let curMins  = s.currentSlot.map { NextClassIntent.minutesRemainingText($0) } ?? ""
+            let curProg  = s.currentSlot?.progress
+            let curColor = s.currentSlot?.config.map { Color.paletteColor(for: $0) } ?? Color.lsTertiary
+            let nxtName  = s.nextSlot?.displayName ?? ""
+            let nxtStart = s.nextSlot.map { ScheduleEngine.timeString($0.startDate) } ?? ""
+            let nxtColor = s.nextSlot?.config.map { Color.paletteColor(for: $0) } ?? Color.lsTertiary
+            return (s, primary, curName, curMins, curProg, curColor, nxtName, nxtStart, nxtColor)
+        }
+        let dialog: IntentDialog = "\(dialogText)"
 
         switch state.dayState {
         case .inSession:
-            guard let current = state.currentSlot else { return .result(dialog: dialog) }
-            return .result(dialog: dialog, view: NextClassIntent.snippet(
-                for: current,
-                statusText: NextClassIntent.minutesRemainingText(current),
-                progress: current.progress
+            guard state.currentSlot != nil else { return .result(dialog: dialog) }
+            return .result(dialog: dialog, view: ClassStatusSnippetView(
+                className: currentName, color: currentColor,
+                progress: currentProg, statusText: currentMins
             ))
         case .betweenPeriods, .beforeSchool:
-            guard let next = state.nextSlot else { return .result(dialog: dialog) }
-            return .result(dialog: dialog, view: NextClassIntent.snippet(
-                for: next,
-                statusText: "Starts at \(ScheduleEngine.timeString(next.startDate))"
+            guard state.nextSlot != nil else { return .result(dialog: dialog) }
+            return .result(dialog: dialog, view: ClassStatusSnippetView(
+                className: nextName, color: nextColor,
+                progress: nil, statusText: "Starts at \(nextStart)"
             ))
         case .afterSchool, .noSchedule, .pathwaysDay, .holiday:
             return .result(dialog: dialog)

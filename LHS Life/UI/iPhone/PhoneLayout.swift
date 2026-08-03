@@ -14,13 +14,14 @@ import SwiftUI
 internal import WebKit
 
 struct PhoneLayout: View {
-
+    
     @Environment(CalendarStore.self) private var store
     @Environment(UserSettings.self) private var settings
-
+    
     @Binding var selectedTab: AppTab
     @Binding var showSettings: Bool
     @Binding var showHomework: Bool
+    @Binding var showContacts: Bool
     let isLaunching: Bool
     let launchProgress: Double
     let calendarUI: CalendarUIState
@@ -28,6 +29,11 @@ struct PhoneLayout: View {
     let powerschoolState: EmbeddedWebState
     let schoologyState: EmbeddedWebState
 
+    /// Incremented when the already-selected Map tab is tapped again.
+    /// MapTabView watches the value, not a Bool, so two taps in a row both
+    /// register — same edge-triggered idiom as CalendarUIState.scrollToNow.
+    @State private var mapResetToken = 0
+    
     private var showBadge: Bool {
         let dayKey = DateFormatter.isoDay.string(from: Date())
         let state = APExamService.examState(
@@ -36,7 +42,7 @@ struct PhoneLayout: View {
         if case .none = state { return false }
         return !settings.apBadgeCleared
     }
-
+    
     /// Everything the per-tab nav bar needs. Built here (where store,
     /// settings and calendarUI live) and handed down through AppDock, since
     /// each Tab owns its own NavigationStack and therefore its own bar.
@@ -54,6 +60,7 @@ struct PhoneLayout: View {
                 settings.apBadgeCleared = true
                 showSettings = true
             },
+            onPhone: { showContacts = true },
             onPillTap: { withAnimation(.lsSnappy) { selectedTab = .events } },
             onEventTap: { event in
                 withAnimation(.lsSnappy) { selectedTab = .events }
@@ -61,7 +68,7 @@ struct PhoneLayout: View {
             }
         )
     }
-
+    
     var body: some View {
         ZStack {
             AppDock(
@@ -70,12 +77,14 @@ struct PhoneLayout: View {
                 powerschoolState: powerschoolState,
                 schoologyState: schoologyState,
                 toolbarConfig: toolbarConfig,
+                mapResetToken: mapResetToken,
                 onSameTabTap: { tab in
                     switch tab {
                     case .events:      calendarUI.goToToday()
                     case .powerschool: powerschoolState.reload()
                     case .schoology:   schoologyState.reload()
                     case .lunch:       lunchState.reload()
+                    case .map:         mapResetToken += 1
                     default: break
                     }
                 },
@@ -84,7 +93,7 @@ struct PhoneLayout: View {
                 }
             )
             .environment(calendarUI)
-
+            
             // Header is gone from this layer entirely — it's a real nav bar now,
             // applied per-tab inside AppDock (see PhoneToolbar). The top gradient
             // that used to fade content out behind the floating pill went with it;
@@ -105,7 +114,7 @@ struct PhoneLayout: View {
                 }
                 .safeAreaPadding(.bottom)
             }
-
+            
             if showHomework {
                 HomeworkPopup(onDismiss: { withAnimation(.lsSpring) { showHomework = false } })
                     .environment(store)
@@ -113,7 +122,7 @@ struct PhoneLayout: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     .zIndex(10)
             }
-
+            
             if isLaunching {
                 LaunchScreen(progress: launchProgress)
                     .transition(.opacity)
@@ -121,5 +130,10 @@ struct PhoneLayout: View {
             }
         }
         .background(Color.lsBackground)
+        .sheet(isPresented: $showContacts) {
+            PhoneContactsSheet()
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
     }
 }

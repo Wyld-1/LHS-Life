@@ -3,8 +3,13 @@
 //  LHS Life
 //
 //  The schedule status pill — "3 min left in Period 2", "No school today",
-//  etc. Shared by iPhone (PhoneHeaderRow) and iPad (sidebar Today module).
-//  Platform-agnostic: no device-specific layout here, just the pill itself.
+//  etc. Shared by iPhone (nav bar principal item) and iPad (sidebar Today
+//  module). Platform-agnostic: no device-specific layout here.
+//
+//  EASTER EGG — hold the pill for 5 seconds while it shows "No school today"
+//  (holiday or noSchedule state). At 5s a haptic fires, EasterEggState.shared
+//  is loaded, and EasterEggOverlay (mounted in AppTabContainer) takes over.
+//  The pill itself shows nothing special — the overlay covers the whole screen.
 //
 
 import SwiftUI
@@ -30,6 +35,7 @@ struct ScheduleHeaderPill: View {
 
     var onPillTap: (() -> Void)? = nil
     var onEventTap: ((SchoolEvent) -> Void)? = nil
+
     /// When true, suppresses the pill's own background/glass surface — use when
     /// the system already provides one (nav bar toolbar item,
     /// tabViewBottomAccessory). Covers BOTH the iOS 26 glassEffect and the
@@ -40,85 +46,15 @@ struct ScheduleHeaderPill: View {
     @State private var now: Date = Date()
     @State private var timer: Timer? = nil
 
-    // MARK: Easter egg
-    // Hold the pill for 5 seconds on "No school today" to surface it.
-    // Appears for 2 seconds with a smooth crossfade, then returns.
-    // Not advertised anywhere. If you know, you know.
-    @State private var easterEggVisible = false
-    @State private var easterEggTimer: Timer? = nil
-    @State private var longPressProgress: CGFloat = 0
+    // MARK: Easter egg — trigger only
+    //
+    // The pill owns the 5s long-press detection and nothing else.
+    // EasterEggState.shared bridges to EasterEggOverlay.
+    private var egg: EasterEggState { EasterEggState.shared }
     @State private var longPressTimer: Timer? = nil
     private let easterEggDuration: TimeInterval = 5.0
 
-    // MARK: Easter egg quote pool
-    //
-    // Long quotes split across line1 + line2 (title + subtitle slot).
-    // Short quotes use line1 only. "Built by Lion" is rare: 1-in-20.
-    private struct EasterEggQuote {
-        let line1: String
-        let line2: String?
-        var rare: Bool = false
-    }
-
-    private static let quotes: [EasterEggQuote] = [
-        // Rare signature
-        .init(line1: "Built by Lion 🦁",          line2: nil,                                 rare: true),
-        // Yours
-        .init(line1: "Keep flying 🕊️",     line2: nil),
-        .init(line1: "Never hesitate 😝",               line2: nil),
-        .init(line1: "Fly long enough",               line2: "and the sun will rise"),
-        .init(line1: "I\u{2019}d rather cry",          line2: "than be machine"),
-        .init(line1: "If you want a Lamborghini,",    line2: "stop working like you want a Honda"),
-        // Maverick
-        .init(line1: "Let\u{2019}s turn and burn",   line2: nil),
-        // Pink Panther
-        .init(line1: "Damburger",                    line2: nil),
-        // Dune
-        .init(line1: "Fear is the mind killer",      line2: nil),
-        // Lao Tzu
-        .init(line1: "The journey of 1,000 miles",    line2: "began with a single step"),
-        // Japanese proverb
-        .init(line1: "Fall seven times,",              line2: "stand up eight"),
-        // Seneca
-        .init(line1: "Luck is when preparation",      line2: "meets opportunity"),
-        // Hitchhiker's Guide
-        .init(line1: "The answer is 42.",              line2: nil),
-        .init(line1: "So long, and thanks",            line2: "for the fish."),
-        // Carlin
-        .init(line1: "Why do they call it rush hour", line2: "when no one moves?"),
-        // Tenet
-        .init(line1: "We live in a twilight world",   line2: nil),
-        .init(line1: "I ordered my hot sauce",         line2: "an hour ago"),
-        // The Prestige
-        .init(line1: "Are you watching closely?",      line2: nil),
-        // Ford v Ferrari
-        .init(line1: "There\u{2019}s a point at 7,000 RPM\u{2026}", line2: nil),
-        // Apple
-        .init(line1: "Here\u{2019}s to the crazy ones", line2: nil),
-        .init(line1: "Stay hungry,",                   line2: "stay foolish"),
-        // Tolkien
-        .init(line1: "Not all those who wander",       line2: "are lost"),
-        // Marcus Aurelius
-        .init(line1: "The obstacle is the way",       line2: nil),
-        // Kent Beck
-        .init(line1: "Make it work, make it right,",   line2: "make it fast"),
-        // Nautical
-        .init(line1: "Ships are safe in harbor,",      line2: "but that\u{2019}s not what ships are for"),
-        // Short punchy
-        .init(line1: "Press on.",                     line2: nil),
-        // Yoda
-        .init(line1: "Do or do not.",                 line2: "There is no try."),
-    ]
-
-    private func pickQuote() -> EasterEggQuote {
-        let rare   = Self.quotes.filter { $0.rare }
-        let common = Self.quotes.filter { !$0.rare }
-        let seed   = Int(Date().timeIntervalSince1970) % 20
-        if seed == 0, let pick = rare.randomElement() { return pick }
-        return common.randomElement() ?? Self.quotes[1]
-    }
-
-    @State private var currentQuote = EasterEggQuote(line1: "", line2: nil)
+    // MARK: AP exam state
 
     private var apExamState: APExamService.APExamState {
         let dayKey = DateFormatter.isoDay.string(from: now)
@@ -143,52 +79,30 @@ struct ScheduleHeaderPill: View {
 
     private var state: ScheduleEngine.ScheduleState { store.todayState(at: now) }
 
+    // MARK: - Body
+
     var body: some View {
         HStack {
             Spacer()
             VStack(spacing: 2) {
-                // Easter egg crossfade: normal text fades out, message fades in.
-                // Only available when the pill is showing "No school today" —
-                // a quiet condition that limits accidental discovery.
-                if easterEggVisible {
-                    Text(currentQuote.line1)
-                        .font(.lsHeadline.italic())
-                        .foregroundStyle(Color.lsGold)
+                Text(DebugClock.shared.forcedPrimaryText ?? primaryText)
+                    .font(.lsHeadline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                if let sub = DebugClock.shared.forcedPrimaryText != nil
+                    ? DebugClock.shared.forcedSecondaryText
+                    : secondaryText {
+                    Text(sub)
+                        .font(.lsCaption)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                    if let line2 = currentQuote.line2 {
-                        Text(line2)
-                            .font(.lsHeadline.italic())
-                            .foregroundStyle(Color.lsGold)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
-                    }
-                } else {
-                    Text(DebugClock.shared.forcedPrimaryText ?? primaryText)
-                        .font(.lsHeadline)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                    if let sub = DebugClock.shared.forcedPrimaryText != nil
-                        ? DebugClock.shared.forcedSecondaryText
-                        : secondaryText {
-                        Text(sub)
-                            .font(.lsCaption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.85)
-                    }
+                        .minimumScaleFactor(0.85)
                 }
             }
-            .animation(.easeInOut(duration: 0.35), value: easterEggVisible)
             Spacer()
         }
         .padding(.horizontal, LS.md)
-        // Fixed 44 (not minHeight) — a nav bar constrains principal-item height
-        // strictly, so the pill must commit to one. 17pt headline + 2 spacing +
-        // 12pt caption ≈ 31pt of text, which clears 44 comfortably; the vertical
-        // padding that used to push this to ~47 is gone. Subtitle is lineLimit(1)
-        // for the same reason — two caption lines would overflow 44.
         .frame(height: 44)
         .overlay(alignment: .leading) {
             if let forced = DebugClock.shared.forcedProgress {
@@ -230,19 +144,16 @@ struct ScheduleHeaderPill: View {
         .onTapGesture {
             if let event = tappableEvent, let onEventTap {
                 onEventTap(event)
-            } else if onPillTap != nil {
+            } else {
                 onPillTap?()
             }
         }
-        // Easter egg long press — only arms on "No school today" states.
-        // Uses simultaneous gesture so it doesn't swallow taps.
         .simultaneousGesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { _ in
-                    // Arm only when pill is in a no-school state and egg not
-                    // already showing. Start counting the moment finger lands.
-                    let isNoSchool = isNoSchoolState
-                    if isNoSchool && !easterEggVisible && longPressTimer == nil {
+                    // Only arm during no-school states and when overlay isn't
+                    // already showing (prevents re-triggering while dismissing)
+                    if isNoSchoolState && !egg.isVisible && longPressTimer == nil {
                         startLongPressTimer()
                     }
                 }
@@ -255,7 +166,55 @@ struct ScheduleHeaderPill: View {
         .onDisappear { stopTimer() }
     }
 
-    // MARK: Text
+    // MARK: - Easter egg helpers
+
+    private var isNoSchoolState: Bool {
+        switch state.dayState {
+        case .holiday, .noSchedule: return true
+        default: return false
+        }
+    }
+
+    private func startLongPressTimer() {
+        var elapsed = 0.0
+        longPressTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { t in
+            elapsed += 0.05
+            if elapsed >= self.easterEggDuration {
+                t.invalidate()
+                self.longPressTimer = nil
+                HapticEngine.shared.bump()
+                self.triggerEasterEgg()
+            }
+        }
+    }
+
+    private func cancelLongPressTimer() {
+        longPressTimer?.invalidate()
+        longPressTimer = nil
+    }
+
+    private func triggerEasterEgg() {
+        egg.nextQuote()
+        withAnimation(.easeInOut(duration: 0.3)) { egg.isVisible = true }
+    }
+
+    // MARK: - Clock timer
+
+    private func startTimer() {
+        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+            Task { @MainActor in
+                self.now = DebugClock.shared.now
+                LiveActivityService.shared.endIfSchoolOver(state: self.store.todayState(at: self.now))
+            }
+        }
+    }
+
+    private func stopTimer() {
+        timer?.invalidate();          timer = nil
+        longPressTimer?.invalidate(); longPressTimer = nil
+    }
+
+    // MARK: - Text
 
     private var todayScheduleType: ScheduleType? {
         store.bellSchedules[DateFormatter.isoDay.string(from: now)]?.scheduleType
@@ -301,15 +260,15 @@ struct ScheduleHeaderPill: View {
 
     private var afterSchoolPrimary: String {
         switch Calendar.current.component(.weekday, from: now) {
-        case 6:    return "Happy Friday! 🎉"
+        case 6:    return "Happy Friday! \u{1F389}"
         case 7, 1: return "Enjoy the weekend!"
-        default:   return "School's out"
+        default:   return "School\u{2019}s out"
         }
     }
 
     private var weekendPrimary: String {
         switch Calendar.current.component(.weekday, from: now) {
-        case 6:    return "Happy Friday! 🎉"
+        case 6:    return "Happy Friday! \u{1F389}"
         case 7, 1: return "Enjoy the weekend!"
         default:   return "No school today"
         }
@@ -322,8 +281,6 @@ struct ScheduleHeaderPill: View {
         if apModeExamDone { return tomorrowSecondary }
         if isSummerWindow {
             if let event = todayEvent {
-                // "Today at {time}" — all-day events have no time to state,
-                // so the subtitle is simply omitted for those.
                 guard !event.isAllDay else { return nil }
                 return "Today at \(ScheduleEngine.timeString(event.startDate))"
             }
@@ -341,8 +298,6 @@ struct ScheduleHeaderPill: View {
             guard let next = state.nextSlot else { return nil }
             return "Until \(ScheduleEngine.timeString(next.endDate))"
         case .beforeSchool:
-            // Show schedule type if available; otherwise show nothing (no next-event preview).
-            // We never want tomorrow's event appearing before today's school has started.
             if let label = scheduleLabel(suppressRegular: false) { return label }
             return nil
         case .holiday:
@@ -360,17 +315,7 @@ struct ScheduleHeaderPill: View {
     }
 
     // MARK: Summer Message
-    //
-    // Aug 1 through the day before Class Orientation Day, when there's no
-    // real event happening today, the header shows "Enjoy summer" instead
-    // of the normal generic "No school today"/weekend text. Once
-    // Orientation Day itself arrives, normal schedule-based header text
-    // resumes on its own (Orientation Day has real synthesized periods by
-    // then, so state.dayState is no longer .noSchedule).
 
-    /// Aug 1 of the current calendar year through (exclusive) the real,
-    /// dynamic Class Orientation Day date — not hardcoded, reads directly
-    /// from the feed the same way ClassOrientationService does.
     private var orientationEvent: SchoolEvent? {
         store.events.first {
             $0.title.trimmingCharacters(in: .whitespaces).lowercased() == "class orientation day"
@@ -393,12 +338,6 @@ struct ScheduleHeaderPill: View {
         return today >= window.start && today < window.end
     }
 
-    /// FLAG FOR REVIEW: excludes "Summer School" specifically, same reasoning
-    /// as before — it's an all-day marker on nearly every July weekday in the
-    /// real feed, so treating it as a displayable "real event" would mean the
-    /// placeholders almost never show. Applies to both today's and tomorrow's
-    /// lookup identically. If Summer School SHOULD count, drop this exclusion
-    /// from both.
     private var todayEvent: SchoolEvent? {
         let dayKey = DateFormatter.isoDay.string(from: now)
         return store.events(on: dayKey).first {
@@ -440,9 +379,7 @@ struct ScheduleHeaderPill: View {
         }
     }
 
-    // MARK: Event lookups (single source of truth for BOTH text and tap —
-    // see "Tap Target" below. Each returns the underlying SchoolEvent;
-    // the *Secondary text properties just format whatever these find.)
+    // MARK: Event lookups
 
     private var saturdayLookaheadEvent: SchoolEvent? {
         let cal = Calendar.current
@@ -476,13 +413,8 @@ struct ScheduleHeaderPill: View {
         return store.events(on: DateFormatter.isoDay.string(from: tom)).first { $0.category != .schedules }
     }
 
-    private var saturdaySecondary: String? {
-        saturdayLookaheadEvent.map { upcomingEventText($0) }
-    }
-
-    private var saturdayOrSundaySecondary: String? {
-        saturdayOrSundayLookaheadEvent.map { upcomingEventText($0) }
-    }
+    private var saturdaySecondary: String? { saturdayLookaheadEvent.map { upcomingEventText($0) } }
+    private var saturdayOrSundaySecondary: String? { saturdayOrSundayLookaheadEvent.map { upcomingEventText($0) } }
 
     private var sundaySecondary: String? {
         if let event = sundayLookaheadEvent { return upcomingEventText(event) }
@@ -492,25 +424,11 @@ struct ScheduleHeaderPill: View {
         return scheduleLabelFor(dayKey: monKey).map { "Tomorrow: \($0)" }
     }
 
-    private var tomorrowSecondary: String? {
-        tomorrowLookaheadEvent.map { upcomingEventText($0) }
-    }
+    private var tomorrowSecondary: String? { tomorrowLookaheadEvent.map { upcomingEventText($0) } }
 
-    // MARK: Tap Target
-    //
-    // Priority: an event shown in the title, then an event shown in the
-    // subtitle, then nothing — which falls through to onPillTap (switches
-    // to the Events tab, which already auto-scrolls to "now" on appear).
-    // That third tier needs no code here at all: it's "go see your current
-    // class," and the Day view already does that on its own the moment you
-    // land on it. titleEvent/subtitleEvent are deliberately built from the
-    // exact same branches as primaryText/secondaryText above (reusing the
-    // same lookahead-event properties, not a separate parallel lookup) so
-    // tap can never point somewhere the displayed text didn't.
+    // MARK: Tap target
 
-    private var tappableEvent: SchoolEvent? {
-        titleEvent ?? subtitleEvent
-    }
+    private var tappableEvent: SchoolEvent? { titleEvent ?? subtitleEvent }
 
     private var titleEvent: SchoolEvent? {
         if isSummerWindow { return todayEvent }
@@ -535,8 +453,7 @@ struct ScheduleHeaderPill: View {
             case 1:  return sundayLookaheadEvent
             default: return tomorrowLookaheadEvent
             }
-        default:
-            return nil
+        default: return nil
         }
     }
 
@@ -566,61 +483,6 @@ struct ScheduleHeaderPill: View {
         let total = nextStart.timeIntervalSince(prevEnd)
         guard total > 0 else { return 0 }
         return max(0, min(1, now.timeIntervalSince(prevEnd) / total))
-    }
-
-    // MARK: Easter egg helpers
-
-    private var isNoSchoolState: Bool {
-        switch state.dayState {
-        case .holiday, .noSchedule: return true
-        default: return false
-        }
-    }
-
-    private func startLongPressTimer() {
-        longPressProgress = 0
-        let interval = 0.05
-        var elapsed = 0.0
-        longPressTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { t in
-            elapsed += interval
-            longPressProgress = CGFloat(elapsed / easterEggDuration)
-            if elapsed >= easterEggDuration {
-                t.invalidate()
-                longPressTimer = nil
-                longPressProgress = 0
-                HapticEngine.shared.bump()
-                triggerEasterEgg()
-            }
-        }
-    }
-
-    private func cancelLongPressTimer() {
-        longPressTimer?.invalidate()
-        longPressTimer = nil
-        withAnimation(.easeOut(duration: 0.2)) { longPressProgress = 0 }
-    }
-
-    private func triggerEasterEgg() {
-        currentQuote = pickQuote()
-        withAnimation(.easeInOut(duration: 0.35)) { easterEggVisible = true }
-        easterEggTimer?.invalidate()
-        easterEggTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { _ in
-            withAnimation(.easeInOut(duration: 0.35)) { easterEggVisible = false }
-        }
-    }
-
-    private func startTimer() {
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-            Task { @MainActor in
-                self.now = DebugClock.shared.now
-                LiveActivityService.shared.endIfSchoolOver(state: self.store.todayState(at: self.now))
-            }
-        }
-    }
-    private func stopTimer() {
-        timer?.invalidate(); timer = nil
-        longPressTimer?.invalidate(); longPressTimer = nil
-        easterEggTimer?.invalidate(); easterEggTimer = nil
     }
 }
 

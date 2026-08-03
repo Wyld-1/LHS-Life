@@ -2,12 +2,20 @@
 //  AppIntentSupport.swift
 //  LHS Life
 //
-//  Shared readiness guard. App Intents run out-of-process from the UI, so
-//  there's no guarantee ContentView's `.task` — which normally kicks off
-//  CalendarStore.loadAll() — has ever run before Siri invokes an intent,
-//  especially on a cold launch triggered directly by Siri rather than by
-//  opening the app. Every Tier 1 intent calls this first so it never
-//  silently answers (or hangs) from an empty, never-loaded store.
+//  Shared readiness guard for App Intents.
+//
+//  App Intents that return snippet views run out-of-process in the App
+//  Intents extension. Each gets a fresh CalendarStore instance unless
+//  AppDependencyManager is used. We now register both singletons in
+//  LHS-LifeApp.init() via AppDependencyManager.shared.add(dependency:),
+//  so @Dependency resolves to the same shared instance in both the main
+//  app process and the extension process.
+//
+//  IMPORTANT: ensureDataLoaded must complete quickly. The system may run
+//  perform() several times (dark mode changes, etc.) and will time out if
+//  a full network load blocks rendering. The guard below skips loadAll()
+//  if the store already has events — stale-but-present data is fine for
+//  a quick Siri answer; the app itself will refresh on next foreground.
 //
 
 import Foundation
@@ -17,6 +25,9 @@ enum AppIntentSupport {
     @MainActor
     static func ensureDataLoaded(store: CalendarStore, settings: UserSettings) async {
         guard settings.accessApproved else { return }
+        // Skip the full network load if we already have any events —
+        // a Siri snippet rendering quickly with slightly stale data is
+        // better than timing out waiting for a fresh fetch.
         guard store.events.isEmpty else { return }
         await store.loadAll()
     }

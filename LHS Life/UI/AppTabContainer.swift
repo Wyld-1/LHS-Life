@@ -21,6 +21,7 @@ enum AppTab: Int, CaseIterable {
     case powerschool = 2
     case schoology   = 3
     case homework    = 4
+    case map         = 5
 
     var title: String {
         switch self {
@@ -29,6 +30,7 @@ enum AppTab: Int, CaseIterable {
         case .powerschool:  return "Grades"
         case .schoology:    return "Schoology"
         case .homework:     return "Homework"
+        case .map:          return "Map"
         }
     }
 
@@ -39,6 +41,7 @@ enum AppTab: Int, CaseIterable {
         case .powerschool:  return "powerschool-logo"
         case .schoology:    return "schoology-logo"
         case .homework:     return "checklist"
+        case .map:          return "map.fill"
         }
     }
 
@@ -50,6 +53,12 @@ enum AppTab: Int, CaseIterable {
     }
 
     static var dockTabs: [AppTab] { [.events, .lunch, .powerschool, .schoology] }
+
+    /// iPad sidebar destinations. Map sits directly after Events, mirroring
+    /// where it appears in the iPhone tab bar. Kept separate from dockTabs
+    /// because that array also drives the pre-26 iPhone dock, which has no
+    /// Map content mounted.
+    static var sidebarTabs: [AppTab] { [.events, .map, .lunch, .powerschool, .schoology] }
 }
 
 // MARK: - Root Container
@@ -58,11 +67,13 @@ struct AppTabContainer: View {
 
     @Environment(CalendarStore.self) private var store
     @Environment(UserSettings.self) private var settings
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var selectedTab  = AppTab.events
     @State private var previousTab  = AppTab.events
     @State private var showSettings = false
     @State private var showHomework = false
+    @State private var showContacts = false
     @State private var isLaunching  = true
     @State private var calendarUI   = CalendarUIState()
     @State private var navCoordinator = AppNavigationCoordinator.shared
@@ -94,6 +105,14 @@ struct AppTabContainer: View {
     var body: some View {
         Group {
             if isPhone { iPhoneLayout } else { iPadLayout }
+        }
+        .overlay { EasterEggOverlay() }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background: calendarUI.appDidBackground()
+            case .active:     calendarUI.appDidForeground()
+            default:          break
+            }
         }
         .onChange(of: launchProgress) { _, progress in
             if progress >= 1.0 && isLaunching {
@@ -145,6 +164,7 @@ struct AppTabContainer: View {
             selectedTab: $selectedTab,
             showSettings: $showSettings,
             showHomework: $showHomework,
+            showContacts: $showContacts,
             isLaunching: isLaunching,
             launchProgress: launchProgress,
             calendarUI: calendarUI,

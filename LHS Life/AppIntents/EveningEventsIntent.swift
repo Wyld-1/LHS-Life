@@ -20,52 +20,49 @@ struct EveningEventsIntent: AppIntent {
     static let title: LocalizedStringResource = "What's Happening This Evening"
     static let description = IntentDescription("Tells you what's on the LaSalle calendar this evening.")
 
-    @MainActor
+    @Dependency var store: CalendarStore
+    @Dependency var settings: UserSettings
+
     func perform() async throws -> some IntentResult & ProvidesDialog & ShowsSnippetView {
-        let store = CalendarStore.shared
-        let settings = UserSettings.shared
-        guard settings.accessApproved else {
+        guard await MainActor.run(body: { settings.accessApproved }) else {
             return .result(dialog: AppIntentSupport.setupIncompleteDialog)
         }
         await AppIntentSupport.ensureDataLoaded(store: store, settings: settings)
+
         let now = Date()
         let cal = Calendar.current
         let noon = cal.date(bySettingHour: 12, minute: 0, second: 0, of: now) ?? now
-        let dayKey = DateFormatter.isoDay.string(from: now)
 
-        let evening = store.events(on: dayKey).filter { $0.startDate >= noon }
-        guard !evening.isEmpty else {
-            return .result(dialog: "Nothing on the LaSalle calendar this evening.")
+        let (notable, bucketedCount) = await MainActor.run {
+            let dayKey = DateFormatter.isoDay.string(from: now)
+            let evening = store.events(on: dayKey).filter { $0.startDate >= noon }
+            let notableEvents = evening.filter { $0.category != .schedules }
+            return (notableEvents, evening.count - notableEvents.count)
         }
-
-        let notable = evening.filter { $0.category != .schedules }
-        let bucketedCount = evening.count - notable.count
 
         guard !notable.isEmpty else {
-            // Only bucketed (bell-schedule) items exist — nothing worth naming.
-            return .result(dialog: "Nothing notable on the LaSalle calendar this evening.")
+            let msg: IntentDialog = bucketedCount > 0
+                ? "Nothing notable on the LaSalle calendar this evening."
+                : "Nothing on the LaSalle calendar this evening."
+            return .result(dialog: msg)
         }
 
-        let named = notable.map { "\($0.title) at \(ScheduleEngine.timeString($0.startDate))" }
+        let (named, title, color, timeStr) = await MainActor.run {
+            let mappedNames = notable.map { "\($0.title) at \(ScheduleEngine.timeString($0.startDate))" }
+            let first = notable[0]
+            return (mappedNames, first.title, first.category.pillColor, ScheduleEngine.timeString(first.startDate))
+        }
         let namedList = Self.speakableList(named)
+        let dialogText = bucketedCount > 0
+            ? "There are a few other things on the calendar, plus \(namedList)."
+            : "There's \(namedList)."
 
-        let dialogText: String
-        if bucketedCount > 0 {
-            dialogText = "There are a few other things on the calendar, plus \(namedList)."
-        } else {
-            dialogText = "There's \(namedList)."
-        }
-
-        // Snippet shows just the first notable event — keeps the card simple;
-        // full list is in the spoken dialog.
-        let first = notable[0]
         let view = InfoSnippetView(
-            title: first.title,
+            title: title,
             symbolName: "moon.stars.fill",
-            color: first.category.pillColor,
-            detail: ScheduleEngine.timeString(first.startDate)
+            color: color,
+            detail: timeStr
         )
-
         return .result(dialog: IntentDialog(stringLiteral: dialogText), view: view)
     }
 

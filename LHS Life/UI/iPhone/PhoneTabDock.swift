@@ -25,6 +25,7 @@ struct AppDock: View {
     let powerschoolState: EmbeddedWebState
     let schoologyState:   EmbeddedWebState
     var toolbarConfig: PhoneToolbarConfig = PhoneToolbarConfig()
+    var mapResetToken: Int = 0
     var onSameTabTap: (AppTab) -> Void = { _ in }
     var onHomeworkTap: () -> Void = {}
 
@@ -37,6 +38,7 @@ struct AppDock: View {
                 powerschoolState: powerschoolState,
                 schoologyState: schoologyState,
                 toolbarConfig: toolbarConfig,
+                mapResetToken: mapResetToken,
                 onSameTabTap: onSameTabTap,
                 onHomeworkTap: onHomeworkTap
             )
@@ -60,10 +62,12 @@ struct AppDock: View {
 private struct SystemTabDock: View {
     @Binding var selectedTab: AppTab
     @Environment(CalendarUIState.self) private var uiState
+    @Environment(UserSettings.self) private var settings
     let lunchState:       EmbeddedWebState
     let powerschoolState: EmbeddedWebState
     let schoologyState:   EmbeddedWebState
     var toolbarConfig: PhoneToolbarConfig = PhoneToolbarConfig()
+    var mapResetToken: Int = 0
     var onSameTabTap: (AppTab) -> Void = { _ in }
     var onHomeworkTap: () -> Void = {}
 
@@ -90,6 +94,12 @@ private struct SystemTabDock: View {
             Tab("Events", systemImage: "calendar", value: AppTab.events) {
                 EventsTabView()
                     .phoneToolbar(tab: .events, config: toolbarConfig)
+            }
+            if settings.showMapTab {
+                Tab("Map", systemImage: "map.fill", value: AppTab.map) {
+                    MapTabView(resetToken: mapResetToken)
+                        .phoneToolbar(tab: .map, config: toolbarConfig)
+                }
             }
             Tab("Order", systemImage: "fork.knife", value: AppTab.lunch) {
                 LunchTabView(webState: lunchState)

@@ -8,6 +8,7 @@ import UserNotifications
 import ActivityKit
 import BackgroundTasks
 import UIKit
+import AppIntents
 
 @main
 struct LaSalle_ScheduleApp: App {
@@ -22,6 +23,16 @@ struct LaSalle_ScheduleApp: App {
     init() {
         // BGProcessingTask handler MUST be registered before first scene connects
         BellTransitionService.register()
+
+        // Register shared singletons with AppDependencyManager so App Intents
+        // running in the extension process get the same instances. Without this,
+        // each snippet intent gets a fresh, empty CalendarStore — loadAll() then
+        // races against Siri's rendering timeout and the content card fails to
+        // load. NavigationIntents (openAppWhenRun: true) are unaffected since
+        // they run in the main process; the five snippet-returning intents are
+        // the ones that need this registration.
+        AppDependencyManager.shared.add(dependency: CalendarStore.shared)
+        AppDependencyManager.shared.add(dependency: UserSettings.shared)
 
         // Start iCloud settings sync — pulls remote prefs before first render
         UserSettings.shared.startICloudSync()

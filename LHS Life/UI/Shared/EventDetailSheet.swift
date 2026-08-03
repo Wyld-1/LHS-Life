@@ -153,6 +153,11 @@ struct EventDetailSheet: View {
 
             SaveToCalendarButton(item: item)
                 .padding(.horizontal, LS.xxl)
+                // iPhone: bottom safe area lifts the button naturally.
+                // iPad: sheets are centered with no bottom safe area, so
+                // the button slams the edge without explicit padding.
+                .padding(.bottom, UIDevice.current.userInterfaceIdiom == .pad ? LS.lg : 0)
+                .safeAreaPadding(.bottom)
         }
         .presentationDragIndicator(.visible)
         .presentationBackground(.regularMaterial)

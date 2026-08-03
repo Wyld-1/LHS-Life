@@ -37,6 +37,10 @@ struct iPadRootView: View {
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
+    /// Incremented when the already-selected Map row is tapped again.
+    /// Same edge-triggered token the iPhone layout uses.
+    @State private var mapResetToken = 0
+
     private var showBadge: Bool {
         let dayKey = DateFormatter.isoDay.string(from: Date())
         let state = APExamService.examState(
@@ -57,6 +61,7 @@ struct iPadRootView: View {
                         case .powerschool: powerschoolState.reload()
                         case .schoology:   schoologyState.reload()
                         case .lunch:       lunchState.reload()
+                        case .map:         mapResetToken += 1
                         default: break
                         }
                     },
@@ -64,7 +69,13 @@ struct iPadRootView: View {
                         settings.apBadgeCleared = true
                         showSettings = true
                     },
-                    showSettingsBadge: showBadge
+                    showSettingsBadge: showBadge,
+                    showMapRow: settings.showMapTab,
+                    onPillTap: { withAnimation(.lsSnappy) { selectedTab = .events } },
+                    onEventTap: { event in
+                        withAnimation(.lsSnappy) { selectedTab = .events }
+                        calendarUI.navigateTo(event: event)
+                    }
                 )
             } detail: {
                 detailContent
@@ -105,6 +116,8 @@ struct iPadRootView: View {
                     .padding(.top, LS.sm)
             case .homework:
                 EmptyView()
+            case .map:
+                MapTabView(resetToken: mapResetToken)
             }
         }
         .navigationTitle(selectedTab.title)
