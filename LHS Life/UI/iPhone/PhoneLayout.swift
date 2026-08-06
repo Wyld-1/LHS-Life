@@ -114,8 +114,12 @@ struct PhoneLayout: View {
             }
             
             if isLaunching {
+                // Timing lives on the transition, not on the state write in
+                // AppTabContainer — scoping it here means only this overlay
+                // fades; the UI underneath is simply correct on the next
+                // frame instead of animating into place.
                 LaunchScreen(progress: launchProgress)
-                    .transition(.opacity)
+                    .transition(.opacity.animation(.easeInOut(duration: 0.4)))
                     .zIndex(20)
             }
         }

@@ -85,15 +85,19 @@ enum NotificationService {
     //
     // Fires one week before, front-loaded with the actual grade-specific
     // start time so the value is visible without even opening the app.
+    // With no resolvable grade (staff, parents), falls back to the full
+    // window's start and the generic "Students" label rather than sending
+    // nothing — the day matters to them too, we just can't narrow it.
     static func scheduleClassOrientationNotification(events: [SchoolEvent], settings: UserSettings) async {
         center.removePendingNotificationRequests(withIdentifiers: ["class-orientation"])
         guard await isAuthorized else { return }
         guard let orientation = events.first(where: {
             $0.title.trimmingCharacters(in: .whitespaces).lowercased() == "class orientation day"
         }) else { return }
-        guard let grade = PathwaysService.gradeLevel(graduationYear: settings.graduationYear),
-              let startTime = ClassOrientationService.startTimeLabel(forGrade: grade)
-        else { return }
+
+        let grade = PathwaysService.gradeLevel(graduationYear: settings.graduationYear)
+        let startTime = grade.flatMap { ClassOrientationService.startTimeLabel(forGrade: $0) }
+            ?? ClassOrientationService.fullWindowStartLabel
 
         let calendar = Calendar.current
         guard let oneWeekBefore = calendar.date(byAdding: .day, value: -7, to: orientation.startDate) else { return }
@@ -101,7 +105,9 @@ enum NotificationService {
         comps.hour = 9; comps.minute = 0
         guard let fireDate = calendar.date(from: comps), fireDate > Date() else { return }
 
-        let gradeLabel = ClassOrientationService.gradeLabel(forGrade: grade)
+        // gradeLabel's default arm already returns "Students" for any
+        // unrecognized grade, which is exactly right here.
+        let gradeLabel = ClassOrientationService.gradeLabel(forGrade: grade ?? 0)
 
         let content = UNMutableNotificationContent()
         content.title = "Class Orientation Day is in a week"

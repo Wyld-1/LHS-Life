@@ -80,6 +80,11 @@ final class UserSettings {
     var hasCompletedOnboarding: Bool
     var accessApproved: Bool
     var graduationYear: Int
+    /// The last real (non-zero) graduation year this account had. Kept so
+    /// flipping to "Not a student" and back doesn't lose the year the user
+    /// already typed. Never used for scheduling or eligibility — read only
+    /// when prefilling the editor.
+    var lastGraduationYear: Int
     var schoolEmail: String
     var periodConfigs: [PeriodConfig]
     var professionalDressNotificationsEnabled: Bool
@@ -142,9 +147,29 @@ final class UserSettings {
         self.accessApproved = d.bool(forKey: Keys.accessApproved)
         self.schoolEmail = d.string(forKey: Keys.schoolEmail) ?? ""
         
-        let storedYear = d.integer(forKey: Keys.gradYear)
-        self.graduationYear = storedYear == 0 ? Self.defaultGradYear : storedYear
+        // 0 is a real, meaningful value here — "not a student" (staff,
+        // parents). Distinguish it from "never written" by key presence, the
+        // same way showMapTab does below. Coercing 0 to the default used to
+        // silently promote every staff account to the current senior class
+        // on its second launch.
+        //
+        // Resolved into a local first: init can't read back self.graduationYear
+        // to seed lastGraduationYear below until every stored property is
+        // assigned, and periodConfigs and friends aren't set yet.
+        let resolvedGradYear: Int
+        if d.object(forKey: Keys.gradYear) != nil {
+            resolvedGradYear = d.integer(forKey: Keys.gradYear)
+        } else {
+            resolvedGradYear = Self.defaultGradYear
+        }
+        self.graduationYear = resolvedGradYear
         
+        // Seed from the resolved value for accounts that predate this key, so
+        // an existing student who taps "Not a student" today still gets
+        // their year back rather than an empty field.
+        let storedLastYear = d.integer(forKey: Keys.lastGradYear)
+        self.lastGraduationYear = storedLastYear != 0 ? storedLastYear : resolvedGradYear
+
         if let data = d.data(forKey: Keys.periodConfigs),
            let decoded = try? JSONDecoder().decode([PeriodConfig].self, from: data),
            d.integer(forKey: Keys.paletteVersion) == Self.currentPaletteVersion {
@@ -194,9 +219,24 @@ final class UserSettings {
     }
     
     // MARK: - Live Activity effective state
-    
-    /// True if Live Activities should run right now.
-    /// Pass the current schedule type so .abnormalOnly can activate automatically.
+
+    /// False for staff and parents — no graduation year, so no grade level,
+    /// no Pathways eligibility, no grade-specific orientation window.
+    /// Stored as graduationYear == 0; nothing should compare to 0 directly.
+    var isStudent: Bool { graduationYear != 0 }
+
+    /// Sets the graduation year, remembering the last real value. Always use
+    /// this rather than assigning `graduationYear` directly — assigning 0
+    /// straight would drop the year with no way to restore it.
+    func setGraduationYear(_ year: Int) {
+        graduationYear = year
+        if year != 0 { lastGraduationYear = year }
+    }
+
+    /// What to prefill the grad-year editor with: the live year for a
+    /// student, otherwise the last one they had. 0 if they never set one.
+    var prefillGraduationYear: Int { isStudent ? graduationYear : lastGraduationYear }
+
     /// True when the user is in their graduating (senior) year.
     /// August or later = new school year has started, so senior class year increments.
     var isSenior: Bool {
@@ -208,6 +248,8 @@ final class UserSettings {
         return graduationYear == seniorGradYear
     }
 
+    /// True if Live Activities should run right now.
+    /// Pass the current schedule type so .abnormalOnly can activate automatically.
     func liveActivityEffectivelyEnabled(scheduleType: ScheduleType?) -> Bool {
         let todayKey = DateFormatter.isoDay.string(from: Date())
         if todayKey != liveActivityTodayKey {
@@ -248,6 +290,7 @@ final class UserSettings {
         store.set(accessApproved, forKey: Keys.accessApproved)
         store.set(schoolEmail, forKey: Keys.schoolEmail)
         store.set(graduationYear, forKey: Keys.gradYear)
+        store.set(lastGraduationYear, forKey: Keys.lastGradYear)
         store.set(professionalDressNotificationsEnabled, forKey: Keys.dressNotifs)
         store.set(liveActivityMode.rawValue, forKey: Keys.liveActivityMode)
         store.set(isASBMember, forKey: Keys.asbMember)
@@ -272,6 +315,7 @@ final class UserSettings {
     func signOut() {
         schoolEmail = ""
         graduationYear = Self.defaultGradYear
+        lastGraduationYear = 0
         accessApproved = false
         save()
     }
@@ -288,6 +332,7 @@ final class UserSettings {
         accessApproved = false
         schoolEmail = ""
         graduationYear = Self.defaultGradYear
+        lastGraduationYear = 0
         periodConfigs = PeriodConfig.defaults
         professionalDressNotificationsEnabled = true
         liveActivityMode = .off
@@ -323,6 +368,7 @@ final class UserSettings {
         static let accessApproved        = "access_approved"
         static let schoolEmail           = "school_email"
         static let gradYear             = "graduation_year"
+        static let lastGradYear         = "last_graduation_year"
         static let periodConfigs        = "period_configs"
         static let dressNotifs          = "dress_notifications_enabled"
         static let liveActivityMode      = "live_activity_mode"
@@ -392,10 +438,15 @@ final class UserSettings {
         let icloud = NSUbiquitousKeyValueStore.default
         var changed = false
         
-        let remoteYear = Int(icloud.longLong(forKey: ICloudKeys.gradYear))
-        if remoteYear != 0, remoteYear != graduationYear {
-            graduationYear = remoteYear
-            changed = true
+        // Key presence, not a zero check — 0 means "not a student" and has
+        // to sync like any other value, or a staff member's setting silently
+        // fails to reach their iPad.
+        if icloud.object(forKey: ICloudKeys.gradYear) != nil {
+            let remoteYear = Int(icloud.longLong(forKey: ICloudKeys.gradYear))
+            if remoteYear != graduationYear {
+                graduationYear = remoteYear
+                changed = true
+            }
         }
         
         let remoteDress = icloud.object(forKey: ICloudKeys.dressNotifs) as? Bool

@@ -125,7 +125,16 @@ struct AppTabContainer: View {
         }
         .onChange(of: launchProgress) { _, progress in
             if progress >= 1.0 && isLaunching {
-                withAnimation(.easeInOut(duration: 0.4)) { isLaunching = false }
+                // Deliberately NOT wrapped in withAnimation. That opens an
+                // animated transaction around the whole state write, so every
+                // geometry change resulting from it — including the tab
+                // container's layout, which settles at this exact moment since
+                // launchProgress only reaches 1.0 once all three web views
+                // report ready — gets animated from old to new. That's what
+                // made the UI appear to fly in from the edges on both iPhone
+                // and iPad. The fade now lives on LaunchScreen's own
+                // transition, which is the only thing that should animate.
+                isLaunching = false
             }
         }
         .onChange(of: selectedTab) { _, new in

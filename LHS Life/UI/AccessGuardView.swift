@@ -143,12 +143,11 @@ struct AccessGuardView: View {
         // Parse grad year from email prefix.
         // Format: [initial][lastname][2-digit-year]@lasalleyakima.org
         // e.g. llefohn27 → 2027
+        // No confirmation step on failure — per Lion, absence of a year in
+        // the email IS the answer, and it's editable in Settings.
+        //
         let prefix = String(trimmed.prefix(trimmed.count - Self.allowedDomain.count))
-        if let gradYear = extractGradYear(from: prefix) {
-            settings.graduationYear = gradYear
-        } else {
-            settings.graduationYear = 0
-        }
+        settings.setGraduationYear(extractGradYear(from: prefix) ?? 0)
 
         HapticEngine.shared.success()
         settings.schoolEmail = trimmed

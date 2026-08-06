@@ -91,8 +91,12 @@ struct iPadRootView: View {
             }
 
             if isLaunching {
+                // Timing lives on the transition, not on the state write in
+                // AppTabContainer — same reasoning as PhoneLayout. This is
+                // the shared trigger, which is why the fly-in showed up on
+                // iPad too despite the layouts having nothing else in common.
                 LaunchScreen(progress: launchProgress)
-                    .transition(.opacity)
+                    .transition(.opacity.animation(.easeInOut(duration: 0.4)))
                     .zIndex(20)
             }
         }

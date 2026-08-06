@@ -41,6 +41,47 @@ enum ClassOrientationService {
         }
     }
 
+    /// The union of every grade's window — earliest start to latest end.
+    ///
+    /// Used when there's no resolvable grade (staff, parents, anyone with
+    /// "Not a student" set). They still get a real timed block covering the
+    /// whole event rather than an all-day placeholder, since the event does
+    /// happen at a specific time — we just can't narrow it to one grade.
+    ///
+    /// Derived from the windows above rather than hardcoded so it stays
+    /// correct if the school moves the times.
+    static var fullWindow: OrientationWindow {
+        let windows = (9...12).compactMap { orientationWindow(forGrade: $0) }
+        let starts  = windows.map { $0.startHour * 60 + $0.startMinute }
+        let ends    = windows.map { $0.endHour   * 60 + $0.endMinute }
+        let start   = starts.min() ?? 9  * 60
+        let end     = ends.max()   ?? 15 * 60
+        return OrientationWindow(
+            startHour: start / 60, startMinute: start % 60,
+            endHour:   end   / 60, endMinute:   end   % 60
+        )
+    }
+
+    /// "9 AM" — report time when no grade is known.
+    static var fullWindowStartLabel: String {
+        hourLabel(fullWindow.startHour, fullWindow.startMinute)
+    }
+
+    /// "9 AM–12 PM" style range when no grade is known.
+    static var fullWindowRangeLabel: String {
+        "\(hourLabel(fullWindow.startHour, fullWindow.startMinute))"
+        + "\u{2013}"
+        + "\(hourLabel(fullWindow.endHour, fullWindow.endMinute))"
+    }
+
+    private static func hourLabel(_ hour: Int, _ minute: Int) -> String {
+        let h12 = hour % 12 == 0 ? 12 : hour % 12
+        let suffix = hour < 12 ? "AM" : "PM"
+        return minute == 0
+            ? "\(h12) \(suffix)"
+            : "\(h12):\(String(format: "%02d", minute)) \(suffix)"
+    }
+
     /// Simple pre-formatted label — avoids building throwaway Date objects
     /// just to format a fixed, known time range.
     static func timeRangeLabel(forGrade grade: Int) -> String? {
@@ -80,15 +121,19 @@ enum ClassOrientationService {
     /// Finds "Class Orientation Day" (exact title match) and replaces it
     /// with a timed copy reflecting the student's grade-specific window —
     /// same UID, so tap-to-detail and the notification both still resolve
-    /// to the same event. Returns the array unmodified if there's no match
-    /// or no resolvable grade (e.g. graduationYear not set yet).
+    /// to the same event.
+    ///
+    /// With no resolvable grade (staff, parents, "Not a student") it falls
+    /// back to `fullWindow` — earliest start to latest end — rather than
+    /// leaving the event as an untimed all-day row. The event is real and
+    /// timed for everyone; only the narrowing is grade-specific.
     static func personalize(events: [SchoolEvent], graduationYear: Int) -> [SchoolEvent] {
         guard let index = events.firstIndex(where: {
             $0.title.trimmingCharacters(in: .whitespaces).lowercased() == "class orientation day"
         }) else { return events }
-        guard let grade = PathwaysService.gradeLevel(graduationYear: graduationYear),
-              let window = orientationWindow(forGrade: grade)
-        else { return events }
+
+        let grade  = PathwaysService.gradeLevel(graduationYear: graduationYear)
+        let window = grade.flatMap { orientationWindow(forGrade: $0) } ?? fullWindow
 
         let original = events[index]
         let cal = Calendar.current

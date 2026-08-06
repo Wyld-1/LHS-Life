@@ -153,7 +153,7 @@ struct SettingsSheetView: View {
         VStack(alignment: .leading, spacing: LS.sm) {
             sectionLabel("My Info")
             HStack {
-                Text("Graduation Year")
+                Text("Class Of")
                     .font(.lsHeadline)
                     .foregroundStyle(Color.lsPrimary)
                 Spacer()
@@ -174,20 +174,24 @@ struct SettingsSheetView: View {
                     .opacity(isEditingGradYear ? 1 : 0)
                     .allowsHitTesting(isEditingGradYear)
 
-                    Button {
-                        gradYearInput = String(settings.graduationYear)
-                        isEditingGradYear = true
-                        gradYearFocused = true
+                    // Menu + Divider + opt-out, matching the Live Activities
+                    // row below and HomeworkPopup's class picker — same shape
+                    // of choice (a value, or explicitly none), same idiom.
+                    Menu {
+                        Button("Enter Year\u{2026}") { beginEditingGradYear() }
+                        Divider()
+                        Button("Not a Student") { setNotAStudent() }
                     } label: {
-                        Text(String(settings.graduationYear))
-                            .font(.lsTime)
+                        Text(gradYearLabel)
+                            .font(settings.isStudent ? .lsTime : .lsBody)
                             .foregroundStyle(Color.lsBlue)
+                            .lineLimit(1)
                             .padding(.horizontal, LS.sm)
                             .frame(height: LS.chipHeight)
                             .background(Color.lsBlue.opacity(0.12))
                             .clipShape(Capsule())
                     }
-                    .buttonStyle(.plain)
+                    .tint(Color.lsPrimary)
                     .opacity(isEditingGradYear ? 0 : 1)
                     .allowsHitTesting(!isEditingGradYear)
                 }
@@ -197,9 +201,35 @@ struct SettingsSheetView: View {
         }
     }
 
+    private var gradYearLabel: String {
+        settings.isStudent ? String(settings.graduationYear) : "Not a student"
+    }
+
+    private func beginEditingGradYear() {
+        // Restores the last real year for someone who tapped "Not a student"
+        // and came back, rather than starting them from an empty field.
+        let prefill = settings.prefillGraduationYear
+        gradYearInput = prefill == 0 ? "" : String(prefill)
+        isEditingGradYear = true
+        gradYearFocused = true
+    }
+
+    private func setNotAStudent() {
+        // setGraduationYear stashes the outgoing year first, so Enter Year…
+        // can bring it back.
+        settings.setGraduationYear(0)
+        // ASB is student leadership — the toggle disappears below when
+        // isStudent is false, so clear it rather than leaving it stuck on
+        // and invisibly scheduling reminders.
+        settings.isASBMember = false
+        isEditingGradYear = false
+        gradYearFocused = false
+        HapticEngine.shared.tick()
+    }
+
     private func commitGradYear() {
         if let year = Int(gradYearInput), year > 2020, year < 2040, year != graduationYearBeforeEdit {
-            settings.graduationYear = year
+            settings.setGraduationYear(year)
             HapticEngine.shared.tick()
         }
         isEditingGradYear = false
@@ -300,23 +330,27 @@ struct SettingsSheetView: View {
                 }
                 .padding(LS.md)
 
-                Divider().background(Color.lsTertiary.opacity(0.3))
+                // ASB is student leadership only — hidden entirely for staff
+                // and parents rather than shown-and-disabled, since there's
+                // no path by which a non-student would want it.
+                if settings.isStudent {
+                    Divider().background(Color.lsTertiary.opacity(0.3))
 
-                Toggle(isOn: $settings.isASBMember) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("ASB Member")
-                            .font(.lsHeadline)
-                            .foregroundStyle(Color.lsPrimary)
-                        Text("Enables student leadership reminders")
-                            .font(.lsCaption)
-                            .foregroundStyle(Color.lsSecondary)
+                    Toggle(isOn: $settings.isASBMember) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("ASB Member")
+                                .font(.lsHeadline)
+                                .foregroundStyle(Color.lsPrimary)
+                            Text("Enables student leadership reminders")
+                                .font(.lsCaption)
+                                .foregroundStyle(Color.lsSecondary)
+                        }
                     }
-                }
-                .tint(Color.lsBlue)
-                .padding(LS.md)
-                .onChange(of: settings.isASBMember) { _, _ in HapticEngine.shared.tap() }
+                    .tint(Color.lsBlue)
+                    .padding(LS.md)
+                    .onChange(of: settings.isASBMember) { _, _ in HapticEngine.shared.tap() }
 
-                if settings.isASBMember {
+                    if settings.isASBMember {
                     Divider()
                         .background(Color.lsTertiary.opacity(0.3))
 
@@ -368,10 +402,12 @@ struct SettingsSheetView: View {
                         .padding(.bottom, LS.md)
                     }
                     .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
                 }
             }
             .lsCard()
             .animation(.lsSnappy, value: settings.isASBMember)
+            .animation(.lsSnappy, value: settings.isStudent)
         }
     }
 
