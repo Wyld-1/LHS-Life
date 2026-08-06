@@ -130,7 +130,9 @@ struct iPadRootView: View {
                     } label: {
                         Image(systemName: button.systemName)
                             .font(.system(size: 17, weight: .regular))
+                            .foregroundStyle(toolbarButtonTint)
                     }
+                    .tint(toolbarButtonTint)
                     .disabled(!button.enabled)
                     .opacity(button.enabled ? 1 : 0.35)
                 }
@@ -155,6 +157,16 @@ struct iPadRootView: View {
         let systemName: String
         var enabled: Bool = true
         let action: () -> Void
+    }
+
+    /// Pre-26 the toolbar is flat chrome and an accent-blue glyph reads as a
+    /// stray link rather than a control, so it takes lsPrimary (black in
+    /// light, white in dark) — matching what PhoneToolbar already does for
+    /// the same contextual button on iPhone. On 26+ the glass capsule
+    /// supplies its own affordance, so the system accent is left alone.
+    private var toolbarButtonTint: Color {
+        if #available(iOS 26, *) { return Color.accentColor }
+        return Color.lsPrimary
     }
 
     private var contextualToolbarButton: ToolbarButtonSpec? {
@@ -219,7 +231,11 @@ private struct iPadHomeworkFAB: View {
                 icon.background {
                     Circle()
                         .fill(Color.lsBlue)
-                        .shadow(color: Color.lsBlue.opacity(0.4), radius: 14, y: 4)
+                        .shadow(
+                            color: .black.opacity(LS.shadowOpacity),
+                            radius: LS.shadowRadius,
+                            y: LS.shadowY
+                        )
                 }
             }
         }

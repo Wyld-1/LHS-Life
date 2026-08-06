@@ -68,16 +68,10 @@ enum ScheduleEngine {
             return ScheduleState(date: date, currentSlot: nil, nextSlot: nil, dayState: .noSchedule)
         }
 
-        let enabledPeriods = visiblePeriods(from: schedule, settings: settings)
-        guard !enabledPeriods.isEmpty else {
+        let slots = orderedSlots(from: schedule, settings: settings)
+        guard !slots.isEmpty else {
             return ScheduleState(date: date, currentSlot: nil, nextSlot: nil, dayState: .noSchedule)
         }
-
-        let slots = enabledPeriods.compactMap { period -> (period: Period, start: Date, end: Date)? in
-            guard let s = period.startDate(on: schedule.date),
-                  let e = period.endDate(on: schedule.date) else { return nil }
-            return (period, s, e)
-        }.sorted { $0.start < $1.start }
 
         guard let firstSlot = slots.first, let lastSlot = slots.last else {
             return ScheduleState(date: date, currentSlot: nil, nextSlot: nil, dayState: .noSchedule)
@@ -155,7 +149,52 @@ enum ScheduleEngine {
         }
     }
 
+    // MARK: - Backward Lookup
+
+    /// The slot immediately preceding `date` — the last one to have ended,
+    /// whatever it is.
+    ///
+    /// Exists for surfaces that need "what did you just come from?" rather
+    /// than "what period is it?" — during passing time the useful answer is
+    /// the slot behind you, not the one ahead.
+    ///
+    /// Does NOT skip Lunch or Break. If lunch just ended, lunch is the honest
+    /// answer and callers that only care about classes will get nil out of
+    /// their own period-number parse. Skipping them would silently reach past
+    /// a real gap in the day and name a class the student left an hour ago.
+    ///
+    /// Deliberately does NOT know about dayState. After school this returns
+    /// the last slot of the day, which is correct as a raw query — callers
+    /// that only want it during passing time gate on dayState themselves.
+    static func previousSlot(
+        for date: Date = Date(),
+        schedule: BellSchedule?,
+        settings: UserSettings
+    ) -> ActiveSlot? {
+        guard let schedule else { return nil }
+        guard let slot = orderedSlots(from: schedule, settings: settings)
+            .last(where: { $0.end <= date })
+        else { return nil }
+        return makeActiveSlot(from: slot, settings: settings, schedule: schedule)
+    }
+
     // MARK: - Private Helpers
+
+    /// Visible periods resolved to concrete start/end Dates and sorted.
+    /// Shared by `state` and `previousSlot` so the two can never
+    /// disagree about which periods exist or what order they run in.
+    private static func orderedSlots(
+        from schedule: BellSchedule,
+        settings: UserSettings
+    ) -> [(period: Period, start: Date, end: Date)] {
+        visiblePeriods(from: schedule, settings: settings)
+            .compactMap { period -> (period: Period, start: Date, end: Date)? in
+                guard let s = period.startDate(on: schedule.date),
+                      let e = period.endDate(on: schedule.date) else { return nil }
+                return (period, s, e)
+            }
+            .sorted { $0.start < $1.start }
+    }
 
     private static func visiblePeriods(from schedule: BellSchedule, settings: UserSettings) -> [Period] {
         schedule.periods.filter { period in

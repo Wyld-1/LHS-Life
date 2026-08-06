@@ -54,6 +54,15 @@ enum AppTab: Int, CaseIterable {
 
     static var dockTabs: [AppTab] { [.events, .lunch, .powerschool, .schoology] }
 
+    /// Legacy (pre-iOS 26) iPhone dock destinations. Overload rather than a
+    /// replacement for `dockTabs` so nothing else that reads the plain array
+    /// has to change. Map sits directly after Events, matching both the iOS
+    /// 26 Tab order in PhoneTabDock and `sidebarTabs` below.
+    static func dockTabs(showMap: Bool) -> [AppTab] {
+        showMap ? [.events, .map, .lunch, .powerschool, .schoology]
+                : [.events, .lunch, .powerschool, .schoology]
+    }
+
     /// iPad sidebar destinations. Map sits directly after Events, mirroring
     /// where it appears in the iPhone tab bar. Kept separate from dockTabs
     /// because that array also drives the pre-26 iPhone dock, which has no

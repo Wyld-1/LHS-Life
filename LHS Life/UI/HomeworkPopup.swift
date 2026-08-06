@@ -49,19 +49,7 @@ struct HomeworkPopup: View {
         }
         .ignoresSafeArea(.keyboard)
         .onAppear {
-            let state = store.todayState()
-            let bestPeriodID: Int? = {
-                if let slot = state.currentSlot, let num = periodNumber(from: slot.period.name) { return num }
-                if let slot = state.nextSlot,    let num = periodNumber(from: slot.period.name) { return num }
-                return nil
-            }()
-            if let num = bestPeriodID, settings.config(for: num)?.isEnabled == true {
-                selectedPeriodID = num
-            } else {
-                // Default to None if no classes are configured — don't force
-                // the first arbitrary period on users who haven't set up classes.
-                selectedPeriodID = enabledPeriods.isEmpty ? nil : enabledPeriods.first?.id
-            }
+            selectedPeriodID = defaultPeriodID()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { titleFocused = true }
             Task { if !reminders.isAuthorized { _ = await reminders.requestAccess() } }
         }
@@ -325,6 +313,68 @@ struct HomeworkPopup: View {
             errorMessage = error.localizedDescription
             isSaving = false
         }
+    }
+
+    // MARK: - Default Period
+
+    /// Which class the popup pre-selects when it opens.
+    ///
+    /// The rule is "the class this assignment is most likely FOR", which is
+    /// not the same as "the next thing on the schedule":
+    ///
+    ///   In a numbered period   → that period
+    ///   Passing time           → the slot that just ended, if it was a class
+    ///                            (you walk out and add the homework right
+    ///                            then)
+    ///   Lunch or Break         → None
+    ///   Passing time after     → None — the slot that just ended was Lunch,
+    ///   lunch                    and nothing is inferred past it
+    ///   Anything else          → None
+    ///
+    /// "Anything else" covers before school, after school, weekends, summer,
+    /// holidays and Pathways days. Those all previously fell through to
+    /// `enabledPeriods.first?.id`, which is why the popup opened on Period 1
+    /// essentially any time school wasn't actively running.
+    ///
+    /// Nothing here reaches BACKWARD past a non-class slot. Once you're on
+    /// the far side of lunch the last class is far enough behind you that
+    /// guessing it is worse than guessing nothing.
+    private func defaultPeriodID() -> Int? {
+        let state = store.todayState()
+
+        switch state.dayState {
+        case .inSession:
+            // Lunch and Break are "in session" but aren't classes, so their
+            // period-number parse yields nil and this lands on None.
+            return enabledPeriodID(
+                state.currentSlot.flatMap { periodNumber(from: $0.period.name) }
+            )
+
+        case .betweenPeriods:
+            return previousSlotPeriodID()
+
+        case .beforeSchool, .afterSchool, .noSchedule, .pathwaysDay, .holiday:
+            return nil
+        }
+    }
+
+    /// The slot immediately behind us, if it was a numbered class. Lunch and
+    /// Break parse to nil here, so the passing time after lunch is None.
+    private func previousSlotPeriodID() -> Int? {
+        let dayKey = DateFormatter.isoDay.string(from: Date())
+        let slot = ScheduleEngine.previousSlot(
+            schedule: store.bellSchedule(for: dayKey),
+            settings: settings
+        )
+        return enabledPeriodID(slot.flatMap { periodNumber(from: $0.period.name) })
+    }
+
+    /// Only pre-select a period the student actually has configured and
+    /// enabled — otherwise fall back to None rather than selecting a class
+    /// they've turned off.
+    private func enabledPeriodID(_ num: Int?) -> Int? {
+        guard let num, settings.config(for: num)?.isEnabled == true else { return nil }
+        return num
     }
 
     // MARK: - Helpers

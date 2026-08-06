@@ -12,57 +12,66 @@ import SwiftUI
 struct LaunchScreen: View {
     let progress: Double  // 0.0 → 1.0
 
+    /// Same idiom check AppTabContainer branches on for PhoneLayout vs
+    /// iPadRootView — kept identical so the launch screen and the app it
+    /// hands off to never disagree about which device they're on.
+    private var isPhone: Bool { UIDevice.current.userInterfaceIdiom == .phone }
+
+    /// Fixed per-platform bar width. 300 is tuned; 460 is a first pass.
+    private var barWidth: CGFloat { isPhone ? 300 : 460 }
+
     var body: some View {
         ZStack {
-            Color.lsBackground.ignoresSafeArea()
+            
+            Image("campus")
+                .resizable()
+                    .scaledToFill()
+                    .ignoresSafeArea()
+            
+            Color.lsBackground.opacity(0.85).ignoresSafeArea()
 
-            VStack(spacing: LS.xl) {
+            VStack(spacing: LS.sm) {
                 Spacer()
 
                 // Logo / wordmark
-                VStack(spacing: LS.md) {
-                    Image("lhs-lightning")
-                        .resizable()
-                        .renderingMode(.original)
-                        .frame(width: 90, height: 90)
+                Image("lhs-lightning")
+                    .resizable()
+                    .renderingMode(.original)
+                    .frame(width: 90, height: 90)
+                    .padding(.vertical, LS.xs)
 
-                    VStack(spacing: LS.sm) {
-                        Text("LHS Life")
-                            .font(.lsDisplay)
-                            .foregroundStyle(Color.lsPrimary)
-                        Text("LA SALLE HIGH SCHOOL · YAKIMA")
-                            .font(.lsLabel)
-                            .foregroundStyle(Color.lsSecondary)
-                            .tracking(2)
-                    }
-                }
+                Text("LHS Life")
+                    .font(.lsDisplay)
+                    .foregroundStyle(Color.lsPrimary)
+                Text("LA SALLE HIGH SCHOOL · YAKIMA")
+                    .font(.lsLabel)
+                    .foregroundStyle(Color.lsSecondary)
+                    .tracking(2)
 
                 Spacer()
                 Spacer()
 
                 // Progress bar
-                VStack(spacing: LS.sm) {
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule()
-                                .fill(Color.lsTertiary.opacity(0.3))
-                                .frame(height: 6)
+                Capsule()
+                    .fill(Color.lsTertiary.opacity(0.3))
+                    .frame(height: 8)
+                    .overlay(alignment: .leading) {
+                        GeometryReader { geo in
                             Capsule()
                                 .fill(Color.lsBlue)
-                                .frame(width: geo.size.width * progress, height: 6)
-                                .animation(.easeInOut(duration: 0.3), value: progress)
+                                .frame(width: geo.size.width * progress)
                         }
+                        .animation(.easeInOut(duration: 0.3), value: progress)
                     }
-                    .frame(height: 8)
+                    .frame(maxWidth: barWidth)
                     .padding(.horizontal, LS.xxl)
 
-                    Text("Loading…")
-                        .font(.lsLabel)
-                        .foregroundStyle(Color.lsSecondary)
-                        .tracking(1)
-                }
-                .padding(.bottom, LS.xxl)
+                Text("Loading…")
+                    .font(.lsLabel)
+                    .foregroundStyle(Color.lsSecondary)
+                    .tracking(1)
             }
+            .padding(.bottom, LS.xxl)
         }
     }
 }

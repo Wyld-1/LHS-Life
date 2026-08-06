@@ -50,7 +50,9 @@ struct AppDock: View {
                 powerschoolState: powerschoolState,
                 schoologyState: schoologyState,
                 toolbarConfig: toolbarConfig,
-                onSameTabTap: onSameTabTap
+                mapResetToken: mapResetToken,
+                onSameTabTap: onSameTabTap,
+                onHomeworkTap: onHomeworkTap
             )
         }
     }
@@ -156,20 +158,35 @@ private struct HomeworkAccessory: View {
 
 
 private struct LegacyTabDock: View {
+    @Environment(UserSettings.self) private var settings
     @Binding var selectedTab: AppTab
     let lunchState:       EmbeddedWebState
     let powerschoolState: EmbeddedWebState
     let schoologyState:   EmbeddedWebState
     var toolbarConfig: PhoneToolbarConfig = PhoneToolbarConfig()
+    var mapResetToken: Int = 0
     var onSameTabTap: (AppTab) -> Void = { _ in }
+    var onHomeworkTap: () -> Void = {}
+
+    private var tabs: [AppTab] { AppTab.dockTabs(showMap: settings.showMapTab) }
 
     var body: some View {
         ZStack {
-            // Content — all four always mounted so web views stay alive
+            // Content — all always mounted so web views stay alive
             EventsTabView()
                 .phoneToolbar(tab: .events, config: toolbarConfig)
                 .opacity(selectedTab == .events      ? 1 : 0)
                 .allowsHitTesting(selectedTab == .events)
+            // Map is the one exception to "always mounted": it's gated on the
+            // same settings.showMapTab the iOS 26 Tab and the iPad sidebar row
+            // use, and it holds no web session that would be expensive to
+            // rebuild, so mounting on demand costs nothing.
+            if settings.showMapTab {
+                MapTabView(resetToken: mapResetToken)
+                    .phoneToolbar(tab: .map, config: toolbarConfig)
+                    .opacity(selectedTab == .map     ? 1 : 0)
+                    .allowsHitTesting(selectedTab == .map)
+            }
             LunchTabView(webState: lunchState)
                 .phoneToolbar(tab: .lunch, config: toolbarConfig)
                 .opacity(selectedTab == .lunch       ? 1 : 0)
@@ -183,30 +200,60 @@ private struct LegacyTabDock: View {
                 .opacity(selectedTab == .schoology   ? 1 : 0)
                 .allowsHitTesting(selectedTab == .schoology)
 
-            // Tab bar — bottom left
+            // Dock + homework button share ONE row, so they cannot drift
+            // vertically relative to each other — they resolve to the same
+            // LS.dockHeight and the HStack centers them against each other.
+            // Previously the FAB lived in PhoneLayout with its own
+            // .padding(.bottom, LS.xxl) while the dock used LS.sm, which is
+            // exactly why they sat at different heights.
             VStack {
                 Spacer()
-                HStack {
-                    LegacyDockBar(selectedTab: $selectedTab, onSameTabTap: onSameTabTap)
-                    Spacer()
+                HStack(alignment: .center, spacing: LS.sm) {
+                    LegacyDockBar(
+                        tabs: tabs,
+                        selectedTab: $selectedTab,
+                        onSameTabTap: onSameTabTap
+                    )
+                    HomeworkFAB(action: onHomeworkTap)
                 }
                 .padding(.horizontal, LS.md)
-                .padding(.bottom, LS.sm)
-                .safeAreaPadding(.bottom)
+                .padding(.bottom, LS.lg)
             }
+            // Resolves against the physical screen edge rather than the home
+            // indicator's safe area — same idiom iPadHomeworkFAB uses to sit
+            // near the true hardware corner. LS.lg (24) rather than LS.md (16):
+            // the indicator occupies roughly the bottom 21pt, so 16 would put
+            // the dock's lower edge inside it.
+            .ignoresSafeArea(edges: .bottom)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: settings.showMapTab) { _, shown in
+            // Turning Map off while standing on it would otherwise strand the
+            // user on an unmounted tab with no way back.
+            if !shown && selectedTab == .map {
+                withAnimation(.lsSnappy) { selectedTab = .events }
+            }
+        }
     }
 }
 
 private struct LegacyDockBar: View {
+    let tabs: [AppTab]
     @Binding var selectedTab: AppTab
     var onSameTabTap: (AppTab) -> Void = { _ in }
 
+    /// Drives the sliding selection capsule. Namespace lives on the bar so
+    /// all buttons share one geometry group.
+    @Namespace private var indicator
+
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(AppTab.dockTabs, id: \.rawValue) { tab in
-                LegacyDockButton(tab: tab, isSelected: selectedTab == tab) {
+            ForEach(tabs, id: \.rawValue) { tab in
+                LegacyDockButton(
+                    tab: tab,
+                    isSelected: selectedTab == tab,
+                    indicator: indicator
+                ) {
                     if tab == selectedTab {
                         // Already on this tab — treat as home
                         onSameTabTap(tab)
@@ -216,15 +263,28 @@ private struct LegacyDockBar: View {
                 }
             }
         }
-        .padding(.horizontal, LS.md)
-        .padding(.vertical, LS.sm)
+        .padding(.horizontal, LS.sm)
+        .frame(height: LS.dockHeight)
+        .frame(maxWidth: .infinity)
         .background {
+            // Capsule, not a rounded rect: with the dock now sitting close to
+            // the physical bottom edge, a fully-rounded end reads better
+            // against the bezel than a squircle, and it matches the selection
+            // indicator inside it. (This trades away the concentric-corner
+            // approximation — a capsule's radius is always half its height.)
             Capsule()
                 .fill(.ultraThinMaterial)
                 .overlay {
-                    Capsule().strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+                    // Was hardcoded white — invisible in dark, a bright rim in
+                    // light. lsPrimary flips with appearance.
+                    Capsule()
+                        .strokeBorder(Color.lsPrimary.opacity(0.06), lineWidth: 0.5)
                 }
-                .shadow(color: .black.opacity(0.4), radius: 24, y: 8)
+                .shadow(
+                    color: .black.opacity(LS.shadowOpacity),
+                    radius: LS.shadowRadius,
+                    y: LS.shadowY
+                )
         }
     }
 }
@@ -232,6 +292,7 @@ private struct LegacyDockBar: View {
 private struct LegacyDockButton: View {
     let tab: AppTab
     let isSelected: Bool
+    let indicator: Namespace.ID
     let action: () -> Void
 
     var body: some View {
@@ -243,24 +304,36 @@ private struct LegacyDockButton: View {
                             .resizable()
                             .renderingMode(.template)
                             .aspectRatio(contentMode: .fit)
-                            .frame(width: 22, height: 22)
+                            .frame(width: 20, height: 20)
                     } else {
                         Image(systemName: tab.iconName)
-                            .font(.system(size: 20, weight: isSelected ? .semibold : .regular))
+                            .font(.system(size: 18, weight: isSelected ? .semibold : .regular))
+                            .frame(height: 20)
                     }
                 }
                 .foregroundStyle(isSelected ? Color.lsBlue : Color.lsSecondary)
-                .scaleEffect(isSelected ? 1.08 : 1.0)
-                .animation(.lsSnappy, value: isSelected)
 
                 Text(tab.title)
                     .font(.lsLabel)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
                     .foregroundStyle(isSelected ? Color.lsBlue : Color.lsSecondary)
             }
-            .shadow(color: .black.opacity(0.4), radius: 2)
-            .frame(width: 64)
-            .padding(.vertical, LS.xs)
+            // Flexible, not a fixed 64pt: with Map enabled this bar carries
+            // five tabs, and fixed widths overflow the screen once the
+            // homework button takes its share of the row.
+            .frame(maxWidth: .infinity)
+            .frame(height: LS.dockHeight - LS.sm)
+            .background {
+                if isSelected {
+                    Capsule()
+                        .fill(Color.lsBlue.opacity(0.14))
+                        .matchedGeometryEffect(id: "dockIndicator", in: indicator)
+                }
+            }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .animation(.lsSnappy, value: isSelected)
     }
 }

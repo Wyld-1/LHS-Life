@@ -129,6 +129,18 @@ enum LS {
     // Tab bar
     static let tabBarHeight: CGFloat = 56
 
+    // Legacy (pre-iOS 26) iPhone dock. Shared by PhoneTabDock and
+    // HomeworkFAB — the two sit on one row and must resolve to the same
+    // height, so the number lives here rather than being typed twice.
+    static let dockHeight: CGFloat = 64
+
+    // Floating-surface shadow (legacy dock, homework FABs). Deliberately
+    // shallow: these sit on a light #F2F3F7 canvas where a 0.4-opacity
+    // 24pt shadow reads as a smudge, not elevation.
+    static let shadowOpacity: Double  = 0.12
+    static let shadowRadius:  CGFloat = 10
+    static let shadowY:       CGFloat = 3
+
     // Standard height for inline pill/chip controls (class selector,
     // priority selector, due date selector, Settings' Grad Year and Live
     // Activities chips). Explicit height rather than matching padding,

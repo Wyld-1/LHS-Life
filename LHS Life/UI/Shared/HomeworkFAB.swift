@@ -3,9 +3,12 @@
 //  LHS Life
 //
 //  Persistent one-tap "add homework" floating button. Used by iPhone
-//  legacy (pre-iOS 26, where tabViewBottomAccessory doesn't exist) and by
-//  iPad (always — the detail pane has no accessory-bar equivalent, and
-//  there's no bottom-bar collision risk to design around on iPad anyway).
+//  legacy (pre-iOS 26, where tabViewBottomAccessory doesn't exist).
+//  iPad has its own larger variant (iPadHomeworkFAB in iPadRootView).
+//
+//  Sized to LS.dockHeight so it matches the legacy dock it sits beside —
+//  the two are laid out in a single HStack in PhoneTabDock, so changing
+//  that token moves both together.
 //
 
 import SwiftUI
@@ -18,13 +21,17 @@ struct HomeworkFAB: View {
             action()
         } label: {
             Image(systemName: "checklist")
-                .font(.system(size: 16, weight: .bold))
+                .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: 48, height: 48)
+                .frame(width: LS.dockHeight, height: LS.dockHeight)
                 .background {
                     Circle()
                         .fill(Color.lsBlue)
-                        .shadow(color: Color.lsBlue.opacity(0.4), radius: 12, y: 4)
+                        .shadow(
+                            color: .black.opacity(LS.shadowOpacity),
+                            radius: LS.shadowRadius,
+                            y: LS.shadowY
+                        )
                 }
         }
         .buttonStyle(.plain)

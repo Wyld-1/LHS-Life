@@ -98,22 +98,12 @@ struct PhoneLayout: View {
             // applied per-tab inside AppDock (see PhoneToolbar). The top gradient
             // that used to fade content out behind the floating pill went with it;
             // the nav bar's own scroll-edge material does that job natively.
-            // What remains here is only the pre-26 homework FAB, which has no
-            // system equivalent below iOS 26 (26+ uses tabViewBottomAccessory).
-            if #unavailable(iOS 26) {
-                VStack {
-                    Spacer()
-                    HStack(alignment: .bottom) {
-                        Spacer()
-                        HomeworkFAB {
-                            withAnimation(.lsSpring) { showHomework = true }
-                        }
-                    }
-                    .padding(.trailing, LS.md)
-                    .padding(.bottom, LS.xxl)
-                }
-                .safeAreaPadding(.bottom)
-            }
+            //
+            // The pre-26 homework FAB also used to live here, behind an
+            // #unavailable check. It now lives inside LegacyTabDock, on the same
+            // HStack row as the dock — that's the only way to guarantee the two
+            // stay aligned, and it restores this file's stated invariant that
+            // PhoneLayout has zero knowledge of which iOS version is running.
             
             if showHomework {
                 HomeworkPopup(onDismiss: { withAnimation(.lsSpring) { showHomework = false } })
