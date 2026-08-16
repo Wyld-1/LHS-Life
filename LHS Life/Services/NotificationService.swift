@@ -110,7 +110,7 @@ enum NotificationService {
         let gradeLabel = ClassOrientationService.gradeLabel(forGrade: grade ?? 0)
 
         let content = UNMutableNotificationContent()
-        content.title = "Class Orientation Day is in a week"
+        content.title = "Class Orientation in 1 week"
         content.body  = "\(gradeLabel) report at \(startTime)."
         content.sound = .default
 

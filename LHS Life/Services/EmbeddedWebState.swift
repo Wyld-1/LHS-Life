@@ -140,15 +140,6 @@ final class EmbeddedWebState {
         wv.backgroundColor = isDark ? Self.darkWebBackground : Self.lightWebBackground
         wv.scrollView.backgroundColor = .clear
         wv.isOpaque = true
-        // NOT .never. obscuredContentInsets corrects WebKit's layout viewport,
-        // but the SCROLL VIEW's resting position is a separate thing, and
-        // .never explicitly told UIKit "do not adjust the scroll view insets" —
-        // so there was no negative offset to scroll into. The scroll view
-        // clamped at offset 0, which sits at the top of the frame, i.e. behind
-        // the toolbar: content parked too high, refusing to be pulled down, and
-        // snapping back up on any scroll attempt. .always lets UIKit adjust the
-        // scroll view to match, which is the half obscuredContentInsets doesn't
-        // do itself.
         wv.scrollView.contentInsetAdjustmentBehavior = .always
         wv.navigationDelegate = delegate
         // NOTE: translatesAutoresizingMaskIntoConstraints is deliberately left at
@@ -159,17 +150,6 @@ final class EmbeddedWebState {
         Self.applyObscuredInsets(to: wv)
         isLoading = true
         wv.load(URLRequest(url: url))
-        // isReady is deliberately NOT set here. It used to flip true the
-        // instant this function created the WKWebView object — before
-        // wv.load() had even started fetching, let alone rendered or
-        // settled scroll position. LaunchScreen's launchProgress reads
-        // exactly this flag to decide when preloading is actually done, so
-        // that made the whole preload gate a no-op: all three tabs hit
-        // isReady=true within the same run loop .task kicks them off in,
-        // the loading screen dismissed almost instantly, and a genuinely
-        // not-yet-loaded tab was fully reachable. isReady now only flips in
-        // didFinish/didFail below, once there's an actual page (or a
-        // confirmed failure) to show.
     }
 
     /// Called from EmbeddedWebView when SwiftUI's \.colorScheme actually

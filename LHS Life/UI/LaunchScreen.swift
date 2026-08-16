@@ -54,7 +54,7 @@ struct LaunchScreen: View {
                 // Progress bar
                 Capsule()
                     .fill(Color.lsTertiary.opacity(0.3))
-                    .frame(height: 8)
+                    .frame(height: 6)
                     .overlay(alignment: .leading) {
                         GeometryReader { geo in
                             Capsule()
