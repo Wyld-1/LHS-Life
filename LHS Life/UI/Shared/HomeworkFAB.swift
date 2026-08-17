@@ -24,15 +24,11 @@ struct HomeworkFAB: View {
                 .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: LS.dockHeight, height: LS.dockHeight)
-                .background {
-                    Circle()
-                        .fill(Color.lsBlue)
-                        .shadow(
-                            color: .black.opacity(LS.shadowOpacity),
-                            radius: LS.shadowRadius,
-                            y: LS.shadowY
-                        )
-                }
+                .background { Circle().fill(Color.lsBlue) }
+                // Chromatic, not neutral. Earlier in this pass I replaced the
+                // original blue shadow with black — right call on the amount
+                // (0.4 bloomed), wrong on the hue. This is the corrected form.
+                .lsTintShadow(Color.lsBlue)
         }
         .buttonStyle(.plain)
     }

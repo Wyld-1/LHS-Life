@@ -47,7 +47,9 @@ struct SettingsSheetView: View {
             .padding(.top, LS.lg)
             .padding(.bottom, LS.md)
 
-            Divider().background(Color.lsTertiary.opacity(0.3))
+            Rectangle()
+                .fill(Color.lsTertiary.opacity(LSDivider.sectionOpacity))
+                .frame(height: LSDivider.thickness)
 
             ScrollView {
                 LazyVStack(spacing: LS.lg, pinnedViews: []) {
@@ -153,7 +155,7 @@ struct SettingsSheetView: View {
         VStack(alignment: .leading, spacing: LS.sm) {
             sectionLabel("My Info")
             HStack {
-                Text("Class Of")
+                Text("Class Of:")
                     .font(.lsHeadline)
                     .foregroundStyle(Color.lsPrimary)
                 Spacer()
@@ -255,8 +257,7 @@ struct SettingsSheetView: View {
                         }
                     )
                     if config.id < 8 {
-                        Divider()
-                            .background(Color.lsTertiary.opacity(0.3))
+                        rowDivider
                             .padding(.leading, 56)
                     }
                 }
@@ -289,7 +290,7 @@ struct SettingsSheetView: View {
                     HapticEngine.shared.tap()
                 }
 
-                Divider().background(Color.lsTertiary.opacity(0.3))
+                rowDivider
 
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
@@ -334,7 +335,7 @@ struct SettingsSheetView: View {
                 // and parents rather than shown-and-disabled, since there's
                 // no path by which a non-student would want it.
                 if settings.isStudent {
-                    Divider().background(Color.lsTertiary.opacity(0.3))
+                    rowDivider
 
                     Toggle(isOn: $settings.isASBMember) {
                         VStack(alignment: .leading, spacing: 3) {
@@ -351,8 +352,7 @@ struct SettingsSheetView: View {
                     .onChange(of: settings.isASBMember) { _, _ in HapticEngine.shared.tap() }
 
                     if settings.isASBMember {
-                    Divider()
-                        .background(Color.lsTertiary.opacity(0.3))
+                    rowDivider
 
                     VStack(alignment: .leading, spacing: LS.md) {
                         Text("Working days:")
@@ -419,6 +419,20 @@ struct SettingsSheetView: View {
         VStack(alignment: .leading, spacing: LS.sm) {
             sectionLabel("Map")
             VStack(spacing: 0) {
+                // Toggle first: it's the setting, and settings rows belong
+                // above actions. "Open Campus Map" stays blue because blue is
+                // the action color here — it's a destination, not a preference.
+                Toggle(isOn: $settings.showMapTab) {
+                    Text("Show Map in Tab Bar")
+                        .font(.lsHeadline)
+                        .foregroundStyle(Color.lsPrimary)
+                }
+                .tint(Color.lsBlue)
+                .padding(LS.md)
+                .onChange(of: settings.showMapTab) { _, _ in HapticEngine.shared.tap() }
+
+                rowDivider
+
                 Button {
                     if settings.showMapTab {
                         // Tab is visible — navigate to it
@@ -448,17 +462,6 @@ struct SettingsSheetView: View {
                         .presentationDetents([.large])
                         .presentationDragIndicator(.visible)
                 }
-
-                Divider().background(Color.lsTertiary.opacity(0.3))
-
-                Toggle(isOn: $settings.showMapTab) {
-                    Text("Show Map in Tab Bar")
-                        .font(.lsHeadline)
-                        .foregroundStyle(Color.lsPrimary)
-                }
-                .tint(Color.lsBlue)
-                .padding(LS.md)
-                .onChange(of: settings.showMapTab) { _, _ in HapticEngine.shared.tap() }
             }
             .lsCard()
         }
@@ -681,13 +684,11 @@ struct SettingsSheetView: View {
         }
     }
 
-    private func sectionLabel(_ text: String) -> some View {
-        Text(text.uppercased())
-            .font(.lsLabel)
-            .foregroundStyle(Color.lsSecondary)
-            .tracking(1)
-            .padding(.leading, LS.xs)
+    private func sectionLabel(_ text: String, showsDivider: Bool = true) -> some View {
+        LSSectionLabel(text: text, showsDivider: showsDivider)
     }
+
+    private var rowDivider: some View { LSRowDivider() }
 
     // MARK: - Sign Out
 
@@ -733,7 +734,24 @@ private struct PeriodRow: View {
                 Circle()
                     .fill(Color.paletteColor(for: config))
                     .frame(width: 22, height: 22)
-                    .overlay { Circle().strokeBorder(Color.lsPrimary.opacity(0.12), lineWidth: 1) }
+                    .overlay {
+                        // Top highlight + bottom shade reads as a sphere
+                        // rather than a flat disc.
+                        Circle().strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.35),
+                                    Color.black.opacity(0.20)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 1
+                        )
+                    }
+                    .ifTrue(config.isEnabled) {
+                        $0.lsTintShadow(Color.paletteColor(for: config), opacity: 0.35)
+                    }
             }
             .buttonStyle(.plain)
             .opacity(config.isEnabled ? 1.0 : 0.4)
@@ -765,16 +783,19 @@ private struct PeriodRow: View {
                         }
                     }
             } else {
+                // The whole space between the color dot and the toggle is the
+                // edit target — previously only the text itself was tappable,
+                // so the gap between the label and the toggle did nothing. The
+                // Spacer lives INSIDE the button, and contentShape makes the
+                // empty area count as part of it.
                 Button(action: onTapName) {
-                    HStack(spacing: LS.xs) {
+                    HStack(spacing: 0) {
                         Text(config.displayName)
                             .font(.lsBody)
                             .foregroundStyle(config.isEnabled ? Color.lsPrimary : Color.lsSecondary)
-                        Spacer()
-                        Image(systemName: "pencil")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Color.lsTertiary)
+                        Spacer(minLength: 0)
                     }
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
@@ -807,41 +828,70 @@ private struct PeriodRow: View {
 private struct ColorPickerPopup: View {
     let selectedIndex: Int
     let onSelect: (Int) -> Void
-    private let columns = Array(repeating: GridItem(.fixed(40), spacing: LS.sm), count: 5)
+
+    // Sized so the grid exactly fills the frame: 5 × 34 + 4 × 10 + 2 × 14 = 238.
+    // The old version declared .fixed(40) cells with LS.md padding, which
+    // needed 264pt inside a 240pt frame — that overflow is what made the
+    // spacing look broken.
+    private static let dot: CGFloat = 34
+    private static let gap: CGFloat = 10
+    private static let inset: CGFloat = 14
+    private static let width: CGFloat = (dot * 5) + (gap * 4) + (inset * 2)
+
+    private let columns = Array(
+        repeating: GridItem(.fixed(34), spacing: 10),
+        count: 5
+    )
 
     var body: some View {
-        VStack(spacing: LS.sm) {
-            Text("Choose a Color")
-                .font(.lsCaption)
-                .foregroundStyle(Color.lsSecondary)
-                .padding(.top, LS.sm)
-            LazyVGrid(columns: columns, spacing: LS.sm) {
-                ForEach(ColorPalette.colors) { paletteColor in
-                    let isSelected = paletteColor.id == selectedIndex
-                    Button { onSelect(paletteColor.id) } label: {
-                        Circle()
-                            .fill(Color(hex: paletteColor.hex))
-                            .frame(width: 34, height: 34)
-                            .overlay {
-                                if isSelected {
-                                    Circle().strokeBorder(Color.white, lineWidth: 2.5)
-                                    Image(systemName: "checkmark")
-                                        .font(.system(size: 12, weight: .bold))
-                                        .foregroundStyle(.white)
-                                }
+        LazyVGrid(columns: columns, spacing: Self.gap) {
+            ForEach(ColorPalette.colors) { paletteColor in
+                let color = Color(hex: paletteColor.hex)
+                let isSelected = paletteColor.id == selectedIndex
+                Button { onSelect(paletteColor.id) } label: {
+                    Circle()
+                        .fill(color)
+                        .frame(width: Self.dot, height: Self.dot)
+                        .overlay {
+                            // Same sphere treatment as the period row dots:
+                            // light rim above, shade below.
+                            Circle().strokeBorder(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.35),
+                                        Color.black.opacity(0.20)
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                ),
+                                lineWidth: 1
+                            )
+                        }
+                        .overlay {
+                            if isSelected {
+                                Circle().strokeBorder(Color.white, lineWidth: 2.5)
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(.white)
                             }
-                            .shadow(color: Color(hex: paletteColor.hex).opacity(0.5),
-                                    radius: isSelected ? 6 : 0)
-                    }
-                    .buttonStyle(.plain)
-                    .animation(.lsSnappy, value: isSelected)
+                        }
+                        .lsTintShadow(color, opacity: isSelected ? 0.55 : 0.30)
                 }
+                .buttonStyle(.plain)
+                .animation(.lsSnappy, value: isSelected)
             }
-            .padding(.horizontal, LS.md)
-            .padding(.bottom, LS.md)
         }
-        .frame(width: 240)
-        .background(Color.lsSurface)
+        .padding(Self.inset)
+        .frame(width: Self.width)
+        // SwiftUI gives no API for the popover's arrow color — presentation
+        // background (which I tried first) paints the content rect only, and
+        // the system keeps drawing the arrow from its own backdrop, which is
+        // why it picked up the color of whatever block sat behind it.
+        //
+        // The standard workaround is to over-extend the background past the
+        // content bounds with negative padding so it bleeds into the arrow's
+        // area. -80 comfortably covers the arrow on every edge.
+        .background(Color.lsSurface.padding(-80))
     }
 }
 

@@ -93,6 +93,57 @@ private struct DayView: View {
     @State private var scrollDayOffset: Int?
     @State private var isProgrammaticScroll = false
 
+    // MARK: Vertical scroll targeting
+    //
+    // Captured at init, BEFORE any layout pass can report an offset, so a
+    // restore reads the position the grid was actually left at rather than
+    // the 0 the first pass produces.
+    @State private var restoreY: CGFloat = DayScrollMemory.shared.y
+    @State private var didApplyInitialScroll = false
+
+    private static let scrollTargetID = "day-scroll-target"
+    private static let gridSpace = "dayGrid"
+
+    /// Where the single scroll anchor sits, by intent.
+    private var scrollTargetY: CGFloat {
+        switch uiState.scrollIntent {
+        case .now:
+            // Exact position of the Now bar. Centering happens via the scroll
+            // anchor below, not by offsetting this.
+            return Grid.y(for: DebugClock.shared.now, on: DebugClock.shared.now)
+        case .event:
+            guard let event = uiState.scrollToEvent else { return 0 }
+            // Half an hour of lead-in, so the event lands just below the top
+            // edge with a little context above it.
+            return max(0, Grid.y(for: event.startDate, on: event.startDate) - Grid.ppm * 30)
+        case .restore:
+            return restoreY
+        }
+    }
+
+    /// Now goes to the middle of the screen; everything else top-aligns.
+    private var scrollAnchorPoint: UnitPoint {
+        uiState.scrollIntent == .now ? .center : .top
+    }
+
+    private func applyScrollIntent(
+        _ proxy: ScrollViewProxy,
+        animated: Bool,
+        delay: TimeInterval = 0.05
+    ) {
+        let anchor = scrollAnchorPoint
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            if animated {
+                withAnimation(.lsSnappy) {
+                    proxy.scrollTo(Self.scrollTargetID, anchor: anchor)
+                }
+            } else {
+                proxy.scrollTo(Self.scrollTargetID, anchor: anchor)
+            }
+            didApplyInitialScroll = true
+        }
+    }
+
     private let cal      = Calendar.current
     private let dayRange = -365...365
 
@@ -138,30 +189,30 @@ private struct DayView: View {
 
                 ScrollViewReader { proxy in
                 ScrollView(.vertical, showsIndicators: false) {
-                    let anchorY = max(0, Grid.y(for: Date(), on: Date()) - Grid.ppm * 60)
-                    let eventAnchorY: CGFloat = {
-                        guard let event = uiState.scrollToEvent else { return 0 }
-                        return max(0, Grid.y(for: event.startDate, on: event.startDate) - Grid.ppm * 60)
-                    }()
+                    // ONE anchor, repositioned by intent, rather than a
+                    // separate anchor per destination. The old version stacked
+                    // a now-anchor and a conditional event-anchor in the same
+                    // VStack, so adding a third (restore) would have meant
+                    // ordering them all by y — this collapses that entirely.
                     VStack(spacing: 0) {
                         Color.clear
-                            .frame(width: 1, height: anchorY)
+                            .frame(width: 1, height: scrollTargetY)
                         Color.clear
                             .frame(width: 1, height: 1)
-                            .id("now-anchor")
-                        // Event anchor — repositions when scrollToEvent changes
-                        if uiState.scrollToEvent != nil {
-                            Color.clear
-                                .frame(width: 1, height: max(0, eventAnchorY - anchorY))
-                            Color.clear
-                                .frame(width: 1, height: 1)
-                                .id("event-anchor")
-                        }
+                            .id(Self.scrollTargetID)
                         Spacer(minLength: 0)
                     }
                     .frame(width: geo.size.width,
                            height: Grid.totalHeight + LS.tabBarHeight,
                            alignment: .topLeading)
+                    .background(
+                        GeometryReader { p in
+                            Color.clear.preference(
+                                key: DayScrollOffsetKey.self,
+                                value: -p.frame(in: .named(Self.gridSpace)).minY
+                            )
+                        }
+                    )
                     .overlay(alignment: .topLeading) {
                         ZStack(alignment: .topLeading) {
                             HStack(alignment: .top, spacing: 0) {
@@ -227,22 +278,27 @@ private struct DayView: View {
                                alignment: .topLeading)
                     }
                 }
+                .coordinateSpace(name: Self.gridSpace)
+                .onPreferenceChange(DayScrollOffsetKey.self) { y in
+                    // Don't record anything until the initial scroll has been
+                    // applied — the first layout pass reports 0, which would
+                    // clobber the very offset we're about to restore.
+                    guard didApplyInitialScroll else { return }
+                    DayScrollMemory.shared.y = max(0, y)
+                }
                 .onAppear {
-                    proxy.scrollTo("now-anchor", anchor: .top)
+                    applyScrollIntent(proxy, animated: false)
                 }
                 .onChange(of: uiState.scrollToNow) { _, _ in
-                    withAnimation(.lsSnappy) {
-                        proxy.scrollTo("now-anchor", anchor: .top)
-                    }
+                    uiState.scrollIntent = .now
+                    applyScrollIntent(proxy, animated: true)
                 }
                 .onChange(of: uiState.scrollToEvent) { _, event in
                     guard event != nil else { return }
-                    // Small delay so selectedDate has time to snap the horizontal scroll
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                        withAnimation(.lsSnappy) {
-                            proxy.scrollTo("event-anchor", anchor: .top)
-                        }
-                    }
+                    uiState.scrollIntent = .event
+                    // Delay lets selectedDate snap the horizontal scroll and
+                    // the anchor settle at its new y before we chase it.
+                    applyScrollIntent(proxy, animated: true, delay: 0.15)
                 }
                 } // ScrollViewReader
             }
@@ -374,6 +430,15 @@ private struct TimeGutter: View {
 
 // MARK: - Day Column
 
+/// Reports the day grid's vertical scroll offset so it can be remembered
+/// across view-mode switches. See DayScrollMemory.
+private struct DayScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 private struct DayColumn: View {
     let date: Date
     let store: CalendarStore
@@ -401,7 +466,16 @@ private struct DayColumn: View {
     }
 
     private var timedEvents: [SchoolEvent] {
-        events.filter { $0.category != .schedules && !$0.isAllDay }
+        events.filter {
+            $0.category != .schedules &&
+            !$0.isAllDay &&
+            // Zero-duration events (CalendarWiz emits a few, e.g. "Mass of
+            // the Holy Spirit" at 10:15–10:15) describe no span of time, so
+            // they have nothing meaningful to occupy on a time grid. They
+            // also break the greedy column assignment below, which reasons
+            // entirely in start < end comparisons.
+            $0.endDate > $0.startDate
+        }
     }
 
     // Greedy column assignment for timed events, period-aware.
@@ -473,6 +547,14 @@ private struct DayColumn: View {
 
         // Second pass: total columns in each event's overlapping group,
         // also counting column 0 as occupied if a period overlaps this event.
+        //
+        // Both col and totalCols are capped at 2 columns. The day column is
+        // roughly 340pt wide on an iPhone; a third column lands around 113pt
+        // and anything beyond it renders off the right edge entirely — which
+        // is what produced the stray yellow sliver hanging past the screen on
+        // Picture Day. Per Lion: overlapping is preferable to invisible, so
+        // extra concurrent events stack into column 1 rather than spilling
+        // into columns that can't be seen.
         return assignments.map { item in
             let eventCols = assignments.filter { other in
                 other.event.startDate < item.event.endDate &&
@@ -486,10 +568,15 @@ private struct DayColumn: View {
             let allCols = periodOccupiesCol0
                 ? ([0] + eventCols)
                 : eventCols
-            let totalCols = (allCols.max() ?? 0) + 1
-            return (item.event, item.col, totalCols)
+            let rawTotal = (allCols.max() ?? 0) + 1
+            let totalCols = min(rawTotal, Self.maxColumns)
+            let col = min(item.col, Self.maxColumns - 1)
+            return (item.event, col, totalCols)
         }
     }
+
+    /// Hard ceiling on side-by-side event columns. See layoutEvents.
+    private static let maxColumns = 2
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -530,9 +617,15 @@ private struct DayColumn: View {
             // Timed event blocks with overlap layout
             ForEach(layoutEvents, id: \.event.id) { item in
                 let colWidth = (width - LS.sm) / CGFloat(item.totalCols)
-                let xOffset  = CGFloat(item.col) * colWidth + (item.col > 0 ? 2 : 4)
+                let rawOffset = CGFloat(item.col) * colWidth + (item.col > 0 ? 2 : 4)
+                let blockWidth = colWidth - (item.col > 0 ? 2 : 0)
+                // Defensive clamp. Nothing in layoutEvents should produce an
+                // offset past the column edge now that columns are capped,
+                // but a stray sliver rendered off the right edge is exactly
+                // the failure this prevents, and it costs one max/min.
+                let xOffset = min(max(rawOffset, 0), max(0, width - blockWidth))
                 EventBlock(event: item.event, onTap: { onSelect(.schoolEvent(item.event)) })
-                    .frame(width: colWidth - (item.col > 0 ? 2 : 0))
+                    .frame(width: blockWidth)
                     .offset(x: xOffset, y: Grid.y(for: item.event.startDate, on: date))
             }
 
@@ -595,7 +688,12 @@ private struct PeriodBlock: View {
     let onTap: () -> Void
 
     private var blockHeight: CGFloat {
-        Grid.height(minutes: end.timeIntervalSince(start) / 60)
+        // True height, no floor. A previous version clamped this to 22pt so a
+        // 10-minute Break could contain its label — but the block's height IS
+        // its duration on a time grid, so padding it made Break look like it
+        // ran twice as long as it does. The label adapts to the block now
+        // instead of the block adapting to the label.
+        rawHeight
     }
     private var num: Int? {
         let p = period.name.split(separator: " ")
@@ -603,31 +701,63 @@ private struct PeriodBlock: View {
         return Int(p[1])
     }
     private var config: PeriodConfig? { num.flatMap { settings.config(for: $0) } }
-    private var color: Color { config.map { Color.paletteColor(for: $0) } ?? Color.lsTertiary }
+    // lsSecondary, not lsTertiary, for unnumbered slots (Lunch, Break).
+    // lsTertiary is #4A5168 — at a 0.30 stroke over the near-black canvas it
+    // computes to roughly 2.5:1 and the border simply doesn't render to the
+    // eye. lsSecondary carries the same neutral read with enough luminance
+    // for the stroke and the label to both survive.
+    private var color: Color { config.map { Color.paletteColor(for: $0) } ?? Color.lsSecondary }
     private var displayName: String { config?.displayName ?? period.name }
     private var isCurrent: Bool { isToday && now >= start && now < end }
+
+    /// True for slots too short to fit the standard treatment — Break is 10
+    /// minutes, which at Grid.ppm is about 11pt: shorter than its own label.
+    private var isCompact: Bool { rawHeight < 22 }
+
+    private var rawHeight: CGFloat {
+        Grid.height(minutes: end.timeIntervalSince(start) / 60)
+    }
 
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 0) {
-                Capsule()
-                    .fill(color)
-                    .frame(width: 4)
-                    .padding(.vertical, 4)
-                    .padding(.horizontal, 4)
+                // Short slots get a dot instead of a capsule — a 4×3pt sliver
+                // reads as a rendering artifact, a circle reads as intent.
+                Group {
+                    if isCompact {
+                        Circle()
+                            .fill(color)
+                            .frame(width: 6, height: 6)
+                    } else {
+                        Capsule()
+                            .fill(color)
+                            .frame(width: 4)
+                            .padding(.vertical, 4)
+                    }
+                }
+                .padding(.horizontal, 4)
                 Text(displayName)
-                    .font(.system(size: blockHeight > 28 ? 13 : 11, weight: .bold, design: .rounded))
+                    .font(.system(
+                        size: isCompact ? 9 : (blockHeight > 28 ? 13 : 11),
+                        weight: .bold,
+                        design: .rounded
+                    ))
                     .foregroundStyle(color)
                     .lineLimit(1)
-                    .padding(.vertical, 3)
+                    .minimumScaleFactor(0.8)
+                    // No vertical padding when compact — an 11pt block has no
+                    // room to spare, and the HStack centers the label anyway.
+                    .padding(.vertical, isCompact ? 0 : 3)
                 Spacer()
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: blockHeight)
-            .background(
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(color.opacity(0.3))
-            )
+            // Height drives the constant-rate ramp — a 50-min period barely
+            // moves off blockFillTop, so seven of them stacked read as a set
+            // rather than as seven competing gradients.
+            //
+            // stroke: false — no hairline on any block in the grid now.
+            .lsBlockSurface(color, height: blockHeight, stroke: false)
         }
         .buttonStyle(.plain)
     }
@@ -662,11 +792,11 @@ private struct EventBlock: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: blockHeight)
-            .background(
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(color.opacity(0.18))
-                    .shadow(color: color, radius: 5)
-            )
+            // stroke: false — events carry no hairline. The chromatic shadow
+            // separates them from the canvas, and dropping the border is what
+            // stops a busy day reading as a stack of outlined boxes.
+            .lsBlockSurface(color, height: blockHeight, stroke: false)
+            .lsTintShadow(color, opacity: 0.22)
             .padding(.trailing, 2)
         }
         .buttonStyle(.plain)
@@ -700,8 +830,8 @@ private struct AllDayStrip: View {
                             .lineLimit(1)
                             .padding(.horizontal, LS.sm)
                             .padding(.vertical, 5)
-                            .background(c.opacity(0.18))
-                            .clipShape(RoundedRectangle(cornerRadius: LS.radiusSm, style: .continuous))
+                            .lsBlockSurface(c, cornerRadius: LS.radiusSm, stroke: false)
+                            .lsTintShadow(c, opacity: 0.22)
                             .contentShape(Rectangle())
                             .highPriorityGesture(
                                 TapGesture().onEnded {
@@ -848,13 +978,33 @@ private struct DayChip: View {
                 .font(.lsLabel)
                 .foregroundStyle(isSelected ? Color.lsBlue : Color.lsTertiary)
             ZStack {
-                Circle()
-                    .fill(isSelected ? Color.lsBlue : Color.clear)
-                    .frame(width: 30, height: 30)
-                if isToday && !isSelected {
+                // Recessed, not raised: the day chips sit IN the strip while
+                // the event blocks float above the grid. Two different depth
+                // languages, so they don't compete.
+                if isSelected {
                     Circle()
-                        .strokeBorder(Color.lsBlue, lineWidth: 1.5)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.lsBlue.opacity(0.94),
+                                    Color.lsBlue
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
                         .frame(width: 30, height: 30)
+                        .lsRecessedCircle()
+                } else if isToday {
+                    Circle()
+                        .fill(Color.lsBlue.opacity(0.10))
+                        .frame(width: 30, height: 30)
+                        .lsRecessedCircle(strength: 0.6)
+                        .overlay {
+                            Circle()
+                                .strokeBorder(Color.lsBlue, lineWidth: 1.5)
+                                .frame(width: 30, height: 30)
+                        }
                 }
                 Text(dayNum)
                     .font(.system(size: 15,
@@ -867,6 +1017,12 @@ private struct DayChip: View {
                                      Color.lsPrimary
                     )
             }
+            // Reserve the circle's footprint whether or not one is drawn.
+            // Without this the ZStack collapses to the text height on
+            // unselected days and inflates to 30pt on the selected one, so
+            // selecting a day shoved the weekday labels and the rest of the
+            // column around it.
+            .frame(width: 30, height: 30)
         }
         .padding(.vertical, LS.xs)
     }
@@ -889,7 +1045,14 @@ private struct SegmentedPill: View {
     var body: some View {
         HStack(spacing: 1) {
             ForEach(Array(colors.enumerated()), id: \.offset) { _, color in
-                color
+                // Slight vertical gradient. At 5pt tall this is barely
+                // perceptible individually, but across a month grid it stops
+                // the pills reading as flat printed dashes.
+                LinearGradient(
+                    colors: [color, color.opacity(0.85)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
             }
         }
         .frame(width: width, height: height)
@@ -931,6 +1094,24 @@ private struct MonthView: View {
             VStack(spacing: 0) {
                 Color.clear.frame(height: LS.contentTopInset)
 
+                // Weekday header lifted OUT of MonthGrid and pinned here, the
+                // way Apple Calendar does it — one row for the whole view
+                // instead of a repeat above every month. Removes six
+                // redundant rows from a year of scrolling.
+                HStack(spacing: 0) {
+                    ForEach(Array(Self.weekdayLabels.enumerated()), id: \.offset) { _, label in
+                        Text(label)
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Color.lsSecondary)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .padding(.vertical, LS.sm)
+
+                Rectangle()
+                    .fill(Color.lsTertiary.opacity(0.25))
+                    .frame(height: 0.5)
+
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: false) {
                         LazyVStack(spacing: 0, pinnedViews: []) {
@@ -956,6 +1137,8 @@ private struct MonthView: View {
         }
         .ignoresSafeArea(edges: .top)
     }
+
+    private static let weekdayLabels = ["S", "M", "T", "W", "T", "F", "S"]
 }
 
 // MARK: - Month Grid (one calendar month)
@@ -999,44 +1182,31 @@ private struct MonthGrid: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Month header
+            // Month header. Toned off pure white — at 20pt bold across a year
+            // of scrolling it was shouting louder than the day numbers it
+            // labels. Current month keeps lsBlue.
             HStack(alignment: .firstTextBaseline, spacing: LS.xs) {
                 Text(monthTitle)
                     .font(.system(size: 20, weight: .bold, design: .rounded))
-                    .foregroundStyle(
-                        cal.component(.month, from: firstOfMonth) == cal.component(.month, from: today) &&
-                        cal.component(.year,  from: firstOfMonth) == cal.component(.year,  from: today)
-                            ? Color.lsBlue : Color.lsPrimary
-                    )
+                    .foregroundStyle(isCurrentMonth ? Color.lsBlue : Color.lsSecondary)
                 if !isCurrentYear {
                     Text(yearTitle)
                         .font(.system(size: 14, weight: .medium, design: .rounded))
-                        .foregroundStyle(Color.lsSecondary)
+                        .foregroundStyle(Color.lsTertiary)
                 }
             }
             .padding(.horizontal, LS.md)
-            .padding(.top, LS.md)
-            .padding(.bottom, LS.xs)
+            .padding(.top, LS.lg)
+            .padding(.bottom, LS.sm)
 
-            // Divider under header
-            Rectangle()
-                .fill(Color.lsTertiary.opacity(0.2))
-                .frame(height: 0.5)
-
-            // Day-of-week headers (only on first month or always)
-            HStack(spacing: 0) {
-                ForEach(["S","M","T","W","T","F","S"], id: \.self) { label in
-                    Text(label)
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color.lsTertiary)
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            .padding(.vertical, LS.xs)
-
-            // Day cells
+            // Week rows, each preceded by a full-bleed hairline. The rules
+            // are what give the grid structure without adding any surface —
+            // same reason Apple Calendar uses them.
             let chunks = stride(from: 0, to: days.count, by: 7).map { Array(days[$0..<min($0+7, days.count)]) }
             ForEach(Array(chunks.enumerated()), id: \.offset) { _, week in
+                Rectangle()
+                    .fill(Color.lsTertiary.opacity(0.18))
+                    .frame(height: 0.5)
                 HStack(spacing: 0) {
                     ForEach(Array(week.enumerated()), id: \.offset) { _, day in
                         if let day {
@@ -1054,6 +1224,11 @@ private struct MonthGrid: View {
                 }
             }
         }
+    }
+
+    private var isCurrentMonth: Bool {
+        cal.component(.month, from: firstOfMonth) == cal.component(.month, from: today) &&
+        cal.component(.year,  from: firstOfMonth) == cal.component(.year,  from: today)
     }
 }
 
@@ -1073,18 +1248,35 @@ private struct MonthDayCell: View {
     }
 
     var body: some View {
-        VStack(spacing: 3) {
+        VStack(spacing: 6) {
             ZStack {
-                Circle()
-                    .fill(isSelected ? Color.lsBlue : Color.clear)
-                    .frame(width: 28, height: 28)
-                if isToday && !isSelected {
+                if isSelected {
                     Circle()
-                        .strokeBorder(Color.lsBlue, lineWidth: 1.5)
-                        .frame(width: 28, height: 28)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.lsBlue.opacity(0.94),
+                                    Color.lsBlue
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 32, height: 32)
+                        .lsRecessedCircle()
+                } else if isToday {
+                    Circle()
+                        .fill(Color.lsBlue.opacity(0.10))
+                        .frame(width: 32, height: 32)
+                        .lsRecessedCircle(strength: 0.6)
+                        .overlay {
+                            Circle()
+                                .strokeBorder(Color.lsBlue, lineWidth: 1.5)
+                                .frame(width: 32, height: 32)
+                        }
                 }
                 Text("\(cal.component(.day, from: date))")
-                    .font(.system(size: 14,
+                    .font(.system(size: 17,
                                   weight: isToday || isSelected ? .bold : .regular,
                                   design: .rounded))
                     .foregroundStyle(
@@ -1094,18 +1286,23 @@ private struct MonthDayCell: View {
                                      Color.lsPrimary
                     )
             }
+            // Fixed footprint — same reason as the week strip's DayChip: the
+            // circle must not change the cell's internal layout, or selecting
+            // a day pushes its summary pill down relative to its neighbours'.
+            .frame(width: 32, height: 32)
 
             // Segmented pill — collapses when no events
             if !summary.isEmpty {
                 SegmentedPill(
                     colors: summary.pillColors,
-                    width: summary.pillColors.count == 1 ? 20 : CGFloat(summary.pillColors.count) * 10,
-                    height: 4
+                    width: summary.pillColors.count == 1 ? 22 : CGFloat(summary.pillColors.count) * 11,
+                    height: 5
                 )
             } else {
-                Color.clear.frame(height: 4)
+                Color.clear.frame(height: 5)
             }
         }
+        .padding(.vertical, LS.sm)
         .frame(maxWidth: .infinity, minHeight: 52)
         .contentShape(Rectangle())
         .onTapGesture {
@@ -1191,7 +1388,10 @@ private struct YearGrid: View {
             let months = Array(1...12)
             let rows = stride(from: 0, to: 12, by: cols).map { Array(months[$0..<min($0+cols, 12)]) }
             ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                HStack(spacing: LS.sm) {
+                // .top matters: HStack defaults to .center, so a 5-row month
+                // (Feb) got vertically centered against a 6-row neighbor and
+                // its title sat visibly lower than the months beside it.
+                HStack(alignment: .top, spacing: LS.sm) {
                     ForEach(row, id: \.self) { month in
                         MiniMonthView(
                             firstOfMonth: firstOfMonth(month),

@@ -141,6 +141,40 @@ enum LS {
     static let shadowRadius:  CGFloat = 10
     static let shadowY:       CGFloat = 3
 
+    // Chromatic shadow — a floating surface casts in its OWN hue, not
+    // neutral black. This is the core of the depth pass: a blue FAB over a
+    // near-black canvas casting a gray shadow reads as a sticker; casting a
+    // faint blue one reads as an object with light behind it.
+    //
+    // 0.18 is deliberate. The original code used 0.4, which bloomed into a
+    // visible halo; pure black reads dead. 0.18 is felt, not seen.
+    static let tintShadowOpacity: Double  = 0.18
+    static let tintShadowRadius:  CGFloat = 12
+    static let tintShadowY:       CGFloat = 4
+
+    // Card surface treatment. The hairline is what stops a card from
+    // dissolving into the canvas when the fill difference is only a few
+    // percent — it's doing more work here than the shadow is.
+    static let hairlineOpacity: Double  = 0.08
+    static let hairlineWidth:   CGFloat = 0.5
+
+    // Colored content blocks (period + event blocks in the day grid).
+    //
+    // The ramp is a constant RATE, not a per-block range. A block always
+    // starts at blockFillTop and falls toward blockFillBottom at a fixed
+    // rate per point of height, reaching bottom only at
+    // blockGradientReference. So a 50-minute period travels ~30% of the
+    // range and reads nearly solid, while a 3-hour event gets the full
+    // sweep. Previously every block spanned the whole range regardless of
+    // size — which is why one long event looked great and a column of
+    // seven periods read as chaotic.
+    static let blockFillTop:    Double = 0.24
+    static let blockFillBottom: Double = 0.16
+    static let blockStroke:     Double = 0.30
+
+    /// Height at which a block shows the full gradient range. ~2.7 hours.
+    static let blockGradientReference: CGFloat = 180
+
     // Standard height for inline pill/chip controls (class selector,
     // priority selector, due date selector, Settings' Grad Year and Live
     // Activities chips). Explicit height rather than matching padding,
@@ -163,8 +197,168 @@ struct LSCard: ViewModifier {
     var elevated: Bool = false
     func body(content: Content) -> some View {
         content
-            .background(elevated ? Color.lsSurfaceRaised : Color.lsSurface)
+            .background {
+                // Vertical gradient rather than a flat fill. The delta is
+                // small on purpose — enough to imply a light source above,
+                // not enough to read as a gradient.
+                LinearGradient(
+                    colors: elevated
+                        ? [Color.lsSurfaceRaised, Color.lsSurface]
+                        : [Color.lsSurface, Color.lsSurface.opacity(0.92)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
             .clipShape(RoundedRectangle(cornerRadius: LS.radiusMd, style: .continuous))
+    }
+}
+
+/// Chromatic drop shadow tinted by the content's own color.
+struct LSTintShadow: ViewModifier {
+    let tint: Color
+    var opacity: Double = LS.tintShadowOpacity
+    func body(content: Content) -> some View {
+        content.shadow(
+            color: tint.opacity(opacity),
+            radius: LS.tintShadowRadius,
+            y: LS.tintShadowY
+        )
+    }
+}
+
+/// Gradient fill, plus an optional same-hue hairline, for colored content
+/// blocks. Replaces flat `color.opacity(0.3)` fills, which desaturate to mud
+/// on a near-black canvas — a red period block at 30% over #0A0C10 reads
+/// brown.
+struct LSBlockSurface: ViewModifier {
+    let color: Color
+    var cornerRadius: CGFloat = 5
+    /// Block height in points. Supplied, the gradient runs at a constant
+    /// rate so short blocks read nearly solid and only tall ones sweep the
+    /// full range. Omitted, it spans the whole range regardless of size.
+    var blockHeight: CGFloat? = nil
+    var showsStroke: Bool = true
+
+    private var bottomOpacity: Double {
+        guard let blockHeight else { return LS.blockFillBottom }
+        let travel = min(1, Double(blockHeight) / Double(LS.blockGradientReference))
+        return LS.blockFillTop - (LS.blockFillTop - LS.blockFillBottom) * travel
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                color.opacity(LS.blockFillTop),
+                                color.opacity(bottomOpacity)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .overlay {
+                        if showsStroke {
+                            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                                .strokeBorder(color.opacity(LS.blockStroke), lineWidth: 0.5)
+                        }
+                    }
+            }
+    }
+}
+
+/// Inverse of the sphere treatment — dark rim above, light below, so the
+/// shape reads as pressed into the surface rather than sitting on it.
+/// Used for day chips in the week strip and month grid, where a raised
+/// treatment would compete with the event blocks that genuinely float.
+///
+/// Toned back from 0.32/0.10 — at that strength the rim read as a drawn
+/// outline rather than as shading, and a grid of 35 of them turned into
+/// visible ornament. Still present, just no longer the loudest thing in
+/// the cell.
+struct LSRecessedCircle: ViewModifier {
+    var strength: Double = 1.0
+    func body(content: Content) -> some View {
+        content.overlay {
+            Circle().strokeBorder(
+                LinearGradient(
+                    colors: [
+                        Color.black.opacity(0.20 * strength),
+                        Color.white.opacity(0.06 * strength)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                ),
+                lineWidth: 1
+            )
+        }
+    }
+}
+
+// MARK: - Section chrome
+//
+// Shared by every sectioned surface (SettingsSheetView, PhoneContactsSheet,
+// and anything added later). These lived duplicated in both sheets, which is
+// exactly how two surfaces drift apart — one source of truth instead.
+
+enum LSDivider {
+    /// Rule separating whole SECTIONS. Deliberately brighter than `row`.
+    static let sectionOpacity: Double = 0.40
+    /// Hairline separating rows WITHIN one card.
+    static let rowOpacity: Double = 0.15
+    static let thickness: CGFloat = 0.5
+}
+
+/// Hairline between rows inside a card.
+///
+/// A Rectangle rather than `Divider()`: Divider draws its own separator in a
+/// system color, and `.background(_:)` only tints the space BEHIND that line
+/// — so the old `Divider().background(lsTertiary.opacity(0.3))` idiom was
+/// rendering the system separator at full strength no matter what opacity it
+/// was handed. This actually controls the line.
+struct LSRowDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(Color.lsTertiary.opacity(LSDivider.rowOpacity))
+            .frame(height: LSDivider.thickness)
+    }
+}
+
+/// Full-bleed rule marking a section break.
+///
+/// `inset` is the horizontal padding of the container this sits inside; it's
+/// cancelled with negative padding so the rule runs bezel to bezel while the
+/// content around it stays inset.
+struct LSSectionDivider: View {
+    var inset: CGFloat = LS.md
+    var body: some View {
+        Rectangle()
+            .fill(Color.lsTertiary.opacity(LSDivider.sectionOpacity))
+            .frame(height: LSDivider.thickness)
+            .padding(.horizontal, -inset)
+    }
+}
+
+/// Section header: letterspaced caps label, then a full-bleed rule closing it
+/// off from the card beneath. The standard sectioned-list header for the app.
+struct LSSectionLabel: View {
+    let text: String
+    var showsDivider: Bool = true
+    var inset: CGFloat = LS.md
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: LS.sm) {
+            Text(text.uppercased())
+                .font(.lsLabel)
+                .foregroundStyle(Color.lsSecondary)
+                .tracking(1)
+                .padding(.leading, LS.xs)
+            if showsDivider {
+                LSSectionDivider(inset: inset)
+            }
+        }
     }
 }
 
@@ -187,6 +381,29 @@ struct LSPressEffect: ViewModifier {
 extension View {
     func lsCard(elevated: Bool = false) -> some View {
         modifier(LSCard(elevated: elevated))
+    }
+    /// Drop shadow in the content's own hue — see LSTintShadow.
+    func lsTintShadow(_ tint: Color, opacity: Double = LS.tintShadowOpacity) -> some View {
+        modifier(LSTintShadow(tint: tint, opacity: opacity))
+    }
+    /// Gradient + optional hairline surface for colored blocks — see
+    /// LSBlockSurface. Pass `height` for the constant-rate ramp.
+    func lsBlockSurface(
+        _ color: Color,
+        cornerRadius: CGFloat = 5,
+        height: CGFloat? = nil,
+        stroke: Bool = true
+    ) -> some View {
+        modifier(LSBlockSurface(
+            color: color,
+            cornerRadius: cornerRadius,
+            blockHeight: height,
+            showsStroke: stroke
+        ))
+    }
+    /// Pressed-in rim for circular chips — see LSRecessedCircle.
+    func lsRecessedCircle(strength: Double = 1.0) -> some View {
+        modifier(LSRecessedCircle(strength: strength))
     }
     func lsPressEffect(action: @escaping () -> Void) -> some View {
         modifier(LSPressEffect(action: action))

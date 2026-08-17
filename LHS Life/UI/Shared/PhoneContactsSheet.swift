@@ -78,7 +78,9 @@ struct PhoneContactsSheet: View {
             .padding(.top, LS.lg)
             .padding(.bottom, LS.md)
 
-            Divider().background(Color.lsTertiary.opacity(0.3))
+            Rectangle()
+                .fill(Color.lsTertiary.opacity(LSDivider.sectionOpacity))
+                .frame(height: LSDivider.thickness)
 
             ScrollView {
                 VStack(spacing: LS.lg) {
@@ -96,17 +98,12 @@ struct PhoneContactsSheet: View {
 
     private func contactSection(label: String, contacts: [Contact]) -> some View {
         VStack(alignment: .leading, spacing: LS.sm) {
-            Text(label.uppercased())
-                .font(.lsLabel)
-                .foregroundStyle(Color.lsSecondary)
-                .tracking(1)
-                .padding(.leading, LS.xs)
+            sectionLabel(label)
 
             VStack(spacing: 0) {
                 ForEach(Array(contacts.enumerated()), id: \.offset) { index, contact in
                     if index > 0 {
-                        Divider()
-                            .background(Color.lsTertiary.opacity(0.3))
+                        rowDivider
                     }
                     contactRow(contact)
                 }
@@ -114,6 +111,15 @@ struct PhoneContactsSheet: View {
             .lsCard()
         }
     }
+
+    /// Section chrome comes from DesignSystem (LSSectionLabel / LSRowDivider)
+    /// — these thin wrappers exist only so the call sites below read the same
+    /// as SettingsSheetView's.
+    private func sectionLabel(_ text: String) -> some View {
+        LSSectionLabel(text: text)
+    }
+
+    private var rowDivider: some View { LSRowDivider() }
 
     private func contactRow(_ contact: Contact) -> some View {
         Button { makeCall(contact.number) } label: {

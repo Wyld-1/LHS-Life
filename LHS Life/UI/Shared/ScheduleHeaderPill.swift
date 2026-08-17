@@ -235,7 +235,7 @@ struct ScheduleHeaderPill: View {
         if inAPMode, case .mine(let name, _, _, _) = apExamState { return name }
         if apModeExamDone { return afterSchoolPrimary }
         if isSummerWindow {
-            if let event = todayEvent { return event.title }
+            if let event = nextUpcomingEvent { return event.title }
             return "Enjoy summer \u{1F3DC}\u{FE0F}"
         }
         switch state.dayState {
@@ -280,11 +280,7 @@ struct ScheduleHeaderPill: View {
         }
         if apModeExamDone { return tomorrowSecondary }
         if isSummerWindow {
-            if let event = todayEvent {
-                guard !event.isAllDay else { return nil }
-                return "Today at \(ScheduleEngine.timeString(event.startDate))"
-            }
-            if let event = tomorrowEvent { return upcomingEventText(event) }
+            if let event = nextUpcomingEvent { return upcomingWhenText(event) }
             guard let label = orientationDateLabel else { return nil }
             return "Orientation on \(label)"
         }
@@ -336,6 +332,37 @@ struct ScheduleHeaderPill: View {
         guard let window = summerMessageWindow else { return false }
         let today = Calendar.current.startOfDay(for: now)
         return today >= window.start && today < window.end
+    }
+
+    /// The next event that hasn't finished yet, scanning forward across days.
+    ///
+    /// This is the ONLY event lookup the pill should use. `store.events` is
+    /// already sorted by start date, so the first match is the soonest one.
+    /// The `endDate > now` filter is what the old `todayEvent` was missing:
+    /// it returned the day's first event whether or not it had ended, so at
+    /// 3:03 the pill still advertised something that finished at 3:00.
+    ///
+    /// All-day events carry an exclusive end (midnight the following day),
+    /// so one running today stays current until the day is actually over.
+    private var nextUpcomingEvent: SchoolEvent? {
+        store.events.first {
+            $0.category != .schedules &&
+            $0.title.trimmingCharacters(in: .whitespaces).lowercased() != "summer school" &&
+            $0.endDate > now
+        }
+    }
+
+    /// "Today at 9:00 AM" / "Tomorrow at 8:30 AM" / "Friday at 6:00 PM".
+    /// Just the when — the title is already the primary line.
+    private func upcomingWhenText(_ event: SchoolEvent) -> String {
+        let cal = Calendar.current
+        let label = cal.isDateInToday(event.startDate)    ? "Today"
+                  : cal.isDateInTomorrow(event.startDate) ? "Tomorrow"
+                  : DateFormatter.shortWeekday.string(from: event.startDate)
+        // All-day events have no meaningful clock time, but the day label
+        // still matters now that this can point past today.
+        guard !event.isAllDay else { return label }
+        return "\(label) at \(ScheduleEngine.timeString(event.startDate))"
     }
 
     private var todayEvent: SchoolEvent? {
@@ -431,15 +458,14 @@ struct ScheduleHeaderPill: View {
     private var tappableEvent: SchoolEvent? { titleEvent ?? subtitleEvent }
 
     private var titleEvent: SchoolEvent? {
-        if isSummerWindow { return todayEvent }
+        if isSummerWindow { return nextUpcomingEvent }
         return nil
     }
 
     private var subtitleEvent: SchoolEvent? {
         if apModeExamDone { return tomorrowLookaheadEvent }
         if isSummerWindow {
-            if let event = todayEvent { return event.isAllDay ? nil : event }
-            if let event = tomorrowEvent { return event }
+            if let event = nextUpcomingEvent { return event.isAllDay ? nil : event }
             return orientationEvent
         }
         switch state.dayState {

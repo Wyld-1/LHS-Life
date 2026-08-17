@@ -34,6 +34,18 @@ enum AppTab: Int, CaseIterable {
         }
     }
 
+    /// SF Symbol name (or asset name when isCustomAsset).
+    ///
+    /// SINGLE SOURCE OF TRUTH. Every surface — the iOS 26 TabView, the legacy
+    /// dock, and the iPad sidebar — reads this. SystemTabDock used to hardcode
+    /// its own strings in the Tab(...) declarations, so editing this had no
+    /// effect on iOS 26 and editing those had no effect anywhere else.
+    ///
+    /// Names are the FILLED variants deliberately. iOS tab bars substitute the
+    /// .fill variant for any symbol they contain, and .symbolVariant(.none)
+    /// does not reliably override that on the iOS 26 TabView — tried and
+    /// reverted. Naming the filled variant outright means the string matches
+    /// what actually renders, instead of lying about it.
     var iconName: String {
         switch self {
         case .events:       return "calendar"

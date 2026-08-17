@@ -93,17 +93,17 @@ private struct SystemTabDock: View {
 
     var body: some View {
         TabView(selection: selection) {
-            Tab("Events", systemImage: "calendar", value: AppTab.events) {
+            Tab(AppTab.events.title, systemImage: AppTab.events.iconName, value: AppTab.events) {
                 EventsTabView()
                     .phoneToolbar(tab: .events, config: toolbarConfig)
             }
             if settings.showMapTab {
-                Tab("Map", systemImage: "map.fill", value: AppTab.map) {
+                Tab(AppTab.map.title, systemImage: AppTab.map.iconName, value: AppTab.map) {
                     MapTabView(resetToken: mapResetToken)
                         .phoneToolbar(tab: .map, config: toolbarConfig)
                 }
             }
-            Tab("Order", systemImage: "fork.knife", value: AppTab.lunch) {
+            Tab(AppTab.lunch.title, systemImage: AppTab.lunch.iconName, value: AppTab.lunch) {
                 LunchTabView(webState: lunchState)
                     .phoneToolbar(tab: .lunch, config: toolbarConfig)
             }
@@ -111,13 +111,13 @@ private struct SystemTabDock: View {
                 PowerSchoolTabView(webState: powerschoolState)
                     .phoneToolbar(tab: .powerschool, config: toolbarConfig)
             } label: {
-                Label("Grades", image: "powerschool-logo")
+                Label(AppTab.powerschool.title, image: AppTab.powerschool.iconName)
             }
             Tab(value: AppTab.schoology) {
                 SchoologyTabView(webState: schoologyState)
                     .phoneToolbar(tab: .schoology, config: toolbarConfig)
             } label: {
-                Label("Schoology", image: "schoology-logo")
+                Label(AppTab.schoology.title, image: AppTab.schoology.iconName)
             }
         }
         .tabBarMinimizeBehavior(uiState.viewMode == .day ? .onScrollDown : .never)

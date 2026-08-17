@@ -61,7 +61,12 @@ struct PhoneLayout: View {
                 showSettings = true
             },
             onPhone: { showContacts = true },
-            onPillTap: { withAnimation(.lsSnappy) { selectedTab = .events } },
+            // No event in the pill — treat it as "go home": Events tab, today,
+            // Now bar centered. Same destination as re-tapping the Events tab.
+            onPillTap: {
+                withAnimation(.lsSnappy) { selectedTab = .events }
+                calendarUI.goToToday()
+            },
             onEventTap: { event in
                 withAnimation(.lsSnappy) { selectedTab = .events }
                 calendarUI.navigateTo(event: event)

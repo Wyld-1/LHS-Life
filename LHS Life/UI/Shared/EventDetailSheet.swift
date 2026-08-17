@@ -102,10 +102,40 @@ enum EventDetailItem: Identifiable {
             return "\(ScheduleEngine.timeString(start)) – \(ScheduleEngine.timeString(end))"
         }
     }
+
+    /// Rough threshold for "this needs the taller detent to be readable."
+    /// Character count rather than measured height — the sheet must choose a
+    /// detent set before layout runs, so a real measurement isn't available
+    /// at this point.
+    var hasLongDescription: Bool { (description?.count ?? 0) > 280 }
 }
 
 struct EventDetailSheet: View {
     let item: EventDetailItem
+
+    /// Measured height of the scrollable content. Drives a custom detent so
+    /// the sheet opens exactly tall enough to show the description AND clear
+    /// the floating Save button — previously a short two-line description
+    /// forced a drag to .large just to read the last line.
+    @State private var contentHeight: CGFloat = 0
+
+    /// Space the pinned Save button occupies, plus breathing room. The button
+    /// floats over the scroll view rather than sitting in it, so its height
+    /// isn't part of contentHeight and has to be added back.
+    private let buttonClearance: CGFloat = 96
+
+    /// Never open taller than this fraction of the screen — past that the
+    /// content is long enough that .large is the honest answer, and the user
+    /// can drag there.
+    private var maxOpenHeight: CGFloat {
+        (UIScreen.main.bounds.height * 0.85)
+    }
+
+    private var openHeight: CGFloat {
+        // Floor keeps very short items (a period with a one-line note) from
+        // opening as a sliver.
+        min(max(contentHeight + buttonClearance, 240), maxOpenHeight)
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -149,6 +179,20 @@ struct EventDetailSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(LS.lg)
                 .padding(.bottom, 64)
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: SheetContentHeightKey.self,
+                            value: proxy.size.height
+                        )
+                    }
+                )
+            }
+            .onPreferenceChange(SheetContentHeightKey.self) { height in
+                // Only grow. Once the sheet is open the ScrollView reports its
+                // own (clipped) height rather than the content's, so tracking
+                // every change would shrink the detent out from under the user.
+                if height > contentHeight { contentHeight = height }
             }
 
             SaveToCalendarButton(item: item)
@@ -161,7 +205,17 @@ struct EventDetailSheet: View {
         }
         .presentationDragIndicator(.visible)
         .presentationBackground(.regularMaterial)
-        .presentationDetents([.medium, .large])
+        // Self-sizing: opens exactly tall enough for the content plus the
+        // floating Save button, capped at 85% of screen. .large stays
+        // available by dragging for genuinely long descriptions.
+        .presentationDetents([.height(openHeight), .large])
+    }
+}
+
+private struct SheetContentHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
@@ -185,8 +239,8 @@ private struct DetailRow: View {
 
 // MARK: - Save to Calendar Button
 // Floating, pinned to the bottom of the sheet regardless of scroll position
-// or detent (.medium or .large) — same placement convention as Apple's own
-// "Delete Event" button in the system Calendar app's detail sheet.
+// or detent — same placement convention as Apple's own "Delete Event"
+// button in the system Calendar app's detail sheet.
 
 private struct SaveToCalendarButton: View {
     let item: EventDetailItem

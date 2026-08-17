@@ -23,6 +23,17 @@ final class CalendarUIState {
     var scrollToNow: Bool = false
     var scrollToEvent: SchoolEvent? = nil
 
+    /// What the day grid's VERTICAL scroll should do the next time DayView
+    /// appears or is retargeted. DayView is torn down and rebuilt whenever
+    /// viewMode changes, so without this it always landed on the same default
+    /// regardless of how the user got there.
+    ///
+    ///   .now     — center the Now bar (going home)
+    ///   .event   — top-align 30 min before an event's start
+    ///   .restore — return to wherever the grid was last left
+    enum DayScrollIntent { case now, event, restore }
+    var scrollIntent: DayScrollIntent = .now
+
     // MARK: - Stale-date correction
     //
     // When the app foregrounds after being backgrounded for more than two hours,
@@ -54,6 +65,7 @@ final class CalendarUIState {
 
     func navigateTo(event: SchoolEvent) {
         selectedDate = Calendar.current.startOfDay(for: event.startDate)
+        scrollIntent = .event
         scrollToEvent = nil  // reset first so onChange fires even for the same event
         withAnimation(.lsSnappy) { viewMode = .day }
         // Brief delay so nil propagates before setting the new value
@@ -66,6 +78,7 @@ final class CalendarUIState {
 
     func goToToday() {
         selectedDate = cal.startOfDay(for: Date())
+        scrollIntent = .now
         scrollToNow.toggle()  // toggle so repeated taps always fire
         withAnimation(.lsSnappy) { viewMode = .day }
     }
@@ -80,6 +93,10 @@ final class CalendarUIState {
     }
     func zoomIn(to date: Date) {
         selectedDate = cal.startOfDay(for: date)
+        // Drilling in from Month or Year keeps the grid's existing vertical
+        // position, matching what swiping between days already does. Jumping
+        // to "now" here would be wrong — the user picked a DAY, not a time.
+        scrollIntent = .restore
         withAnimation(.lsSnappy) {
             switch viewMode {
             case .year:  viewMode = .month
@@ -101,6 +118,19 @@ final class CalendarUIState {
         case .year:        return { withAnimation(.lsSnappy) { self.viewMode = .day } }
         }
     }
+}
+
+// MARK: - Day grid scroll memory
+
+/// Last vertical offset of the day grid, remembered across view-mode
+/// switches. Deliberately NOT @Observable and not stored on CalendarUIState:
+/// this is written on every scroll frame, and publishing that would re-render
+/// the entire events tab continuously while the user drags.
+@MainActor
+final class DayScrollMemory {
+    static let shared = DayScrollMemory()
+    var y: CGFloat = 0
+    private init() {}
 }
 
 // MARK: - CalendarStore

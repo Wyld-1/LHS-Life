@@ -71,7 +71,13 @@ struct iPadRootView: View {
                     },
                     showSettingsBadge: showBadge,
                     showMapRow: settings.showMapTab,
-                    onPillTap: { withAnimation(.lsSnappy) { selectedTab = .events } },
+                    // No event in the pill — treat it as "go home": Events,
+                    // today, Now bar centered. Matches PhoneLayout, and the
+                    // same destination as re-tapping the Events row above.
+                    onPillTap: {
+                        withAnimation(.lsSnappy) { selectedTab = .events }
+                        calendarUI.goToToday()
+                    },
                     onEventTap: { event in
                         withAnimation(.lsSnappy) { selectedTab = .events }
                         calendarUI.navigateTo(event: event)
@@ -233,14 +239,10 @@ private struct iPadHomeworkFAB: View {
                 icon.glassEffect(.regular.interactive().tint(Color.lsBlue), in: Circle())
             } else {
                 icon.background {
-                    Circle()
-                        .fill(Color.lsBlue)
-                        .shadow(
-                            color: .black.opacity(LS.shadowOpacity),
-                            radius: LS.shadowRadius,
-                            y: LS.shadowY
-                        )
+                    Circle().fill(Color.lsBlue)
                 }
+                // Chromatic rather than neutral, matching the iPhone FAB.
+                .lsTintShadow(Color.lsBlue)
             }
         }
         .buttonStyle(.plain)
