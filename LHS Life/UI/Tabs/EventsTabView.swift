@@ -77,6 +77,22 @@ private struct DayView: View {
     @Environment(CalendarUIState.self) private var uiState
     @State private var selectedDetail: EventDetailItem?
 
+    // Scroll state, deliberately separate from uiState.selectedDate.
+    //
+    // selectedDate is the TARGET — written by a week-strip tap, a month-view
+    // tap, or a settled swipe. scrollDayOffset is the scroll view's OWN
+    // position, which follows the target.
+    //
+    // These were previously one value: .scrollPosition took an inline Binding
+    // whose get read selectedDate and whose set wrote it. That binding is
+    // two-way and SwiftUI drives it during PROGRAMMATIC scrolling too, not
+    // just user drags — so a tap that moved several days fired the setter
+    // once per column swept, each write retargeting the scroll mid-flight.
+    // It landed a day or two off. Swiping was unaffected because nothing
+    // else was writing the target at the same time.
+    @State private var scrollDayOffset: Int?
+    @State private var isProgrammaticScroll = false
+
     private let cal      = Calendar.current
     private let dayRange = -365...365
 
@@ -171,17 +187,38 @@ private struct DayView: View {
                                     .scrollTargetLayout()
                                 }
                                 .scrollTargetBehavior(.viewAligned)
-                                .scrollPosition(id: Binding(
-                                    get: { offsetFor(uiState.selectedDate) },
-                                    set: { newOffset in
-                                        guard let newOffset, dayRange.contains(newOffset) else { return }
-                                        let d = dayDate(newOffset)
-                                        if !cal.isDate(d, inSameDayAs: uiState.selectedDate) {
-                                            uiState.selectedDate = d
-                                            HapticEngine.shared.tick()
+                                .scrollPosition(id: $scrollDayOffset)
+                                .onAppear {
+                                    // Mount at the target without animating
+                                    // across the columns in between.
+                                    scrollDayOffset = offsetFor(uiState.selectedDate)
+                                }
+                                .onChange(of: uiState.selectedDate) { _, date in
+                                    let target = offsetFor(date)
+                                    guard target != scrollDayOffset else { return }
+                                    isProgrammaticScroll = true
+                                    scrollDayOffset = target
+                                }
+                                .onChange(of: scrollDayOffset) { _, newOffset in
+                                    guard let newOffset, dayRange.contains(newOffset) else { return }
+                                    if isProgrammaticScroll {
+                                        // Swallow the intermediate columns the
+                                        // scroll sweeps through; the target
+                                        // already holds the right date. Clear
+                                        // the flag once we've actually landed.
+                                        if newOffset == offsetFor(uiState.selectedDate) {
+                                            isProgrammaticScroll = false
                                         }
+                                        return
                                     }
-                                ))
+                                    // User-driven swipe — the scroll is the
+                                    // source of truth here, so publish it.
+                                    let d = dayDate(newOffset)
+                                    if !cal.isDate(d, inSameDayAs: uiState.selectedDate) {
+                                        uiState.selectedDate = d
+                                        HapticEngine.shared.tick()
+                                    }
+                                }
                             }
                         }
                         .padding(.top, LS.md)
