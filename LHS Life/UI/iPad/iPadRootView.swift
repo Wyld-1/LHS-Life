@@ -135,16 +135,11 @@ struct iPadRootView: View {
         .toolbar {
             if let button = contextualToolbarButton {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        button.action()
-                    } label: {
-                        Image(systemName: button.systemName)
-                            .font(.system(size: 17, weight: .regular))
-                            .foregroundStyle(toolbarButtonTint)
-                    }
-                    .tint(toolbarButtonTint)
-                    .disabled(!button.enabled)
-                    .opacity(button.enabled ? 1 : 0.35)
+                    LSToolbarButton(
+                        systemName: button.systemName,
+                        enabled: button.enabled,
+                        action: button.action
+                    )
                 }
             }
         }
@@ -169,21 +164,11 @@ struct iPadRootView: View {
         let action: () -> Void
     }
 
-    /// Pre-26 the toolbar is flat chrome and an accent-blue glyph reads as a
-    /// stray link rather than a control, so it takes lsPrimary (black in
-    /// light, white in dark) — matching what PhoneToolbar already does for
-    /// the same contextual button on iPhone. On 26+ the glass capsule
-    /// supplies its own affordance, so the system accent is left alone.
-    private var toolbarButtonTint: Color {
-        if #available(iOS 26, *) { return Color.accentColor }
-        return Color.lsPrimary
-    }
-
     private var contextualToolbarButton: ToolbarButtonSpec? {
         switch selectedTab {
         case .events:
             return .init(
-                systemName: zoomSystemIcon(for: calendarUI.zoomOutLabel),
+                systemName: CalendarUIState.zoomSystemIcon(for: calendarUI.zoomOutLabel),
                 action: { calendarUI.zoomOutAction() }
             )
         case .powerschool:
@@ -200,15 +185,6 @@ struct iPadRootView: View {
             )
         default:
             return nil
-        }
-    }
-
-    private func zoomSystemIcon(for label: String?) -> String {
-        switch label {
-        case "Month": return "square.grid.2x2.fill"
-        case "Year":  return "square.grid.3x3.fill"
-        case "Day":   return "calendar.day.timeline.leading"
-        default:      return "calendar"
         }
     }
 }

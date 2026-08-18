@@ -91,6 +91,19 @@ final class CalendarUIState {
             }
         }
     }
+    /// SF Symbol for the zoom-out toolbar button, given `zoomOutLabel`.
+    /// Static so both PhoneToolbar (which only has the label string from its
+    /// config) and iPadRootView can share one mapping — they previously had
+    /// byte-identical private copies.
+    static func zoomSystemIcon(for label: String?) -> String {
+        switch label {
+        case "Month": return "square.grid.2x2.fill"
+        case "Year":  return "square.grid.3x3.fill"
+        case "Day":   return "calendar.day.timeline.leading"
+        default:      return "calendar"
+        }
+    }
+
     func zoomIn(to date: Date) {
         selectedDate = cal.startOfDay(for: date)
         // Drilling in from Month or Year keeps the grid's existing vertical

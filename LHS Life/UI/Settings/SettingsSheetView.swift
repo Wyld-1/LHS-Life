@@ -734,21 +734,7 @@ private struct PeriodRow: View {
                 Circle()
                     .fill(Color.paletteColor(for: config))
                     .frame(width: 22, height: 22)
-                    .overlay {
-                        // Top highlight + bottom shade reads as a sphere
-                        // rather than a flat disc.
-                        Circle().strokeBorder(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(0.35),
-                                    Color.black.opacity(0.20)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            ),
-                            lineWidth: 1
-                        )
-                    }
+                    .lsSphereRim()
                     .ifTrue(config.isEnabled) {
                         $0.lsTintShadow(Color.paletteColor(for: config), opacity: 0.35)
                     }
@@ -852,21 +838,7 @@ private struct ColorPickerPopup: View {
                     Circle()
                         .fill(color)
                         .frame(width: Self.dot, height: Self.dot)
-                        .overlay {
-                            // Same sphere treatment as the period row dots:
-                            // light rim above, shade below.
-                            Circle().strokeBorder(
-                                LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.35),
-                                        Color.black.opacity(0.20)
-                                    ],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                ),
-                                lineWidth: 1
-                            )
-                        }
+                        .lsSphereRim()
                         .overlay {
                             if isSelected {
                                 Circle().strokeBorder(Color.white, lineWidth: 2.5)

@@ -47,7 +47,7 @@ struct PhoneToolbar: ViewModifier {
     /// web tabs, none in Lunch.
     private var contextualSymbol: String? {
         switch tab {
-        case .events:                  return zoomSystemIcon(for: config.cycleLabel)
+        case .events:                  return CalendarUIState.zoomSystemIcon(for: config.cycleLabel)
         case .powerschool, .schoology: return "chevron.left"
         default:                       return nil
         }
@@ -86,16 +86,11 @@ struct PhoneToolbar: ViewModifier {
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     if let contextualSymbol {
-                        Button {
-                            contextualAction()
-                        } label: {
-                            Image(systemName: contextualSymbol)
-                                .font(.system(size: 17, weight: .regular))
-                                .foregroundStyle(Color.lsPrimary)
-                        }
-                        .tint(Color.lsPrimary)
-                        .disabled(!contextualEnabled)
-                        .opacity(contextualEnabled ? 1 : 0.35)
+                        LSToolbarButton(
+                            systemName: contextualSymbol,
+                            enabled: contextualEnabled,
+                            action: contextualAction
+                        )
                     }
                 }
                 // ToolbarSpacer is the iOS 26 API that actually forces two
@@ -105,13 +100,7 @@ struct PhoneToolbar: ViewModifier {
                     ToolbarSpacer(.fixed, placement: .topBarTrailing)
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button {
-                        config.onPhone()
-                    } label: {
-                        Image(systemName: "phone.fill")
-                            .font(.system(size: 17, weight: .regular))
-                            .foregroundStyle(Color.lsPrimary)
-                    }
+                    LSToolbarButton(systemName: "phone.fill", action: config.onPhone)
                     Button {
                         config.onSettings()
                     } label: {
@@ -133,15 +122,6 @@ struct PhoneToolbar: ViewModifier {
                     .tint(Color.lsBlue)
                 }
             }
-    }
-
-    private func zoomSystemIcon(for label: String?) -> String {
-        switch label {
-        case "Month": return "square.grid.2x2.fill"
-        case "Year":  return "square.grid.3x3.fill"
-        case "Day":   return "calendar.day.timeline.leading"
-        default:      return "calendar"
-        }
     }
 }
 

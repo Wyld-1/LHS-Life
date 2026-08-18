@@ -155,6 +155,11 @@ enum LS {
     // Card surface treatment. The hairline is what stops a card from
     // dissolving into the canvas when the fill difference is only a few
     // percent — it's doing more work here than the shadow is.
+    //
+    // NOTE: currently unused. LSCard's border was removed in favour of
+    // section rules (see LSDivider); these are kept because HomeworkPopup
+    // still hardcodes the same 0.08 / 0.5 values inline and should adopt
+    // them rather than have them deleted twice.
     static let hairlineOpacity: Double  = 0.08
     static let hairlineWidth:   CGFloat = 0.5
 
@@ -362,6 +367,57 @@ struct LSSectionLabel: View {
     }
 }
 
+// MARK: - Toolbar chrome
+
+/// Standard toolbar glyph button. Consolidates the iPhone and iPad bars,
+/// which had drifted: both hand-rolled the same Button + 17pt Image +
+/// foregroundStyle + tint + disabled + 0.35-opacity stack, and iPad's had
+/// picked up an accent-color branch iPhone's never had.
+///
+/// Tint defaults to lsPrimary — black in light, white in dark — and is NOT
+/// derived from Color.accentColor. On macOS (and "Designed for iPad" running
+/// on Apple silicon) accentColor resolves to the user's system-wide accent,
+/// so an accent-tinted glyph turns pink or graphite on someone else's Mac and
+/// stops matching the app at all.
+struct LSToolbarButton: View {
+    let systemName: String
+    var enabled: Bool = true
+    var tint: Color = .lsPrimary
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 17, weight: .regular))
+                .foregroundStyle(tint)
+        }
+        .tint(tint)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.35)
+    }
+}
+
+/// Light rim above, shade below — makes a filled Circle read as a sphere
+/// rather than a flat disc. Used by the period color dots and the color
+/// picker swatches, which had identical copies of this gradient.
+struct LSSphereRim: ViewModifier {
+    func body(content: Content) -> some View {
+        content.overlay {
+            Circle().strokeBorder(
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.35),
+                        Color.black.opacity(0.20)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                ),
+                lineWidth: 1
+            )
+        }
+    }
+}
+
 struct LSPressEffect: ViewModifier {
     @State private var pressed = false
     var action: () -> Void
@@ -404,6 +460,10 @@ extension View {
     /// Pressed-in rim for circular chips — see LSRecessedCircle.
     func lsRecessedCircle(strength: Double = 1.0) -> some View {
         modifier(LSRecessedCircle(strength: strength))
+    }
+    /// Raised rim for filled circles — see LSSphereRim.
+    func lsSphereRim() -> some View {
+        modifier(LSSphereRim())
     }
     func lsPressEffect(action: @escaping () -> Void) -> some View {
         modifier(LSPressEffect(action: action))

@@ -150,7 +150,10 @@ struct HomeworkPopup: View {
                 .fill(Color.lsSurface)
                 .overlay {
                     RoundedRectangle(cornerRadius: LS.radiusXl, style: .continuous)
-                        .strokeBorder(Color.lsPrimary.opacity(0.08), lineWidth: 0.5)
+                        .strokeBorder(
+                            Color.lsPrimary.opacity(LS.hairlineOpacity),
+                            lineWidth: LS.hairlineWidth
+                        )
                 }
         }
         .shadow(color: .black.opacity(0.35), radius: 40, y: 8)
@@ -176,7 +179,7 @@ struct HomeworkPopup: View {
                     Circle()
                         .fill(Color.paletteColor(for: config))
                         .frame(width: 10, height: 10)
-                        .overlay { Circle().strokeBorder(Color.lsPrimary.opacity(0.12), lineWidth: 1) }
+                        .lsSphereRim()
                 } else {
                     Circle()
                         .fill(Color.lsSurfaceRaised)
@@ -347,7 +350,7 @@ struct HomeworkPopup: View {
             // Lunch and Break are "in session" but aren't classes, so their
             // period-number parse yields nil and this lands on None.
             return enabledPeriodID(
-                state.currentSlot.flatMap { periodNumber(from: $0.period.name) }
+                state.currentSlot.flatMap { ScheduleEngine.periodNumber(from: $0.period.name) }
             )
 
         case .betweenPeriods:
@@ -366,7 +369,7 @@ struct HomeworkPopup: View {
             schedule: store.bellSchedule(for: dayKey),
             settings: settings
         )
-        return enabledPeriodID(slot.flatMap { periodNumber(from: $0.period.name) })
+        return enabledPeriodID(slot.flatMap { ScheduleEngine.periodNumber(from: $0.period.name) })
     }
 
     /// Only pre-select a period the student actually has configured and
@@ -383,12 +386,6 @@ struct HomeworkPopup: View {
         let f = DateFormatter()
         f.dateFormat = "MMM d"
         return f.string(from: date)
-    }
-
-    private func periodNumber(from name: String) -> Int? {
-        let parts = name.split(separator: " ")
-        guard parts.count == 2, parts[0].lowercased() == "period" else { return nil }
-        return Int(parts[1])
     }
 }
 

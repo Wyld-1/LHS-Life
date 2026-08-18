@@ -457,7 +457,7 @@ private struct DayColumn: View {
     private var visiblePeriods: [(period: Period, start: Date, end: Date)] {
         guard let s = schedule else { return [] }
         return s.periods.compactMap { p -> (Period, Date, Date)? in
-            if let num = periodNum(p.name),
+            if let num = ScheduleEngine.periodNumber(from: p.name),
                settings.config(for: num)?.isEnabled == false { return nil }
             guard let start = p.startDate(on: s.date),
                   let end   = p.endDate(on: s.date) else { return nil }
@@ -601,7 +601,8 @@ private struct DayColumn: View {
                     onTap: {
                         onSelect(.period(
                             item.period,
-                            config: periodNum(item.period.name).flatMap { settings.config(for: $0) },
+                            config: ScheduleEngine.periodNumber(from: item.period.name)
+                                .flatMap { settings.config(for: $0) },
                             start: item.start,
                             end: item.end,
                             scheduleLabel: schedule?.scheduleType.scheduleLabel ?? "schedule"
@@ -667,12 +668,6 @@ private struct DayColumn: View {
         }
         .onDisappear { timer?.invalidate(); timer = nil }
     }
-
-    private func periodNum(_ name: String) -> Int? {
-        let p = name.split(separator: " ")
-        guard p.count == 2, p[0].lowercased() == "period" else { return nil }
-        return Int(p[1])
-    }
 }
 
 // MARK: - Period Block
@@ -695,11 +690,7 @@ private struct PeriodBlock: View {
         // instead of the block adapting to the label.
         rawHeight
     }
-    private var num: Int? {
-        let p = period.name.split(separator: " ")
-        guard p.count == 2, p[0].lowercased() == "period" else { return nil }
-        return Int(p[1])
-    }
+    private var num: Int? { ScheduleEngine.periodNumber(from: period.name) }
     private var config: PeriodConfig? { num.flatMap { settings.config(for: $0) } }
     // lsSecondary, not lsTertiary, for unnumbered slots (Lunch, Break).
     // lsTertiary is #4A5168 — at a 0.30 stroke over the near-black canvas it

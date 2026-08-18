@@ -365,24 +365,6 @@ struct ScheduleHeaderPill: View {
         return "\(label) at \(ScheduleEngine.timeString(event.startDate))"
     }
 
-    private var todayEvent: SchoolEvent? {
-        let dayKey = DateFormatter.isoDay.string(from: now)
-        return store.events(on: dayKey).first {
-            $0.category != .schedules &&
-            $0.title.trimmingCharacters(in: .whitespaces).lowercased() != "summer school"
-        }
-    }
-
-    private var tomorrowEvent: SchoolEvent? {
-        let cal = Calendar.current
-        guard let tom = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return nil }
-        let dayKey = DateFormatter.isoDay.string(from: tom)
-        return store.events(on: dayKey).first {
-            $0.category != .schedules &&
-            $0.title.trimmingCharacters(in: .whitespaces).lowercased() != "summer school"
-        }
-    }
-
     private var orientationDateLabel: String? {
         guard let orientation = orientationEvent else { return nil }
         let cal = Calendar.current

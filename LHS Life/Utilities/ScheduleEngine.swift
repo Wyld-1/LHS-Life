@@ -199,18 +199,26 @@ enum ScheduleEngine {
     private static func visiblePeriods(from schedule: BellSchedule, settings: UserSettings) -> [Period] {
         schedule.periods.filter { period in
             // Special rows (Break, Lunch) are always shown
-            guard let periodNum = extractPeriodNumber(from: period.name) else { return true }
+            guard let periodNum = periodNumber(from: period.name) else { return true }
             return settings.config(for: periodNum)?.isEnabled ?? true
         }
     }
 
-    private static func extractPeriodNumber(from name: String) -> Int? {
-        // "Period 3" → 3,  "Break" → nil,  "Lunch" → nil
+    /// "Period 3" → 3.  "Break" / "Lunch" / anything else → nil.
+    ///
+    /// SINGLE SOURCE OF TRUTH for this parse. It previously existed in four
+    /// places — here, DayColumn, PeriodBlock, and HomeworkPopup — each with
+    /// its own copy. They agreed, but a divergence would have been nasty and
+    /// silent: the homework popup could pre-select a different class than the
+    /// grid was showing, with nothing visibly broken.
+    ///
+    /// Deliberately strict: exactly two space-separated components, the first
+    /// case-insensitively "period", the second a plain Int. "Period 3A" and
+    /// "Zero Period" both return nil rather than guessing.
+    static func periodNumber(from name: String) -> Int? {
         let parts = name.split(separator: " ")
-        if parts.count == 2, parts[0].lowercased() == "period", let n = Int(parts[1]) {
-            return n
-        }
-        return nil
+        guard parts.count == 2, parts[0].lowercased() == "period" else { return nil }
+        return Int(parts[1])
     }
 
     private static func makeActiveSlot(
@@ -218,7 +226,7 @@ enum ScheduleEngine {
         settings: UserSettings,
         schedule: BellSchedule
     ) -> ActiveSlot {
-        let periodNum = extractPeriodNumber(from: slot.period.name)
+        let periodNum = periodNumber(from: slot.period.name)
         let config    = periodNum.flatMap { settings.config(for: $0) }
         return ActiveSlot(period: slot.period, config: config, startDate: slot.start, endDate: slot.end)
     }
