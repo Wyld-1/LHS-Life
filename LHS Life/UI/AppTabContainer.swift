@@ -182,6 +182,20 @@ struct AppTabContainer: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsSheetView(settings: settings)
+                // Environment is re-injected explicitly rather than inherited.
+                // On iOS a sheet inherits the presenting view's environment,
+                // which is why this worked on iPhone and iPad. On macOS the
+                // sheet is hosted outside that chain, the inheritance breaks,
+                // and SettingsSheetView's @Environment(CalendarStore.self)
+                // traps with "No Observable object of type CalendarStore
+                // found."
+                //
+                // Same reason iPadRootView already re-injects store/settings
+                // into HomeworkPopup — this sheet just never got the same
+                // treatment.
+                .environment(store)
+                .environment(settings)
+                .environment(calendarUI)
                 .presentationDragIndicator(.visible)
                 .presentationBackground(Color.lsSurface)
         }

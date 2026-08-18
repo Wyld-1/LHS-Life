@@ -1142,7 +1142,6 @@ private struct MonthGrid: View {
 
     private let cal = Calendar.current
     private let today = Calendar.current.startOfDay(for: Date())
-    private let dayWidth: CGFloat = UIScreen.main.bounds.width / 7
 
     private var monthTitle: String {
         let f = DateFormatter()

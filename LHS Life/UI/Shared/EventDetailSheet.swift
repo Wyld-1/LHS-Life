@@ -110,10 +110,35 @@ enum EventDetailItem: Identifiable {
     var hasLongDescription: Bool { (description?.count ?? 0) > 280 }
 }
 
+/// Sizes the sheet to its content, capped at 85% of whatever space the sheet
+/// actually has.
+///
+/// `context.maxDetentValue` is the real container height — which is why this
+/// exists instead of the `UIScreen.main.bounds.height * 0.85` it replaced.
+/// UIScreen is the whole DISPLAY, not the sheet's container, so in iPad Split
+/// View the old cap could exceed 100% of the available height and silently
+/// stop clamping.
+///
+/// The measured content height arrives through a static rather than an
+/// instance property because `height(in:)` is a static requirement of the
+/// protocol. That's ugly but contained: only EventDetailSheet writes it, and
+/// only ever from the main actor.
+struct ContentFitDetent: CustomPresentationDetent {
+    @MainActor static var measuredHeight: CGFloat = 0
+
+    static func height(in context: Context) -> CGFloat? {
+        let ceiling = context.maxDetentValue * 0.85
+        let measured = MainActor.assumeIsolated { measuredHeight }
+        // Floor keeps very short items (a period with a one-line note) from
+        // opening as a sliver.
+        return min(max(measured, 240), ceiling)
+    }
+}
+
 struct EventDetailSheet: View {
     let item: EventDetailItem
 
-    /// Measured height of the scrollable content. Drives a custom detent so
+    /// Measured height of the scrollable content. Drives the custom detent so
     /// the sheet opens exactly tall enough to show the description AND clear
     /// the floating Save button — previously a short two-line description
     /// forced a drag to .large just to read the last line.
@@ -123,19 +148,6 @@ struct EventDetailSheet: View {
     /// floats over the scroll view rather than sitting in it, so its height
     /// isn't part of contentHeight and has to be added back.
     private let buttonClearance: CGFloat = 96
-
-    /// Never open taller than this fraction of the screen — past that the
-    /// content is long enough that .large is the honest answer, and the user
-    /// can drag there.
-    private var maxOpenHeight: CGFloat {
-        (UIScreen.main.bounds.height * 0.85)
-    }
-
-    private var openHeight: CGFloat {
-        // Floor keeps very short items (a period with a one-line note) from
-        // opening as a sliver.
-        min(max(contentHeight + buttonClearance, 240), maxOpenHeight)
-    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -192,7 +204,10 @@ struct EventDetailSheet: View {
                 // Only grow. Once the sheet is open the ScrollView reports its
                 // own (clipped) height rather than the content's, so tracking
                 // every change would shrink the detent out from under the user.
-                if height > contentHeight { contentHeight = height }
+                if height > contentHeight {
+                    contentHeight = height
+                    ContentFitDetent.measuredHeight = height + buttonClearance
+                }
             }
 
             SaveToCalendarButton(item: item)
@@ -205,10 +220,9 @@ struct EventDetailSheet: View {
         }
         .presentationDragIndicator(.visible)
         .presentationBackground(.regularMaterial)
-        // Self-sizing: opens exactly tall enough for the content plus the
-        // floating Save button, capped at 85% of screen. .large stays
-        // available by dragging for genuinely long descriptions.
-        .presentationDetents([.height(openHeight), .large])
+        // Self-sizing against the sheet's real container (see ContentFitDetent).
+        // .large stays available by dragging for long descriptions.
+        .presentationDetents([.custom(ContentFitDetent.self), .large])
     }
 }
 
