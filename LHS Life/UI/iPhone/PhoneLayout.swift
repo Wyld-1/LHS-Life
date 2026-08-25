@@ -127,6 +127,12 @@ struct PhoneLayout: View {
                     .transition(.opacity.animation(.easeInOut(duration: 0.4)))
                     .zIndex(20)
             }
+
+            // Above everything, launch screen included: a confirmation is a
+            // direct response to something the user just did, and it's
+            // non-interactive, so nothing is blocked by putting it on top.
+            LSConfirmationOverlay()
+                .zIndex(30)
         }
         .background(Color.lsBackground)
         .sheet(isPresented: $showContacts) {

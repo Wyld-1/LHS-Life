@@ -11,6 +11,7 @@
 
 import Foundation
 import ActivityKit
+import OSLog
 
 enum PushTokenService {
 
@@ -23,6 +24,51 @@ enum PushTokenService {
         let new = UUID().uuidString
         UserDefaults.standard.set(new, forKey: key)
         return new
+    }
+
+    // MARK: - APNs environment
+    //
+    // Derived from the ACTUAL aps-environment entitlement, not from #if DEBUG.
+    //
+    // Those are independent switches: aps-environment comes from the
+    // $(APS_ENVIRONMENT) build setting and the provisioning profile, while
+    // DEBUG comes from the build configuration. A Release build run from
+    // Xcode is signed with a development profile — so it gets a SANDBOX
+    // token while #if DEBUG reports "production". The worker then routes to
+    // api.push.apple.com, APNs answers 400 BadDeviceToken, and the worker
+    // deletes the device from its registry — killing updates for the rest of
+    // the day, silently.
+    //
+    // embedded.mobileprovision is present in development, ad-hoc, and
+    // TestFlight-from-Xcode builds; the App Store strips it. So: no profile
+    // means a real App Store build (production). A profile whose
+    // aps-environment is "development" means sandbox. Anything else is
+    // production.
+    static var apnsEnvironment: String {
+        guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
+              let data = try? Data(contentsOf: url),
+              // isoLatin1, NOT ascii: the file is a binary CMS blob and
+              // .ascii decoding returns nil on any byte >127 — so the
+              // original version of this check silently failed on every
+              // build and fell through to "production". isoLatin1 maps all
+              // 256 byte values, so the embedded plist text survives.
+              let raw = String(data: data, encoding: .isoLatin1)
+        else {
+            LHSLogger.liveActivity.notice("apnsEnvironment: no embedded profile → production (App Store build)")
+            return "production"
+        }
+
+        guard let range = raw.range(of: "<key>aps-environment</key>") else {
+            // Profile present but no push entitlement at all — Activity.request
+            // with pushType: .token will fail. Report production and let the
+            // worker's fallback sort it out rather than guessing.
+            LHSLogger.liveActivity.error("apnsEnvironment: profile has NO aps-environment entitlement")
+            return "production"
+        }
+        let tail = raw[range.upperBound...].prefix(200)
+        let environment = tail.contains("development") ? "sandbox" : "production"
+        LHSLogger.liveActivity.notice("apnsEnvironment: profile says \(environment, privacy: .public)")
+        return environment
     }
 
     // MARK: - Register
@@ -54,11 +100,7 @@ enum PushTokenService {
             let transitions: [Int]   // slotStartMinutes for each period start
             let endMinutes: Int      // last period's end time — triggers the dismissal push
         }
-        #if DEBUG
-        let apnsEnvironment = "sandbox"
-        #else
-        let apnsEnvironment = "production"
-        #endif
+        let apnsEnvironment = Self.apnsEnvironment
         let cal = Calendar.current
         let transitions = periods.map {
             cal.component(.hour, from: $0.startDate) * 60 + cal.component(.minute, from: $0.startDate)

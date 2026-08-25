@@ -12,6 +12,7 @@
 import Foundation
 import ActivityKit
 import UserNotifications
+import OSLog
 
 @MainActor
 @Observable
@@ -26,11 +27,29 @@ final class LiveActivityService {
     // MARK: - Reconnect (call on app launch/foreground)
     // Restores currentActivity from ActivityKit if the app was suspended.
 
+    /// True when a Live Activity is currently running.
+    var isRunning: Bool { currentActivity != nil }
+
+    /// Set when the user taps the "Start Live Activities" notification
+    /// action. Consumed on the next foreground so the confirmation overlay
+    /// appears once the app is actually on screen — the action itself may
+    /// fire while the app is backgrounded, where an overlay would be lost.
+    var pendingStartConfirmation = false
+
+    /// Why the last startIfNeeded call declined to start, phrased for the
+    /// user rather than the log. nil after a successful start (or when one
+    /// was already running).
+    ///
+    /// Separate from the LHSLogger lines on purpose: those name internal
+    /// state ("liveActivityEffectivelyEnabled false (mode: .off…)") and are
+    /// for us. These are for a sophomore reading a card on their phone.
+    private(set) var lastStartFailure: String?
+
     func reconnect() {
         guard currentActivity == nil else { return }
         currentActivity = Activity<ScheduleActivityAttributes>.activities.first
         if let a = currentActivity {
-            print("[LiveActivity] Reconnected to existing activity — id: \(a.id)")
+            LHSLogger.liveActivity.notice("Reconnected to existing activity — id: \(a.id, privacy: .public)")
         }
     }
 
@@ -39,29 +58,39 @@ final class LiveActivityService {
     func startIfNeeded(schedule: BellSchedule?, settings: UserSettings) {
         reconnect()
         guard currentActivity == nil else {
-            print("[LiveActivity] startIfNeeded bailed — activity already running (id: \(currentActivity!.id))")
+            LHSLogger.liveActivity.notice("bail: activity already running (id: \(self.currentActivity!.id, privacy: .public))")
+            // Already running is a success from the user's point of view —
+            // they asked for a Live Activity and there is one.
+            lastStartFailure = nil
             return
         }
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
-            print("[LiveActivity] startIfNeeded bailed — activities not enabled")
+            LHSLogger.liveActivity.error("bail: activities not enabled in system settings")
+            lastStartFailure = "Turn on Live Activities in iPhone Settings"
             return
         }
         let scheduleType = schedule?.scheduleType
         guard settings.liveActivityEffectivelyEnabled(scheduleType: scheduleType) else {
-            print("[LiveActivity] startIfNeeded bailed — liveActivityEffectivelyEnabled returned false (type: \(String(describing: scheduleType)))")
+            LHSLogger.liveActivity.error(
+                "bail: liveActivityEffectivelyEnabled false (mode: \(String(describing: settings.liveActivityMode), privacy: .public), type: \(String(describing: scheduleType), privacy: .public))"
+            )
+            lastStartFailure = "Live Activities are turned off in LHS Life settings"
             return
         }
         guard let schedule = schedule else {
-            print("[LiveActivity] startIfNeeded bailed — schedule is nil")
+            LHSLogger.liveActivity.error("bail: schedule is nil")
+            lastStartFailure = "No bell schedule for today"
             return
         }
         let periods = buildSchedule(from: schedule, settings: settings)
         guard !periods.isEmpty else {
-            print("[LiveActivity] startIfNeeded bailed — periods empty after buildSchedule")
+            LHSLogger.liveActivity.error("bail: periods empty after buildSchedule")
+            lastStartFailure = "No classes enabled in your schedule"
             return
         }
         if let firstBell = periods.first?.startDate, firstBell.timeIntervalSinceNow > 3600 {
-            print("[LiveActivity] startIfNeeded bailed — first bell too far away (\(Int(firstBell.timeIntervalSinceNow / 60))min)")
+            LHSLogger.liveActivity.notice("bail: first bell too far away (\(Int(firstBell.timeIntervalSinceNow / 60))min)")
+            lastStartFailure = "School hasn't started yet today"
             return
         }
 
@@ -91,7 +120,8 @@ final class LiveActivityService {
                 pushType:   .token
             )
             currentActivity = activity
-            print("[LiveActivity] Started — id: \(activity.id), \(periods.count) periods")
+            lastStartFailure = nil
+            LHSLogger.liveActivity.notice("Started — id: \(activity.id, privacy: .public), \(periods.count) periods")
 
             // Cancel the "school starts soon" reminder — LA is already running
             let todayKey = DateFormatter.isoDay.string(from: Date())
@@ -111,7 +141,12 @@ final class LiveActivityService {
             let upcoming = periods.filter { $0.startDate > Date() }
             BellTransitionService.scheduleTransitions(for: upcoming)
         } catch {
-            print("[LiveActivity] Failed to start: \(error)")
+            // The likeliest TestFlight-only failure: pushType: .token requires
+            // the push entitlement, and an App Store provisioning profile
+            // generated before Push Notifications was enabled on the App ID
+            // won't carry it. Logged at .error so it survives to Console.app.
+            LHSLogger.liveActivity.error("Failed to start: \(String(describing: error), privacy: .public)")
+            lastStartFailure = "Couldn't start Live Activities"
         }
     }
 

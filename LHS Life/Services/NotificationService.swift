@@ -277,7 +277,7 @@ enum NotificationService {
 
             // Find the first period the user has enabled
             let firstEnabled = schedule.periods.first(where: { period in
-                guard let num = extractPeriodNumber(from: period.name) else { return false }
+                guard let num = ScheduleEngine.periodNumber(from: period.name) else { return false }
                 return settings.config(for: num)?.isEnabled ?? true
             })
             guard let firstPeriod = firstEnabled,
@@ -301,12 +301,6 @@ enum NotificationService {
                 trigger: trigger
             ))
         }
-    }
-
-    private static func extractPeriodNumber(from name: String) -> Int? {
-        let parts = name.split(separator: " ")
-        guard parts.count == 2, parts[0].lowercased() == "period", let n = Int(parts[1]) else { return nil }
-        return n
     }
 
     private static func timeString(_ date: Date) -> String {

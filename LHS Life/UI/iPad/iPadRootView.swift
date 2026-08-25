@@ -105,6 +105,10 @@ struct iPadRootView: View {
                     .transition(.opacity.animation(.easeInOut(duration: 0.4)))
                     .zIndex(20)
             }
+
+            // See PhoneLayout — same placement, same reasoning.
+            LSConfirmationOverlay()
+                .zIndex(30)
         }
     }
 

@@ -169,7 +169,7 @@ async function runPushCycle(env) {
       const isLast = firedMinutes === transitions[transitions.length - 1];
       console.log(`[Cron] ${device.deviceId} → transition at ${firedMinutes}min${isLast ? " (last)" : ""}`);
 
-      const { dead } = await sendAPNsUpdate(device.pushToken,
+      const { dead, environment: workingEnv } = await sendAPNsUpdate(device.pushToken,
         { slotStartMinutes: firedMinutes, isEnded: false },
         jwt, env, device.environment).catch(err => { console.log(`[APNs] ✗ ${device.deviceId}: ${err.message}`); return { dead: false }; });
 
@@ -177,6 +177,12 @@ async function runPushCycle(env) {
         console.log(`[APNs] 💀 ${device.deviceId} — dead token, removing`);
         await removeDevice(device.deviceId, env);
         continue;
+      }
+
+      // The retry found the other endpoint — persist it so subsequent pushes
+      // go straight there instead of paying the failed attempt every time.
+      if (workingEnv && workingEnv !== device.environment) {
+        await updateDeviceEnvironment(device.deviceId, workingEnv, env);
       }
 
       // Schedule the end push at this device's specific end time
@@ -193,10 +199,13 @@ async function runPushCycle(env) {
       const endAt = parseInt(pendingEnd);
       if (currentMinutes >= endAt && currentMinutes <= endAt + 10) {
         console.log(`[Cron] ${device.deviceId} — sending end push`);
-        const { dead } = await sendAPNsEnd(device.pushToken,
+        const { dead, environment: workingEnv } = await sendAPNsEnd(device.pushToken,
           { slotStartMinutes: 0, isEnded: true },
           jwt, env, device.environment).catch(err => { console.log(`[APNs] ✗ ${device.deviceId}: ${err.message}`); return { dead: false }; });
         if (dead) await removeDevice(device.deviceId, env);
+        else if (workingEnv && workingEnv !== device.environment) {
+          await updateDeviceEnvironment(device.deviceId, workingEnv, env);
+        }
         await env.TOKENS.delete(`endpush:${device.deviceId}:${todayKey}`);
       }
     }
@@ -243,14 +252,41 @@ async function sendAPNsEnd(pushToken, contentState, jwt, env, environment = "pro
 
 /**
  * Shared APNs HTTP/2 request.
- * Returns { dead: bool }.
+ * Returns { dead: bool, environment: string } — environment is the one that
+ * actually worked, which may differ from the one passed in.
  * Throws on non-dead errors.
+ *
+ * Environment fallback: a token is only valid against the endpoint matching
+ * the aps-environment entitlement it was minted under, and clients have
+ * historically mis-reported that (the app derived it from #if DEBUG rather
+ * than from the entitlement, so a Release-from-Xcode build claimed
+ * "production" while holding a sandbox token). Rather than trust the claim,
+ * a BadDeviceToken is retried once against the other host before the token is
+ * declared dead. Without this, one mis-labeled registration silently removed
+ * the device from the registry for the rest of the day.
  */
 async function sendAPNsPayload(pushToken, payload, jwt, env, environment = "production") {
+  const primary  = (environment === "sandbox") ? "sandbox" : "production";
+  const fallback = (primary === "sandbox") ? "production" : "sandbox";
+
+  let result = await sendToHost(pushToken, payload, jwt, env, primary);
+
+  // Only a token/topic mismatch is worth retrying — 410 Gone means the
+  // activity genuinely ended on the device, and that's final.
+  if (result.badToken) {
+    console.log(`[APNs] retrying on ${fallback} after BadDeviceToken on ${primary}`);
+    result = await sendToHost(pushToken, payload, jwt, env, fallback);
+    if (!result.dead && !result.badToken) {
+      return { dead: false, environment: fallback };
+    }
+  }
+
+  return { dead: result.dead || result.badToken, environment: primary };
+}
+
+/** Single APNs attempt against one host. Returns { dead, badToken }. */
+async function sendToHost(pushToken, payload, jwt, env, environment) {
   const bundleId = env.APNS_BUNDLE_ID;
-  // Route each token to the correct APNs endpoint based on the environment
-  // the app registered with. Debug/Xcode builds use sandbox tokens which are
-  // rejected by the production endpoint (400 BadDeviceToken).
   const host = (environment === "sandbox")
     ? "api.sandbox.push.apple.com"
     : "api.push.apple.com";
@@ -268,28 +304,41 @@ async function sendAPNsPayload(pushToken, payload, jwt, env, environment = "prod
     body: JSON.stringify(payload),
   });
 
-  // 410 Gone — activity ended on device; token permanently dead
+  // 410 Gone — activity ended on device; token permanently dead. Never retried.
   if (resp.status === 410) {
-    console.log(`[APNs] 410 Gone — activity ended on device`);
-    return { dead: true };
+    console.log(`[APNs] 410 Gone on ${environment} — activity ended on device`);
+    return { dead: true, badToken: false };
   }
 
-  // 400 — check if it's a bad token or a payload issue
   if (resp.status === 400) {
     const body = await resp.text();
     if (body.includes("BadDeviceToken") || body.includes("DeviceTokenNotForTopic")) {
-      console.log(`[APNs] 400 bad token — ${body}`);
-      return { dead: true };
+      console.log(`[APNs] 400 bad token on ${environment} — ${body}`);
+      return { dead: false, badToken: true };
     }
-    throw new Error(`APNs 400: ${body}`);
+    throw new Error(`APNs 400 (${environment}): ${body}`);
   }
 
   if (!resp.ok) {
     const body = await resp.text();
-    throw new Error(`APNs ${resp.status}: ${body}`);
+    throw new Error(`APNs ${resp.status} (${environment}): ${body}`);
   }
 
-  return { dead: false };
+  return { dead: false, badToken: false };
+}
+
+/** Persists a corrected environment so the next push skips the retry. */
+async function updateDeviceEnvironment(deviceId, environment, env) {
+  try {
+    const value = await env.TOKENS.get(`token:${deviceId}`, "json");
+    if (!value) return;
+    if (value.environment === environment) return;
+    value.environment = environment;
+    await env.TOKENS.put(`token:${deviceId}`, JSON.stringify(value));
+    console.log(`[Registry] ${deviceId} environment corrected → ${environment}`);
+  } catch (e) {
+    console.error(`[Registry] Failed to update environment for ${deviceId}: ${e.message}`);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

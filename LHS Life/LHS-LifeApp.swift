@@ -20,6 +20,8 @@ struct LaSalle_ScheduleApp: App {
     @State private var store    = CalendarStore.shared
     @State private var settings = UserSettings.shared
 
+    @Environment(\.scenePhase) private var scenePhase
+
     init() {
         // BGProcessingTask handler MUST be registered before first scene connects
         BellTransitionService.register()
@@ -51,23 +53,52 @@ struct LaSalle_ScheduleApp: App {
                 .task {
                     guard settings.accessApproved else { return }
                     await store.loadAll()
-                    let dayKey = DateFormatter.isoDay.string(from: Date())
-                    LiveActivityService.shared.startIfNeeded(
-                        schedule: store.bellSchedules[dayKey],
-                        settings: settings
-                    )
+                    startLiveActivity()
                 }
                 .onChange(of: settings.accessApproved) { _, approved in
                     guard approved else { return }
                     Task {
                         await store.loadAll()
-                        let dayKey = DateFormatter.isoDay.string(from: Date())
-                        LiveActivityService.shared.startIfNeeded(
-                            schedule: store.bellSchedules[dayKey],
-                            settings: settings
-                        )
+                        startLiveActivity()
                     }
                 }
+                // Foreground is where the notification-tap confirmation gets
+                // resolved. The notification action can fire while the app is
+                // backgrounded or not running at all, so the overlay can't be
+                // shown from the delegate — it's deferred to here, when there
+                // is actually a screen to show it on.
+                .onChange(of: scenePhase) { _, phase in
+                    guard phase == .active else { return }
+                    startLiveActivity()
+                    resolvePendingConfirmation()
+                }
+        }
+    }
+
+    @MainActor
+    private func startLiveActivity() {
+        let dayKey = DateFormatter.isoDay.string(from: Date())
+        LiveActivityService.shared.startIfNeeded(
+            schedule: store.bellSchedules[dayKey],
+            settings: settings
+        )
+    }
+
+    @MainActor
+    private func resolvePendingConfirmation() {
+        guard LiveActivityService.shared.pendingStartConfirmation else { return }
+        LiveActivityService.shared.pendingStartConfirmation = false
+
+        // Only confirm what actually happened. The Live Activity lives on the
+        // Lock Screen, so the user can't verify a claim made here — which
+        // makes a wrong "started" worse than saying nothing.
+        if LiveActivityService.shared.isRunning {
+            ConfirmationState.shared.show("Live Activities started")
+        } else {
+            ConfirmationState.shared.show(
+                LiveActivityService.shared.lastStartFailure ?? "Couldn't start Live Activities",
+                style: .warning
+            )
         }
     }
 }
@@ -86,9 +117,41 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                  didReceive response: UNNotificationResponse,
                                  withCompletionHandler handler: @escaping () -> Void) {
-        if response.actionIdentifier == NotificationService.enableLiveActivityActionID {
-            Task { @MainActor in UserSettings.shared.enableLiveActivityForToday() }
+        // Two ways in, and they must behave identically:
+        //   1. The "Show Today's Schedule" action button.
+        //   2. Tapping the notification BODY — the default action.
+        //
+        // Both the abnormal-schedule and the "School starts soon" reminder
+        // use this category, and both bodies say "Tap to…", so a plain tap
+        // promising action and delivering none was a broken promise. The
+        // default action previously fell through and just opened the app.
+        let isActionButton =
+            response.actionIdentifier == NotificationService.enableLiveActivityActionID
+        let isBodyTap =
+            response.actionIdentifier == UNNotificationDefaultActionIdentifier &&
+            response.notification.request.content.categoryIdentifier
+                == NotificationService.abnormalScheduleCategoryID
+
+        if isActionButton || isBodyTap {
+            Task { @MainActor in Self.beginLiveActivityFromNotification() }
         }
         handler()
+    }
+
+    /// Enables Live Activities for today, attempts the start, and flags the
+    /// confirmation for the next foreground.
+    @MainActor
+    private static func beginLiveActivityFromNotification() {
+        UserSettings.shared.enableLiveActivityForToday()
+        // Flag first, then attempt the start. Whichever path gets there —
+        // this one, or ContentView's .task on a cold launch — the flag is
+        // resolved on the next foreground.
+        LiveActivityService.shared.pendingStartConfirmation = true
+
+        let dayKey = DateFormatter.isoDay.string(from: Date())
+        LiveActivityService.shared.startIfNeeded(
+            schedule: CalendarStore.shared.bellSchedules[dayKey],
+            settings: UserSettings.shared
+        )
     }
 }
