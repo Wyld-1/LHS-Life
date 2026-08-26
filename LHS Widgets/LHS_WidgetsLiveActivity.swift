@@ -81,7 +81,9 @@ struct LaSalle_WidgetsLiveActivity: Widget {
                                         Spacer()
                                     }
                                 }
-                                if slot.isPassing, let passStart = slot.passingStartDate {
+                                if slot.isPreSchool {
+                                    SchedulePreviewBar(schedule: schedule, height: 6)
+                                } else if slot.isPassing, let passStart = slot.passingStartDate {
                                     LiveProgressBar(start: passStart, end: slot.startDate, color: color)
                                 } else {
                                     LiveProgressBar(start: slot.startDate, end: slot.endDate, color: color)
@@ -228,7 +230,19 @@ private func resolveSlot(
 }
 
 private func transitionDates(from schedule: [ScheduleActivityAttributes.ScheduledPeriod]) -> [Date] {
-    schedule.map { $0.startDate }
+    let starts = schedule.map { $0.startDate }
+    guard let firstBell = starts.first else { return [] }
+    // A TimelineView(.explicit:) schedule has no entry BEFORE its first date,
+    // so between the activity starting and the first bell there is nothing for
+    // it to render — and it falls forward to the first entry instead. tl.date
+    // then equals the first bell, which makes the time-based checks in
+    // resolveSlot believe Period 1 is already in session: activeSlot resolves
+    // to Period 1, isPreSchool computes false, and the view shows Period 1's
+    // END time instead of counting down to its start.
+    //
+    // Prepending an entry well before the first bell gives the timeline a
+    // window that actually covers the pre-school period.
+    return [firstBell.addingTimeInterval(-12 * 3600)] + starts
 }
 
 // MARK: - Lock Screen
@@ -240,7 +254,7 @@ private struct LockScreenView: View {
     var body: some View {
         TimelineView(.explicit(transitionDates(from: attributes.schedule))) { tl in
             if let slot = resolveSlot(at: tl.date, schedule: attributes.schedule, state: state, scheduleTypeName: attributes.scheduleTypeName) {
-                LockScreenContent(slot: slot)
+                LockScreenContent(slot: slot, schedule: attributes.schedule)
             }
         }
     }
@@ -248,6 +262,7 @@ private struct LockScreenView: View {
 
 private struct LockScreenContent: View {
     let slot: ActiveSlotInfo
+    let schedule: [ScheduleActivityAttributes.ScheduledPeriod]
 
     var body: some View {
         let color = Color(hex: slot.colorHex)
@@ -302,7 +317,11 @@ private struct LockScreenContent: View {
                 }
             }
 
-            if slot.isPassing, let passStart = slot.passingStartDate {
+            if slot.isPreSchool {
+                // Whole-day preview instead of a progress bar that would read
+                // 0% until the first bell.
+                SchedulePreviewBar(schedule: schedule)
+            } else if slot.isPassing, let passStart = slot.passingStartDate {
                 LiveProgressBar(start: passStart, end: slot.startDate, color: color)
             } else {
                 LiveProgressBar(start: slot.startDate, end: slot.endDate, color: color)
@@ -311,6 +330,71 @@ private struct LockScreenContent: View {
         .padding(16)
         .activityBackgroundTint(Color(hex: "#0D1220"))
         .activitySystemActionForegroundColor(.white)
+    }
+}
+
+// MARK: - Schedule Preview Bar
+//
+// Shown before school in place of the progress bar, which would otherwise sit
+// at 0% until the first bell. Renders the whole day as proportional colored
+// bands: [Period 1][break][Period 3][lunch]… — colors only, no labels.
+//
+// Reads attributes.schedule, which the app already writes at activity start,
+// so this needs no new state and no push. Gaps between slots (passing periods
+// the schedule doesn't model as their own entries) render as dim spacers so
+// the proportions stay honest.
+
+private struct SchedulePreviewBar: View {
+    let schedule: [ScheduleActivityAttributes.ScheduledPeriod]
+    var height: CGFloat = 8
+
+    private struct Band: Identifiable {
+        let id = UUID()
+        let fraction: Double
+        let color: Color?   // nil = gap
+    }
+
+    private var bands: [Band] {
+        guard let first = schedule.first, let last = schedule.last else { return [] }
+        let total = last.endDate.timeIntervalSince(first.startDate)
+        guard total > 0 else { return [] }
+
+        var result: [Band] = []
+        var cursor = first.startDate
+
+        for slot in schedule {
+            // Gap before this slot (passing time)
+            let gap = slot.startDate.timeIntervalSince(cursor)
+            if gap > 0 {
+                result.append(Band(fraction: gap / total, color: nil))
+            }
+            let duration = slot.endDate.timeIntervalSince(slot.startDate)
+            if duration > 0 {
+                result.append(Band(fraction: duration / total, color: Color(hex: slot.colorHex)))
+            }
+            cursor = slot.endDate
+        }
+        return result
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            HStack(spacing: 1) {
+                ForEach(bands) { band in
+                    Group {
+                        if let color = band.color {
+                            color
+                        } else {
+                            Color.white.opacity(0.10)
+                        }
+                    }
+                    .frame(width: max(1, geo.size.width * band.fraction))
+                }
+            }
+            .frame(height: height)
+            .clipShape(Capsule())
+        }
+        .frame(height: height)
     }
 }
 

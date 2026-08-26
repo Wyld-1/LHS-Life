@@ -45,11 +45,58 @@ final class LiveActivityService {
     /// for us. These are for a sophomore reading a card on their phone.
     private(set) var lastStartFailure: String?
 
+    /// Observes the running activity so we can tell, from the DEVICE side,
+    /// whether pushes are arriving at all.
+    ///
+    /// This is the missing half of the diagnosis: worker logs prove APNs
+    /// accepted a push, but only contentUpdates proves iOS delivered it and
+    /// ActivityKit applied it. If the worker says 200 and this logs nothing,
+    /// the failure is between APNs and the device (budget throttling, stale
+    /// token). If this logs an update and the Lock Screen still shows the old
+    /// period, the failure is in the widget's rendering — two very different
+    /// problems that look identical from the outside.
+    private func observeActivity(_ activity: Activity<ScheduleActivityAttributes>) {
+        Task { @MainActor in
+            for await content in activity.contentUpdates {
+                LHSLogger.liveActivity.notice(
+                    "contentUpdate received — slotStartMinutes: \(content.state.slotStartMinutes), isEnded: \(content.state.isEnded)"
+                )
+            }
+            LHSLogger.liveActivity.notice("contentUpdates stream ended")
+        }
+
+        Task { @MainActor in
+            for await state in activity.activityStateUpdates {
+                LHSLogger.liveActivity.notice("activityState → \(String(describing: state), privacy: .public)")
+            }
+        }
+    }
+
     func reconnect() {
         guard currentActivity == nil else { return }
         currentActivity = Activity<ScheduleActivityAttributes>.activities.first
         if let a = currentActivity {
             LHSLogger.liveActivity.notice("Reconnected to existing activity — id: \(a.id, privacy: .public)")
+            // Reconnecting after a relaunch must re-observe, or a warm-start
+            // day produces no device-side evidence at all.
+            observeActivity(a)
+
+            // Re-register on reconnect.
+            //
+            // startIfNeeded bails right after this when an activity is already
+            // running, so without this the ONLY registration paths are a cold
+            // start and a token rotation observed in the same process. A
+            // rebuild, a relaunch, or an app the user killed and reopened all
+            // left the worker holding whatever it was told hours ago — stale
+            // transitions after a schedule change, and no re-registration if
+            // the push token rotated while the app wasn't running.
+            //
+            // attributes.schedule is the same [ScheduledPeriod] the activity
+            // was started with, so the transitions sent stay consistent.
+            PushTokenService.observeTokenUpdates(for: a, periods: a.attributes.schedule)
+            if let token = a.pushToken {
+                Task { await PushTokenService.register(token: token, periods: a.attributes.schedule) }
+            }
         }
     }
 
@@ -122,6 +169,7 @@ final class LiveActivityService {
             currentActivity = activity
             lastStartFailure = nil
             LHSLogger.liveActivity.notice("Started — id: \(activity.id, privacy: .public), \(periods.count) periods")
+            observeActivity(activity)
 
             // Cancel the "school starts soon" reminder — LA is already running
             let todayKey = DateFormatter.isoDay.string(from: Date())

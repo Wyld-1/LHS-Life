@@ -21,9 +21,35 @@
  *   TOKENS           — KV namespace binding (set in wrangler.toml or dashboard)
  *
  * KV structure:
- *   token:{deviceId}        → { pushToken, environment, transitions, endMinutes, updatedAt }
- *   endpush:{deviceId}:{YYYY-MM-DD} → endMinutes (set when last period fires; auto-expires)
- *   registry:devices        → JSON array of active deviceIds (avoids list() quota burn in push cycle)
+ *   token:{deviceId}   → { deviceId, pushToken, environment, transitions,
+ *                        endMinutes, updatedAt }
+ *                      Written ONLY by that device's own registration, with
+ *                      metadata { u: updatedAt } so reconciliation can spot a
+ *                      change from list() alone, without reading the value.
+ *   registry:devices   → JSON array of all the above records. Written ONLY by
+ *                        the cron. Never written by a request handler.
+ *
+ * WHY THIS SHAPE — two separate problems:
+ *
+ * 1. READS. The push cycle used to read token:{deviceId} for every device
+ *    every minute, plus an endpush:{id}:{date} key each: 1 + 2N reads × 1440
+ *    minutes against a 100,000/day free-tier cap put the ceiling at ~34
+ *    devices, and KV caps are hard failures rather than throttling. Reading
+ *    one blob makes the cycle 1,440 reads/day regardless of device count.
+ *
+ * 2. WRITES RACING. Having each registration read-modify-write the shared
+ *    blob loses records: KV is eventually consistent, reads are edge-cached
+ *    for up to 60s by default, and concurrent writes to one key silently
+ *    overwrite each other (last write wins). With a few hundred handsets
+ *    registering across a morning that is regular data loss, not a rare edge
+ *    case. Cloudflare's own guidance is to funnel writes for a key through a
+ *    single process.
+ *
+ *    So: devices write only their OWN key (one writer each, no contention),
+ *    and the cron — a single scheduled process — owns the blob. It reconciles
+ *    every 2 minutes via list(), which is capped at 1,000/day: 720 fits, 1440
+ *    would not. The cost is that a newly registered device may wait up to two
+ *    minutes to be picked up.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -48,6 +74,30 @@ export default {
       return new Response("OK", { status: 200 });
     }
 
+    // Manual recovery: rebuilds registry:devices from the token:{id} backups.
+    // Uses list() (1,000/day cap), so it is never called automatically.
+    if (request.method === "GET" && url.pathname === "/rebuild") {
+      const count = await rebuildRegistry(env);
+      return new Response(`Rebuilt registry with ${count} device(s)`, { status: 200 });
+    }
+
+    // Diagnostics: how many devices are registered, without exposing tokens.
+    if (request.method === "GET" && url.pathname === "/status") {
+      const devices = await readRegistry(env);
+      return new Response(JSON.stringify({
+        deviceCount: devices.length,
+        devices: devices.map(d => ({
+          deviceId: d.deviceId,
+          environment: d.environment,
+          appVersion: d.appVersion ?? null,
+          osVersion: d.osVersion ?? null,
+          transitions: (d.transitions ?? []).length,
+          endMinutes: d.endMinutes,
+          updatedAt: d.updatedAt,
+        })),
+      }, null, 2), { status: 200, headers: { "content-type": "application/json" } });
+    }
+
     return new Response("LHS Life Push Worker", { status: 200 });
   },
 
@@ -67,7 +117,7 @@ async function handleRegister(request, env) {
     return new Response("Bad JSON", { status: 400 });
   }
 
-  const { deviceId, pushToken, environment, transitions, endMinutes } = body;
+  const { deviceId, pushToken, environment, transitions, endMinutes, appVersion, osVersion } = body;
   if (!deviceId || !pushToken) {
     return new Response("Missing deviceId or pushToken", { status: 400 });
   }
@@ -79,28 +129,37 @@ async function handleRegister(request, env) {
     return new Response(msg, { status: 500 });
   }
 
+  const record = {
+    deviceId,
+    pushToken,
+    environment: environment ?? "production",
+    transitions: transitions ?? null,
+    endMinutes:  endMinutes  ?? null,
+    // Build identity — app build and iOS version only, no hardware model.
+    // Optional: older clients don't send these.
+    appVersion: appVersion ?? null,
+    osVersion:  osVersion  ?? null,
+    updatedAt: new Date().toISOString(),
+  };
+
   try {
-    await env.TOKENS.put(`token:${deviceId}`, JSON.stringify({
-      pushToken,
-      environment: environment ?? "production",
-      transitions: transitions ?? null,
-      endMinutes:  endMinutes  ?? null,
-      updatedAt: new Date().toISOString(),
-    }));
-    // Maintain the device registry so getAllTokens can use a single get() instead of list()
-    const regRaw = await env.TOKENS.get("registry:devices");
-    const regIds = regRaw ? JSON.parse(regRaw) : [];
-    if (!regIds.includes(deviceId)) {
-      regIds.push(deviceId);
-      await env.TOKENS.put("registry:devices", JSON.stringify(regIds));
-    }
+    // The device writes ONLY its own key. No read-modify-write of the shared
+    // registry blob here — that was the race. The cron picks this up within
+    // two minutes via reconcileRegistry().
+    //
+    // The updatedAt stamp is duplicated into KV metadata so reconciliation
+    // can detect a changed record straight from list(), without spending a
+    // read on every device to find the one that moved.
+    await env.TOKENS.put(`token:${deviceId}`, JSON.stringify(record), {
+      metadata: { u: record.updatedAt },
+    });
   } catch (e) {
     const msg = `KV write failed: ${e.message}`;
     console.error(`[Register] ${msg}`);
     return new Response(msg, { status: 500 });
   }
 
-  console.log(`[Register] Device ${deviceId} registered (${environment ?? "production"})`);
+  console.log(`[Register] Device ${deviceId} registered (${environment ?? "production"}) — ${(transitions ?? []).length} transitions, build ${appVersion ?? "?"} on iOS ${osVersion ?? "?"}, live within 2min`);
   return new Response("OK", { status: 200 });
 }
 
@@ -113,16 +172,7 @@ async function handleUnregister(request, env) {
   const { deviceId } = body;
   if (!deviceId) return new Response("Missing deviceId", { status: 400 });
 
-  await env.TOKENS.delete(`token:${deviceId}`);
-  try {
-    const regRaw = await env.TOKENS.get("registry:devices");
-    if (regRaw) {
-      const ids = JSON.parse(regRaw).filter(id => id !== deviceId);
-      await env.TOKENS.put("registry:devices", JSON.stringify(ids));
-    }
-  } catch (e) {
-    console.error(`[Unregister] Registry update failed: ${e.message}`);
-  }
+  await removeDevice(deviceId, env);
   console.log(`[Unregister] Device ${deviceId} removed`);
   return new Response("OK", { status: 200 });
 }
@@ -142,15 +192,22 @@ async function runPushCycle(env) {
   // by the registry key, eliminating the 1k/day list quota concern.
   if (nowPT.dow === 0 || nowPT.dow === 6) return;
 
-  const tokens = await getAllTokens(env);
-  if (tokens.length === 0) {
+  // Reconcile on even minutes only. list() is capped at 1,000/day: every
+  // other minute is 720, every minute would be 1,440 and would start failing
+  // partway through the afternoon. On reconcile minutes the returned list is
+  // reused, so the blob is not read twice.
+  const devices = (nowPT.minutes % 2 === 0)
+    ? await reconcileRegistry(env)
+    : await readRegistry(env);
+
+  if (devices.length === 0) {
     console.log("[Cron] No registered devices");
     return;
   }
 
   const jwt = await getAPNsJWT(env);
 
-  for (const device of tokens) {
+  for (const device of devices) {
     const transitions = device.transitions ?? [];
     const endMinutes  = device.endMinutes  ?? null;
 
@@ -184,29 +241,24 @@ async function runPushCycle(env) {
       if (workingEnv && workingEnv !== device.environment) {
         await updateDeviceEnvironment(device.deviceId, workingEnv, env);
       }
-
-      // Schedule the end push at this device's specific end time
-      if (isLast && endMinutes !== null) {
-        await env.TOKENS.put(`endpush:${device.deviceId}:${todayKey}`,
-          String(endMinutes), { expirationTtl: 7200 });
-        console.log(`[Cron] ${device.deviceId} — end push scheduled at ${endMinutes}min`);
-      }
     }
 
-    // Check for a pending end push for this device
-    const pendingEnd = await env.TOKENS.get(`endpush:${device.deviceId}:${todayKey}`);
-    if (pendingEnd) {
-      const endAt = parseInt(pendingEnd);
-      if (currentMinutes >= endAt && currentMinutes <= endAt + 10) {
-        console.log(`[Cron] ${device.deviceId} — sending end push`);
-        const { dead, environment: workingEnv } = await sendAPNsEnd(device.pushToken,
+    // End-of-day dismissal.
+    //
+    // Fired directly off endMinutes rather than via an endpush:{id}:{date}
+    // key. That key cost one KV READ per device per minute (half the read
+    // budget) and one WRITE per device per day, purely to remember something
+    // already present in the record. The same 2-minute window used for
+    // transitions applies; a duplicate "end" event is harmless because iOS
+    // has already dismissed the activity and the second push is a no-op.
+    if (endMinutes !== null && endMinutes > 0) {
+      const endDiff = currentMinutes - endMinutes;
+      if (endDiff >= 0 && endDiff < 2) {
+        console.log(`[Cron] ${device.deviceId} — sending end push (${endMinutes}min)`);
+        const { dead } = await sendAPNsEnd(device.pushToken,
           { slotStartMinutes: 0, isEnded: true },
           jwt, env, device.environment).catch(err => { console.log(`[APNs] ✗ ${device.deviceId}: ${err.message}`); return { dead: false }; });
         if (dead) await removeDevice(device.deviceId, env);
-        else if (workingEnv && workingEnv !== device.environment) {
-          await updateDeviceEnvironment(device.deviceId, workingEnv, env);
-        }
-        await env.TOKENS.delete(`endpush:${device.deviceId}:${todayKey}`);
       }
     }
   }
@@ -310,6 +362,18 @@ async function sendToHost(pushToken, payload, jwt, env, environment) {
     return { dead: true, badToken: false };
   }
 
+  if (resp.status === 403) {
+    // Auth-class failure: the JWT is being rejected, not the token. Most
+    // often an environment-restricted .p8 (BadEnvironmentKeyInToken) or a
+    // Key ID that doesn't match the key file (InvalidProviderToken).
+    // Logged loudly and NOT swallowed as a dead token — killing the device
+    // registration over a server-side key problem is exactly backwards.
+    const body = await resp.text();
+    console.error(`[APNs] ⚠ 403 AUTH FAILURE on ${environment} — ${body}`);
+    console.error(`[APNs]   → check the .p8 key's environment + Key ID in Worker vars`);
+    return { dead: false, badToken: false };
+  }
+
   if (resp.status === 400) {
     const body = await resp.text();
     if (body.includes("BadDeviceToken") || body.includes("DeviceTokenNotForTopic")) {
@@ -324,17 +388,28 @@ async function sendToHost(pushToken, payload, jwt, env, environment) {
     throw new Error(`APNs ${resp.status} (${environment}): ${body}`);
   }
 
+  // Success is logged explicitly. Without this, "APNs accepted the push" and
+  // "we never got as far as sending" produce identical log output — silence —
+  // which is exactly the ambiguity that made the 403 take days to find.
+  // apns-id is Apple's own request identifier: quoting it in a support ticket
+  // or matching it against a device log is the only way to trace one push.
+  console.log(`[APNs] ✓ 200 on ${environment} — apns-id: ${resp.headers.get("apns-id") || "none"}`);
   return { dead: false, badToken: false };
 }
 
 /** Persists a corrected environment so the next push skips the retry. */
 async function updateDeviceEnvironment(deviceId, environment, env) {
   try {
+    // Write through the device's own key. The blob picks it up on the next
+    // reconcile via the metadata stamp — same path as a registration, so
+    // there's only ever one writer per key.
     const value = await env.TOKENS.get(`token:${deviceId}`, "json");
-    if (!value) return;
-    if (value.environment === environment) return;
+    if (!value || value.environment === environment) return;
     value.environment = environment;
-    await env.TOKENS.put(`token:${deviceId}`, JSON.stringify(value));
+    value.updatedAt = new Date().toISOString();
+    await env.TOKENS.put(`token:${deviceId}`, JSON.stringify(value), {
+      metadata: { u: value.updatedAt },
+    });
     console.log(`[Registry] ${deviceId} environment corrected → ${environment}`);
   } catch (e) {
     console.error(`[Registry] Failed to update environment for ${deviceId}: ${e.message}`);
@@ -349,6 +424,22 @@ async function updateDeviceEnvironment(deviceId, environment, env) {
 let jwtCache = { token: null, generatedAt: 0 };
 
 async function getAPNsJWT(env) {
+  // Fail loudly and specifically on missing config.
+  //
+  // Without this, an unset secret surfaces as
+  // "TypeError: Cannot read properties of undefined (reading 'replace')"
+  // from deep inside generateJWT — which says nothing about WHICH variable is
+  // missing, and buried the real cause for days. runPushCycle then throws
+  // before sending anything, so there are no [APNs] lines at all and the
+  // failure looks like silence rather than an error.
+  const required = ["APNS_PRIVATE_KEY", "APNS_KEY_ID", "APNS_TEAM_ID", "APNS_BUNDLE_ID"];
+  const missing = required.filter(k => !env[k]);
+  if (missing.length) {
+    throw new Error(
+      `APNs config missing: ${missing.join(", ")} \u2014 set these in the Worker's ` +
+      `Settings \u2192 Variables and Secrets, then redeploy.`
+    );
+  }
   const now = Math.floor(Date.now() / 1000);
   if (jwtCache.token && now - jwtCache.generatedAt < 45 * 60) {
     return jwtCache.token;
@@ -402,41 +493,132 @@ async function generateJWT(keyId, teamId, privateKeyPem) {
 // MARK: - KV helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function getAllTokens(env) {
-  // Uses a stored registry key instead of list() — list() has a 1,000/day free-tier quota;
-  // reads are capped at 100,000/day, giving 100× more headroom as users scale.
+/**
+ * Reads every device record in ONE KV read.
+ *
+ * Handles the legacy format transparently: registry:devices used to be an
+ * array of deviceId STRINGS, with the records themselves in token:{id}. If
+ * that shape is found it is migrated in place — N reads and one write, once —
+ * so an in-flight school day keeps working across the deploy without anyone
+ * re-registering.
+ */
+async function readRegistry(env) {
   const raw = await env.TOKENS.get("registry:devices");
   if (!raw) return [];
-  let deviceIds;
-  try { deviceIds = JSON.parse(raw); } catch { return []; }
-  const tokens = [];
-  for (const deviceId of deviceIds) {
+
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { return []; }
+  if (!Array.isArray(parsed) || parsed.length === 0) return [];
+
+  // New format: array of record objects.
+  if (typeof parsed[0] === "object" && parsed[0] !== null) {
+    return parsed.filter(d => d && d.deviceId && d.pushToken);
+  }
+
+  // Legacy format: array of deviceId strings — hydrate and migrate.
+  console.log(`[Registry] Legacy format detected — migrating ${parsed.length} device(s)`);
+  const records = [];
+  for (const deviceId of parsed) {
     const value = await env.TOKENS.get(`token:${deviceId}`, "json");
     if (value?.pushToken) {
-      tokens.push({
+      records.push({
         deviceId,
         pushToken:   value.pushToken,
         environment: value.environment ?? "production",
         transitions: value.transitions ?? null,
         endMinutes:  value.endMinutes  ?? null,
+        appVersion:  value.appVersion  ?? null,
+        osVersion:   value.osVersion   ?? null,
+        updatedAt:   value.updatedAt   ?? new Date().toISOString(),
       });
     }
   }
-  return tokens;
+  await env.TOKENS.put("registry:devices", JSON.stringify(records));
+  console.log(`[Registry] Migration complete — ${records.length} device(s) carried over`);
+  return records;
 }
 
-// Deletes a device's token and removes it from the registry.
+/** Replaces the whole registry blob. Cron-only — see the header note. */
+async function writeRegistry(devices, env) {
+  await env.TOKENS.put("registry:devices", JSON.stringify(devices));
+}
+
+/**
+ * Reconciles registry:devices against the token:{id} keys.
+ *
+ * The cron is the ONLY writer of the blob, which is what makes this race-free
+ * — there is exactly one scheduled invocation per minute, so no two processes
+ * modify the key concurrently.
+ *
+ * list() returns each key's metadata, so a device whose record changed is
+ * detected by comparing the metadata stamp against the blob — no read needed
+ * for unchanged devices. Only new or updated records cost a get().
+ *
+ * Returns the reconciled device list so the caller doesn't read it again.
+ */
+async function reconcileRegistry(env) {
+  const existing = await readRegistry(env);
+  const byId = new Map(existing.map(d => [d.deviceId, d]));
+
+  const next = [];
+  let hydrated = 0;
+  let cursor;
+
+  do {
+    const page = await env.TOKENS.list({ prefix: "token:", cursor });
+    for (const key of page.keys) {
+      const deviceId = key.name.slice("token:".length);
+      const stamp = key.metadata?.u ?? null;
+      const current = byId.get(deviceId);
+
+      // Unchanged and already known — carry it over, no read.
+      if (current && stamp && current.updatedAt === stamp) {
+        next.push(current);
+        continue;
+      }
+
+      const value = await env.TOKENS.get(key.name, "json");
+      hydrated++;
+      if (value?.pushToken) {
+        next.push({
+          deviceId,
+          pushToken:   value.pushToken,
+          environment: value.environment ?? "production",
+          transitions: value.transitions ?? null,
+          endMinutes:  value.endMinutes  ?? null,
+          appVersion:  value.appVersion  ?? null,
+          osVersion:   value.osVersion   ?? null,
+          updatedAt:   value.updatedAt   ?? new Date().toISOString(),
+        });
+      }
+    }
+    cursor = page.list_complete ? null : page.cursor;
+  } while (cursor);
+
+  // Write only when something actually moved — writes are the scarcer quota
+  // (1,000/day) and most reconcile passes are no-ops.
+  if (hydrated > 0 || next.length !== existing.length) {
+    await writeRegistry(next, env);
+    console.log(`[Registry] Reconciled — ${next.length} device(s), ${hydrated} hydrated`);
+  }
+
+  return next;
+}
+
+/**
+ * Rebuilds registry:devices from the token:{id} keys, ignoring the existing
+ * blob entirely. Manual recovery via GET /rebuild.
+ */
+async function rebuildRegistry(env) {
+  await env.TOKENS.put("registry:devices", JSON.stringify([]));
+  const devices = await reconcileRegistry(env);
+  console.log(`[Registry] Rebuilt — ${devices.length} device(s)`);
+  return devices.length;
+}
+
+// Deletes a device's token. The blob catches up on the next reconcile.
 async function removeDevice(deviceId, env) {
   await env.TOKENS.delete(`token:${deviceId}`);
-  try {
-    const raw = await env.TOKENS.get("registry:devices");
-    if (raw) {
-      const ids = JSON.parse(raw).filter(id => id !== deviceId);
-      await env.TOKENS.put("registry:devices", JSON.stringify(ids));
-    }
-  } catch (e) {
-    console.error(`[Registry] Failed to remove ${deviceId}: ${e.message}`);
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

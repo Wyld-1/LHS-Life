@@ -75,6 +75,11 @@ enum NotificationService {
         content.title = "Professional Dress Tomorrow"
         content.body  = "For \(event.title)."
         content.sound = .default
+        // Deliberately left .active. This fires at 9 PM about TOMORROW — if a
+        // student has a Focus on at 9 PM, breaking through it is presumptuous.
+        // Time Sensitive is a limited budget of user goodwill; spending it on
+        // something with twelve hours of lead time devalues it for the
+        // notifications that genuinely can't wait.
 
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
         try? await center.add(UNNotificationRequest(identifier: "dress-\(event.id)",
@@ -187,6 +192,23 @@ enum NotificationService {
         content.title = "Morning Announcements"
         content.body  = "You're doing announcements this morning!"
         content.sound = .default
+        // Time Sensitive: this fires 5 minutes before first period, and a
+        // student with a School Focus on — which is most of them — would
+        // otherwise get it silently, or batched into Notification Summary
+        // hours later. .active does NOT break through Focus.
+        //
+        // This and the two Student Store notifications are the ONLY Time
+        // Sensitive ones in the app. They share a property nothing else has:
+        // a five-minute window, after which the notification is worthless
+        // because the student is already late to a duty someone is counting
+        // on them for. Everything else — schedule changes, dress code, Live
+        // Activity nudges — is still useful whenever it's read.
+        //
+        // Requires the "Time Sensitive Notifications" capability in Xcode
+        // (Signing & Capabilities). No Apple approval needed — that's only
+        // Critical Alerts.
+        content.interruptionLevel = .timeSensitive
+        content.relevanceScore = 1.0
 
         let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
@@ -213,6 +235,8 @@ enum NotificationService {
         content.title = "Head to Student Store"
         content.body  = "Break starts in 5 minutes."
         content.sound = .default
+        content.interruptionLevel = .timeSensitive   // 5-minute warning — see announcements
+        content.relevanceScore = 1.0
 
         let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
@@ -231,6 +255,8 @@ enum NotificationService {
         content.title = "Head to Student Store"
         content.body  = "Lunch starts in 5 minutes."
         content.sound = .default
+        content.interruptionLevel = .timeSensitive   // 5-minute warning — see announcements
+        content.relevanceScore = 1.0
 
         let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
@@ -291,6 +317,11 @@ enum NotificationService {
             content.title = "School starts at \(timeStr)"
             content.body  = "Tap to start Live Activities."
             content.sound = .default
+            // .active, not .timeSensitive. This is a 30-minute-ahead nudge to
+            // start Live Activities — useful, but it can wait for the user to
+            // pick up their phone. Time Sensitive is reserved for the ASB
+            // notifications, where being five minutes late means missing the
+            // thing entirely.
             content.categoryIdentifier = abnormalScheduleCategoryID // reuse — same action
 
             let comps = cal.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
@@ -371,6 +402,8 @@ enum NotificationService {
         content.title = "Different Schedule Today"
         content.body  = "Tap to pin the bells to your Lock Screen."
         content.sound = .default
+        // .active — see the Live Activity reminder. Informational, and the
+        // schedule is still there to look at whenever they check.
         content.categoryIdentifier = abnormalScheduleCategoryID
 
         let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
