@@ -578,6 +578,10 @@ private struct DayColumn: View {
     /// Hard ceiling on side-by-side event columns. See layoutEvents.
     private static let maxColumns = 2
 
+    /// Fixed height for the Now row, so its centered line can be positioned
+    /// exactly on the current time. Must comfortably fit the "Now" pill.
+    private static let nowRowHeight: CGFloat = 16
+
     var body: some View {
         ZStack(alignment: .topLeading) {
             Color.clear.frame(width: width, height: Grid.totalHeight)
@@ -631,12 +635,22 @@ private struct DayColumn: View {
             }
 
             // Time scrubber — line with a "Now" capsule at the trailing
-            // end, replacing the old separate dot that used to live in the
-            // gutter. Line and capsule share one HStack so they vertically
-            // center on the same axis automatically via SwiftUI's default
-            // center alignment — the outer .offset(y:) positioning below is
-            // untouched from before, so the careful alignment work that
-            // already existed here carries over as-is.
+            // end. Line and capsule share one HStack so they vertically
+            // center on the same axis via SwiftUI's default center alignment.
+            //
+            // The row is given an EXPLICIT height and offset by half of it,
+            // because .offset(y:) positions a view's TOP edge while this row
+            // is taller than the line inside it. The "Now" pill is ~15pt tall
+            // (9pt text + 2pt padding each side); the line is 3pt and centers
+            // within that. So offsetting by Grid.y(now) alone put the TOP of
+            // the 15pt row on the current time and left the line itself ~7pt
+            // below it — and at Grid.ppm (1.1pt per minute) 7pt is about six
+            // minutes. The line crossed each hour rule roughly six minutes
+            // before the clock did, which is exactly the "runs early" symptom.
+            //
+            // Everything else on the grid (period blocks, event blocks, hour
+            // rules) is top-aligned, so only this row — the one thing that
+            // must center on its y — needed the correction.
             if isToday {
                 HStack(spacing: -4) {
                     Capsule()
@@ -653,8 +667,8 @@ private struct DayColumn: View {
                 }
                 .padding(.trailing, LS.sm)
                 .shadow(color: Color.lsDestructive, radius: 2)
-                .frame(width: width, alignment: .leading)
-                .offset(y: Grid.y(for: now, on: date))
+                .frame(width: width, height: Self.nowRowHeight, alignment: .leading)
+                .offset(y: Grid.y(for: now, on: date) - Self.nowRowHeight / 2)
                 .animation(.linear(duration: 1), value: now)
             }
         }

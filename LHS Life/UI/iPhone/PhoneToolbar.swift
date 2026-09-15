@@ -30,6 +30,10 @@ struct PhoneToolbarConfig {
     var onCycle: () -> Void = {}
     var canGoBack: Bool = false
     var onBack: () -> Void = {}
+    /// True while the CURRENT tab's web view is mid-navigation. Drives the
+    /// back button's swap to a spinner — the browser-like signal that
+    /// replaced blanking the whole page on every tap.
+    var isWebLoading: Bool = false
     var showSettingsBadge: Bool = false
     var onSettings: () -> Void = {}
     var onPhone: () -> Void = {}
@@ -68,10 +72,20 @@ struct PhoneToolbar: ViewModifier {
         }
     }
 
+    /// Only the wrapped-web tabs swap their contextual button for a spinner.
+    /// Events' zoom-out button has nothing to do with page loading.
+    private var isWebTab: Bool {
+        switch tab {
+        case .powerschool, .schoology, .lunch: return true
+        default:                               return false
+        }
+    }
+
     func body(content: Content) -> some View {
         content
             // No .navigationTitle — the principal item IS the title here.
             .navigationBarTitleDisplayMode(.inline)
+            .animation(.lsFade, value: config.isWebLoading)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     // suppressGlass: the bar already provides the surface.
@@ -85,12 +99,27 @@ struct PhoneToolbar: ViewModifier {
                     )
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    if let contextualSymbol {
+                    if isWebTab && config.isWebLoading {
+                        // Back button becomes the loading indicator.
+                        //
+                        // Deliberately occupies the SAME slot rather than
+                        // adding one: the toolbar keeps its exact geometry,
+                        // so nothing shifts as it appears and disappears.
+                        // Back is also the right control to borrow — it's
+                        // meaningless mid-navigation anyway.
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .controlSize(.small)
+                            .tint(Color.lsPrimary)
+                            .frame(width: 22, height: 22)
+                            .transition(.opacity)
+                    } else if let contextualSymbol {
                         LSToolbarButton(
                             systemName: contextualSymbol,
                             enabled: contextualEnabled,
                             action: contextualAction
                         )
+                        .transition(.opacity)
                     }
                 }
                 // ToolbarSpacer is the iOS 26 API that actually forces two

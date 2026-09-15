@@ -98,14 +98,14 @@ struct SettingsSheetView: View {
         ) {
             Button("Delete All Data", role: .destructive) {
                 HapticEngine.shared.success()
-                settings.deleteAllData()
+                DataResetService.deleteAllData(settings: settings)
             }
             Button("Sign Out", role: .destructive) {
                 HapticEngine.shared.success()
                 settings.signOut()
             }
         } message: {
-            Text("Sign Out clears your email and grad year. Delete All Data resets all customizations.")
+            Text("Sign Out clears your email and grad year. Delete All Data resets all customizations and signs you out of PowerSchool, Schoology, and lunch ordering.")
         }
     }
 
@@ -693,20 +693,29 @@ struct SettingsSheetView: View {
     // MARK: - Sign Out
 
     private var signOutSection: some View {
-        Button {
-            HapticEngine.shared.tap()
-            showSignOutDialog = true
-        } label: {
-            HStack {
-                Spacer()
-                Text("Sign Out")
-                    .font(.lsHeadline)
-                    .foregroundStyle(Color.lsDestructive)
-                Spacer()
+        VStack(spacing: LS.md) {
+            Button {
+                HapticEngine.shared.tap()
+                showSignOutDialog = true
+            } label: {
+                HStack {
+                    Spacer()
+                    Text("Sign Out")
+                        .font(.lsHeadline)
+                        .foregroundStyle(Color.lsDestructive)
+                    Spacer()
+                }
+                .padding(LS.md)
             }
-            .padding(LS.md)
+            .lsCard()
+
+            // Below the card, not inside it, so it reads as a footer rather
+            // than a second action next to Sign Out. Apple requires the
+            // policy to be reachable from inside the app.
+            Link("Privacy Policy", destination: AppConstants.privacyPolicyURL)
+                .font(.lsCaption)
+                .foregroundStyle(Color.lsSecondary)
         }
-        .lsCard()
     }
 }
 

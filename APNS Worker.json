@@ -192,11 +192,32 @@ async function runPushCycle(env) {
   // by the registry key, eliminating the 1k/day list quota concern.
   if (nowPT.dow === 0 || nowPT.dow === 6) return;
 
+  // Outside school hours there is nothing to push and nothing worth
+  // reconciling, so don't spend quota.
+  //
+  // This matters more than it looks: the KV free tier resets at 00:00 UTC,
+  // which is 5 PM PDT the PREVIOUS day. So by lunchtime local, 19 of the 24
+  // quota-hours are already gone — most of them overnight with an empty
+  // school. Running 24/7 spent ~570 list+write ops before first bell; a
+  // 6 AM–5 PM window cuts that to ~330, and the content-comparison check in
+  // reconcileRegistry drops the writes to roughly one per device per day.
+  //
+  // 6 AM is comfortably before the earliest registration (the Live Activity
+  // starts within an hour of first bell); 5 PM is well after the last one.
+  const hour = Math.floor(currentMinutes / 60);
+  if (hour < 6 || hour >= 17) {
+    return;
+  }
+
   // Reconcile on even minutes only. list() is capped at 1,000/day: every
   // other minute is 720, every minute would be 1,440 and would start failing
   // partway through the afternoon. On reconcile minutes the returned list is
   // reused, so the blob is not read twice.
-  const devices = (nowPT.minutes % 2 === 0)
+  //
+  // Keyed off currentMinutes (minutes since local midnight), which the
+  // transition matching below also uses — one source of truth for "what time
+  // is it" in this function.
+  const devices = (currentMinutes % 2 === 0)
     ? await reconcileRegistry(env)
     : await readRegistry(env);
 
@@ -577,10 +598,14 @@ async function reconcileRegistry(env) {
         continue;
       }
 
+      // No stamp means a record written before metadata was introduced. Read
+      // it, and re-put it WITH a stamp so this pass is the last one that has
+      // to. Costs one write once per stale record, rather than a read every
+      // two minutes indefinitely.
       const value = await env.TOKENS.get(key.name, "json");
       hydrated++;
       if (value?.pushToken) {
-        next.push({
+        const record = {
           deviceId,
           pushToken:   value.pushToken,
           environment: value.environment ?? "production",
@@ -589,17 +614,39 @@ async function reconcileRegistry(env) {
           appVersion:  value.appVersion  ?? null,
           osVersion:   value.osVersion   ?? null,
           updatedAt:   value.updatedAt   ?? new Date().toISOString(),
-        });
+        };
+        if (!stamp) {
+          await env.TOKENS.put(key.name, JSON.stringify(record), {
+            metadata: { u: record.updatedAt },
+          });
+          console.log(`[Registry] Backfilled metadata stamp for ${deviceId}`);
+        }
+        next.push(record);
       }
     }
     cursor = page.list_complete ? null : page.cursor;
   } while (cursor);
 
-  // Write only when something actually moved — writes are the scarcer quota
-  // (1,000/day) and most reconcile passes are no-ops.
-  if (hydrated > 0 || next.length !== existing.length) {
-    await writeRegistry(next, env);
-    console.log(`[Registry] Reconciled — ${next.length} device(s), ${hydrated} hydrated`);
+  // Write only when the CONTENT actually changed.
+  //
+  // Previously this triggered on `hydrated > 0`, which conflated "had to
+  // read a record" with "the record is different." A token: key written
+  // before metadata stamps existed has no stamp, so it gets re-hydrated on
+  // every single pass — and the old condition then rewrote the blob every
+  // two minutes, forever, with byte-identical content. Three devices were
+  // enough to burn a third of the daily write quota by noon.
+  //
+  // Comparing the serialized form is exact and cheap: list() returns keys in
+  // a stable order, so an unchanged registry serializes identically.
+  const nextJson = JSON.stringify(next);
+  if (nextJson !== JSON.stringify(existing)) {
+    await env.TOKENS.put("registry:devices", nextJson);
+    console.log(`[Registry] Reconciled — ${next.length} device(s), ${hydrated} hydrated, blob updated`);
+  } else if (hydrated > 0) {
+    // Reads happened but nothing moved — worth seeing, because it means
+    // records are missing their metadata stamps and every pass is paying
+    // for reads it shouldn't need.
+    console.log(`[Registry] Reconciled — ${hydrated} record(s) re-read but unchanged (missing metadata stamp?)`);
   }
 
   return next;

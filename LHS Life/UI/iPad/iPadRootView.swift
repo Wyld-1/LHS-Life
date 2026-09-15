@@ -102,7 +102,10 @@ struct iPadRootView: View {
                 // the shared trigger, which is why the fly-in showed up on
                 // iPad too despite the layouts having nothing else in common.
                 LaunchScreen(progress: launchProgress)
-                    .transition(.opacity.animation(.easeInOut(duration: 0.4)))
+                    .transition(.asymmetric(
+                        insertion: .identity,
+                        removal: .opacity.animation(.easeInOut(duration: 0.4))
+                    ))
                     .zIndex(20)
             }
 
@@ -137,7 +140,17 @@ struct iPadRootView: View {
         .navigationTitle(selectedTab.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if let button = contextualToolbarButton {
+            if isWebTabLoading {
+                // Same treatment as PhoneToolbar: the contextual slot becomes
+                // a spinner mid-navigation rather than the page blanking out.
+                ToolbarItem(placement: .topBarTrailing) {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .controlSize(.small)
+                        .tint(Color.lsPrimary)
+                        .frame(width: 22, height: 22)
+                }
+            } else if let button = contextualToolbarButton {
                 ToolbarItem(placement: .topBarTrailing) {
                     LSToolbarButton(
                         systemName: button.systemName,
@@ -147,6 +160,7 @@ struct iPadRootView: View {
                 }
             }
         }
+        .animation(.lsFade, value: isWebTabLoading)
         .overlay(alignment: .bottomTrailing) {
             iPadHomeworkFAB {
                 withAnimation(.lsSpring) { showHomework = true }
@@ -166,6 +180,17 @@ struct iPadRootView: View {
         let systemName: String
         var enabled: Bool = true
         let action: () -> Void
+    }
+
+    /// True while the selected web tab is mid-navigation — see PhoneToolbar
+    /// for why the back button becomes the indicator.
+    private var isWebTabLoading: Bool {
+        switch selectedTab {
+        case .powerschool: return powerschoolState.isLoading
+        case .schoology:   return schoologyState.isLoading
+        case .lunch:       return lunchState.isLoading
+        default:           return false
+        }
     }
 
     private var contextualToolbarButton: ToolbarButtonSpec? {

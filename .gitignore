@@ -1,0 +1,16 @@
+# Signing keys and secrets — never commit these. The APNs key belongs in the
+# Cloudflare Worker's secrets (APNS_PRIVATE_KEY), not in this repo.
+*.p8
+*.p12
+*.mobileprovision
+*.cer
+.env
+.env.*
+.dev.vars
+
+# Xcode per-user state
+xcuserdata/
+DerivedData/
+
+# macOS
+.DS_Store

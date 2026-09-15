@@ -2,12 +2,19 @@
 //  SystemCalendarService.swift
 //  LHS Life
 //
-//  Writes a single event to a dedicated "LHS Life" calendar in the user's
-//  Apple Calendar — ONLY on explicit user request (the "Save to Calendar"
+//  Writes a single event to the user's default Apple Calendar — ONLY on
+//  explicit user request (the "Save to Calendar"
 //  button on EventDetailSheet). Never automatic, never triggered from a
 //  background refresh — that distinction is the whole reason this exists
 //  as a separate, deliberate action instead of the earlier auto-sync
 //  approach.
+//
+//  Write-only access, not full access. Full access would let the app read
+//  every event on a student's calendar just to add one school event; write-
+//  only can add events and nothing else. The cost is the old dedicated
+//  "LHS Life" calendar: finding or creating a calendar needs read access, so
+//  events now go to the default calendar for new events. Anyone who already
+//  has an "LHS Life" calendar from an earlier version keeps it and its events.
 //
 
 import Foundation
@@ -22,19 +29,17 @@ final class SystemCalendarService {
     private let ekStore = EKEventStore()
     private(set) var authorizationStatus: EKAuthorizationStatus = .notDetermined
 
-    private static let calendarIdentifierKey = "lhs_life_calendar_identifier"
-    private static let defaultCalendarTitle  = "LHS Life"
-    private static let defaults = UserDefaults(suiteName: UserSettings.appGroupID) ?? .standard
-
     private init() {
         authorizationStatus = EKEventStore.authorizationStatus(for: .event)
     }
 
-    var isAuthorized: Bool { authorizationStatus == .fullAccess }
+    /// Either level can write. .fullAccess only shows up for someone who
+    /// granted it to an earlier version.
+    var isAuthorized: Bool { authorizationStatus == .writeOnly || authorizationStatus == .fullAccess }
 
     func requestAccess() async -> Bool {
         do {
-            let granted = try await ekStore.requestFullAccessToEvents()
+            let granted = try await ekStore.requestWriteOnlyAccessToEvents()
             authorizationStatus = EKEventStore.authorizationStatus(for: .event)
             return granted
         } catch {
@@ -48,8 +53,8 @@ final class SystemCalendarService {
         case failed
     }
 
-    /// Saves the given detail item as a single event to a dedicated "LHS Life"
-    /// calendar. Requests access first if not already determined — safe here
+    /// Saves the given detail item as a single event to the default calendar.
+    /// Requests access first if not already determined — safe here
     /// specifically because this only ever runs from an explicit button tap.
     @discardableResult
     func save(_ item: EventDetailItem) async -> SaveResult {
@@ -59,12 +64,11 @@ final class SystemCalendarService {
         guard isAuthorized else { return .denied }
 
         do {
-            let calendar = try targetCalendar()
             let event = EKEvent(eventStore: ekStore)
             event.title    = item.title
             event.location = item.location
             event.notes    = item.description
-            event.calendar = calendar
+            event.calendar = ekStore.defaultCalendarForNewEvents
             event.isAllDay = item.isAllDay
             event.startDate = item.startDate
             event.endDate    = item.endDate
@@ -75,30 +79,5 @@ final class SystemCalendarService {
             print("[SystemCalendarService] Failed to save event: \(error)")
             return .failed
         }
-    }
-
-    // MARK: - Dedicated Calendar
-    // Same pattern as RemindersService's Homework list — a dedicated
-    // calendar so writes are clearly identifiable and don't clutter the
-    // user's personal default calendar.
-
-    private func targetCalendar() throws -> EKCalendar {
-        if let id = Self.defaults.string(forKey: Self.calendarIdentifierKey),
-           let cal = ekStore.calendar(withIdentifier: id),
-           cal.allowsContentModifications {
-            return cal
-        }
-        if let existing = ekStore.calendars(for: .event)
-            .first(where: { $0.title == Self.defaultCalendarTitle }) {
-            Self.defaults.set(existing.calendarIdentifier, forKey: Self.calendarIdentifierKey)
-            return existing
-        }
-        let newCal = EKCalendar(for: .event, eventStore: ekStore)
-        newCal.title  = Self.defaultCalendarTitle
-        newCal.source = ekStore.sources.first { $0.sourceType == .calDAV && $0.title == "iCloud" }
-            ?? ekStore.sources.first { $0.sourceType == .local }
-        try ekStore.saveCalendar(newCal, commit: true)
-        Self.defaults.set(newCal.calendarIdentifier, forKey: Self.calendarIdentifierKey)
-        return newCal
     }
 }

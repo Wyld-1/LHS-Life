@@ -55,6 +55,16 @@ struct PhoneLayout: View {
                 if selectedTab == .powerschool { powerschoolState.webView?.goBack() }
                 else if selectedTab == .schoology { schoologyState.webView?.goBack() }
             },
+            // Whichever web tab is showing — the toolbar only renders for the
+            // selected tab, so reading the selected tab's state is enough.
+            isWebLoading: {
+                switch selectedTab {
+                case .powerschool: return powerschoolState.isLoading
+                case .schoology:   return schoologyState.isLoading
+                case .lunch:       return lunchState.isLoading
+                default:           return false
+                }
+            }(),
             showSettingsBadge: showBadge,
             onSettings: {
                 settings.apBadgeCleared = true
@@ -119,12 +129,20 @@ struct PhoneLayout: View {
             }
             
             if isLaunching {
-                // Timing lives on the transition, not on the state write in
-                // AppTabContainer — scoping it here means only this overlay
-                // fades; the UI underneath is simply correct on the next
-                // frame instead of animating into place.
+                // Asymmetric on purpose: appears INSTANTLY, only the removal
+                // animates.
+                //
+                // A plain .opacity transition animates both directions, so
+                // the launch screen was fading IN at the same moment the app
+                // content was fading in behind it — two transitions colliding
+                // over about a third of a second, which is what made it read
+                // as a flash rather than a screen. Nothing should animate
+                // into place during launch.
                 LaunchScreen(progress: launchProgress)
-                    .transition(.opacity.animation(.easeInOut(duration: 0.4)))
+                    .transition(.asymmetric(
+                        insertion: .identity,
+                        removal: .opacity.animation(.easeInOut(duration: 0.4))
+                    ))
                     .zIndex(20)
             }
 

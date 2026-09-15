@@ -96,6 +96,19 @@ struct AppTabContainer: View {
     @State private var showHomework = false
     @State private var showContacts = false
     @State private var isLaunching  = true
+    /// Hard ceiling on how long the launch screen can hold the app hostage.
+    @State private var launchDeadlinePassed = false
+    /// Gates whether the launch screen is EVER shown.
+    ///
+    /// A launch that finishes inside this window shows nothing but the
+    /// system's own static launch image, then the app — no fade in, no fade
+    /// out, no flash. Only a genuinely slow launch gets the SwiftUI screen,
+    /// which is the only case it was ever useful in.
+    ///
+    /// Deliberately NOT a minimum display time: padding every launch to fix
+    /// the appearance of a fast one makes the app worse for everyone, and a
+    /// slow launch is more noticeable than a brief flash.
+    @State private var launchScreenDue = false
     @State private var calendarUI   = CalendarUIState()
     @State private var navCoordinator = AppNavigationCoordinator.shared
 
@@ -115,12 +128,24 @@ struct AppTabContainer: View {
 
     private var isPhone: Bool { UIDevice.current.userInterfaceIdiom == .phone }
 
+    /// Launch gate — the CALENDAR only.
+    ///
+    /// This used to require all three web views to report isReady, so the
+    /// launch screen sat there until PowerSchool and Schoology had finished
+    /// loading — two tabs most launches never open. The web views were
+    /// already loading concurrently in the background (see .task below);
+    /// waiting on them bought nothing except a slower launch.
+    ///
+    /// They keep loading exactly as before, off the main thread. A tab opened
+    /// before its page is ready shows that tab's own first-load spinner,
+    /// which is the honest place for it — the cost lands on whoever actually
+    /// asked for that tab, instead of on everyone.
+    ///
+    /// launchDeadlinePassed is a safety net: store.events being empty is not
+    /// a reliable "still loading" signal, since a student with genuinely no
+    /// events would otherwise never get past the launch screen at all.
     private var launchProgress: Double {
-        var p = store.events.isEmpty ? 0.0 : 0.34
-        if lunchState.isReady       { p += 0.22 }
-        if powerschoolState.isReady { p += 0.22 }
-        if schoologyState.isReady   { p += 0.22 }
-        return min(p, 1.0)
+        (!store.events.isEmpty || launchDeadlinePassed) ? 1.0 : 0.0
     }
 
     var body: some View {
@@ -139,13 +164,11 @@ struct AppTabContainer: View {
             if progress >= 1.0 && isLaunching {
                 // Deliberately NOT wrapped in withAnimation. That opens an
                 // animated transaction around the whole state write, so every
-                // geometry change resulting from it — including the tab
-                // container's layout, which settles at this exact moment since
-                // launchProgress only reaches 1.0 once all three web views
-                // report ready — gets animated from old to new. That's what
-                // made the UI appear to fly in from the edges on both iPhone
-                // and iPad. The fade now lives on LaunchScreen's own
-                // transition, which is the only thing that should animate.
+                // geometry change resulting from it gets animated from old to
+                // new — which is what made the UI appear to fly in from the
+                // edges on both iPhone and iPad. The fade now lives on
+                // LaunchScreen's own transition, which is the only thing that
+                // should animate.
                 isLaunching = false
             }
         }
@@ -167,10 +190,26 @@ struct AppTabContainer: View {
             navCoordinator.pendingTab = nil
         }
         .task {
+            // Fire-and-forget. These three load concurrently in the
+            // background and nothing waits on them — the app is interactive
+            // as soon as the calendar is ready, and each tab reports its own
+            // readiness when opened.
             async let l: () = lunchState.initialize()
             async let p: () = powerschoolState.initialize()
             async let s: () = schoologyState.initialize()
             _ = await (l, p, s)
+        }
+        .task {
+            // Safety net — see launchProgress. Never let the launch screen
+            // outlive this, regardless of what the calendar is doing.
+            try? await Task.sleep(for: .seconds(2.5))
+            launchDeadlinePassed = true
+        }
+        .task {
+            // Delay-then-show. If loading beats this, isLaunching is already
+            // false and the screen never appears at all.
+            try? await Task.sleep(for: .milliseconds(300))
+            launchScreenDue = true
         }
         .background {
             SettingsSheetView(settings: settings)
@@ -209,7 +248,7 @@ struct AppTabContainer: View {
             showSettings: $showSettings,
             showHomework: $showHomework,
             showContacts: $showContacts,
-            isLaunching: isLaunching,
+            isLaunching: isLaunching && launchScreenDue,
             launchProgress: launchProgress,
             calendarUI: calendarUI,
             lunchState: lunchState,
@@ -225,7 +264,7 @@ struct AppTabContainer: View {
             selectedTab: $selectedTab,
             showSettings: $showSettings,
             showHomework: $showHomework,
-            isLaunching: isLaunching,
+            isLaunching: isLaunching && launchScreenDue,
             launchProgress: launchProgress,
             calendarUI: calendarUI,
             lunchState: lunchState,

@@ -203,19 +203,35 @@ final class CalendarStore {
             cache.saveEvents(fetched)
             applyEvents(fetched)
             lastFetched = Date()
-            if settings.professionalDressNotificationsEnabled {
-                await NotificationService.scheduleProfessionalDressNotifications(for: fetched)
-            }
-            if settings.isASBMember {
-                await NotificationService.scheduleASBNotifications(settings: settings, store: self)
-            }
-            await NotificationService.scheduleAbnormalScheduleNotifications(settings: settings, store: self)
-            await NotificationService.scheduleLiveActivityReminderNotifications(settings: settings, store: self)
-            await NotificationService.scheduleClassOrientationNotification(events: fetched, settings: settings)
+            await scheduleNotifications(for: fetched)
         } catch {
             self.error = AppError(underlying: error)
         }
         isLoading = false
+    }
+
+    /// Re-runs every notification schedule against the last fetched calendar.
+    ///
+    /// For when notification permission is granted AFTER refresh() already
+    /// ran. The sign-in prompt and the first calendar load happen at the same
+    /// time, and every scheduler bails out while unauthorized — so without
+    /// this, a student who taps Allow gets nothing scheduled until the next
+    /// refresh.
+    func rescheduleNotifications() async {
+        guard let fetched = cache.loadEvents() else { return }
+        await scheduleNotifications(for: fetched)
+    }
+
+    private func scheduleNotifications(for fetched: [SchoolEvent]) async {
+        if settings.professionalDressNotificationsEnabled {
+            await NotificationService.scheduleProfessionalDressNotifications(for: fetched)
+        }
+        if settings.isASBMember {
+            await NotificationService.scheduleASBNotifications(settings: settings, store: self)
+        }
+        await NotificationService.scheduleAbnormalScheduleNotifications(settings: settings, store: self)
+        await NotificationService.scheduleLiveActivityReminderNotifications(settings: settings, store: self)
+        await NotificationService.scheduleClassOrientationNotification(events: fetched, settings: settings)
     }
 
     // MARK: - Queries

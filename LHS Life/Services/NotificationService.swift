@@ -47,6 +47,14 @@ enum NotificationService {
         }
     }
 
+    /// True until the user has answered the system prompt once. After that,
+    /// requestAuthorization() returns the stored answer without prompting.
+    static var needsAuthorizationPrompt: Bool {
+        get async {
+            await center.notificationSettings().authorizationStatus == .notDetermined
+        }
+    }
+
     static var isAuthorized: Bool {
         get async {
             let settings = await center.notificationSettings()

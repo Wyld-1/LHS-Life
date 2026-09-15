@@ -42,7 +42,7 @@ struct LaSalle_ScheduleApp: App {
         Task { @MainActor in HapticEngine.shared.prepare() }
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
         NotificationService.registerCategories()
-        Task { _ = await NotificationService.requestAuthorization() }
+        // No permission prompt here — see requestNotificationsIfNeeded().
     }
 
     var body: some Scene {
@@ -52,11 +52,15 @@ struct LaSalle_ScheduleApp: App {
                 .environment(settings)
                 .task {
                     guard settings.accessApproved else { return }
+                    // Covers anyone who signed in before the prompt moved to
+                    // sign-in and never answered it. A no-op otherwise.
+                    Task { await requestNotificationsIfNeeded() }
                     await store.loadAll()
                     startLiveActivity()
                 }
                 .onChange(of: settings.accessApproved) { _, approved in
                     guard approved else { return }
+                    Task { await requestNotificationsIfNeeded() }
                     Task {
                         await store.loadAll()
                         startLiveActivity()
@@ -73,6 +77,22 @@ struct LaSalle_ScheduleApp: App {
                     resolvePendingConfirmation()
                 }
         }
+    }
+
+    /// Asks for notification permission right after sign-in, not at launch.
+    ///
+    /// Prompting at launch put the system alert on top of the email screen,
+    /// before a student knew what the app was — and a reflexive Don't Allow
+    /// there silently disables every reminder the app sends.
+    ///
+    /// Runs alongside the first calendar load rather than before it, so the
+    /// calendar isn't held up behind an alert. A grant reschedules, because
+    /// that load may already have tried to schedule while unauthorized.
+    @MainActor
+    private func requestNotificationsIfNeeded() async {
+        guard await NotificationService.needsAuthorizationPrompt else { return }
+        guard await NotificationService.requestAuthorization() else { return }
+        await store.rescheduleNotifications()
     }
 
     @MainActor

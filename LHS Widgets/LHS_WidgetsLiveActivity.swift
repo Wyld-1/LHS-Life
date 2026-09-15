@@ -66,9 +66,22 @@ struct LaSalle_WidgetsLiveActivity: Widget {
                         let color = Color(hex: slot?.colorHex ?? "#3A6FD8")
                         VStack(spacing: 6) {
                             if let slot = slot {
+                                // Subtitle priority must match LockScreenContent:
+                                // passing → "Until", before school → schedule type,
+                                // otherwise → next period. This region was missing
+                                // the pre-school case, so the Dynamic Island said
+                                // "Next: Passing" while the Lock Screen said
+                                // "Regular Schedule" for the same instant.
                                 if slot.isPassing, let until = slot.nextEndTimeString {
                                     HStack {
                                         Text("Until \(until)")
+                                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                                            .foregroundStyle(.white.opacity(0.6)).lineLimit(1)
+                                        Spacer()
+                                    }
+                                } else if slot.isPreSchool {
+                                    HStack {
+                                        Text(slot.scheduleTypeName)
                                             .font(.system(size: 12, weight: .medium, design: .rounded))
                                             .foregroundStyle(.white.opacity(0.6)).lineLimit(1)
                                         Spacer()
@@ -82,7 +95,22 @@ struct LaSalle_WidgetsLiveActivity: Widget {
                                     }
                                 }
                                 if slot.isPreSchool {
+                                    // Extra horizontal inset beyond the region's
+                                    // own padding. The expanded bottom region sits
+                                    // low in the Dynamic Island, where the
+                                    // container's corner radius curves inward — a
+                                    // full-width bar has its first and last bands
+                                    // sliced diagonally by that curve.
+                                    //
+                                    // Invisible with LiveProgressBar because its
+                                    // track ends are faint gray; obvious here,
+                                    // where both ends are saturated color.
+                                    //
+                                    // Lock Screen doesn't need this — its container
+                                    // is a plain rounded rect with the bar well
+                                    // inside the corner radius.
                                     SchedulePreviewBar(schedule: schedule, height: 6)
+                                        .padding(.horizontal, 10)
                                 } else if slot.isPassing, let passStart = slot.passingStartDate {
                                     LiveProgressBar(start: passStart, end: slot.startDate, color: color)
                                 } else {
@@ -159,6 +187,10 @@ private struct ActiveSlotInfo {
     let scheduleTypeName: String   // shown as subtitle before school
 }
 
+/// LaSalle blue — the neutral fallback tint used when no period color
+/// applies, and the identity color before school.
+private let lsBlueHex = "#3A6FD8"
+
 /// Resolves the active slot from attributes.schedule using state.slotStartMinutes.
 /// The worker pushes slotStartMinutes — widget looks it up locally for name/color/dates.
 /// Falls back to time-based resolution before first push arrives.
@@ -199,8 +231,26 @@ private func resolveSlot(
     let current = pushedSlot ?? activeSlot ?? upcomingSlot
     guard let current else { return nil }
 
-    let idx  = schedule.firstIndex(where: { $0.startDate == current.startDate }) ?? 0
-    let next = idx + 1 < schedule.count ? schedule[idx + 1] : nil
+    let idx = schedule.firstIndex(where: { $0.startDate == current.startDate }) ?? 0
+
+    // "Next: X" must always name a CLASS, never a passing period. If the
+    // schedule ever models a passing period as its own entry in the array —
+    // a name like "Passing" or "Passing Period" sitting between two real
+    // classes — a plain schedule[idx + 1] surfaces it verbatim: "Next:
+    // Passing period". That's never useful information; the person wants to
+    // know the next CLASS, and the passing period is implied by the gap.
+    //
+    // Walks forward past any such entries to the next actual class.
+    var next: ScheduleActivityAttributes.ScheduledPeriod?
+    var lookaheadIdx = idx + 1
+    while lookaheadIdx < schedule.count {
+        let candidate = schedule[lookaheadIdx]
+        if !isPassingLikeName(candidate.displayName) {
+            next = candidate
+            break
+        }
+        lookaheadIdx += 1
+    }
 
     // For passing: previous slot's end is the passing start
     let prevSlot = idx > 0 ? schedule[idx - 1] : nil
@@ -213,9 +263,27 @@ private func resolveSlot(
         return f.string(from: d)
     }
 
+    // Before school the pill describes the DAY, not a class.
+    //
+    // `current` resolves to Period 1 here (it's the upcoming slot), so the
+    // name and color came out as "Physics" in that period's color — which
+    // reads as though Physics is in session at 8:27 AM. The times are still
+    // Period 1's, and correctly so: the first bell IS when Physics starts.
+    // Only the identity is wrong.
+    //
+    // "Today" rather than a time-of-day word: what's actually on screen in
+    // this state is the whole day — the schedule preview bar underneath, the
+    // schedule type as subtitle, and the first bell. The label names that.
+    //
+    // Neutral LaSalle blue rather than the first period's color, for the same
+    // reason: tinting the whole pill orange because first period happens to
+    // be orange implies a class that hasn't begun.
+    let displayName = isPreSchool ? "Today" : current.displayName
+    let colorHex    = isPreSchool ? lsBlueHex : current.colorHex
+
     return ActiveSlotInfo(
-        displayName:      current.displayName,
-        colorHex:         current.colorHex,
+        displayName:      displayName,
+        colorHex:         colorHex,
         startDate:        current.startDate,
         endDate:          current.endDate,
         endTimeString:    current.endTimeString,
@@ -227,6 +295,16 @@ private func resolveSlot(
         isPreSchool:      isPreSchool,
         scheduleTypeName: scheduleTypeName
     )
+}
+
+/// True for a schedule entry whose NAME identifies it as passing time rather
+/// than a class — "Passing", "Passing Period", case-insensitive. Deliberately
+/// narrow: only the exact passing-period naming is excluded, so a real class
+/// that happens to contain the word (unlikely, but not this function's call
+/// to make) is never silently dropped from "Next:".
+private func isPassingLikeName(_ name: String) -> Bool {
+    let normalized = name.trimmingCharacters(in: .whitespaces).lowercased()
+    return normalized == "passing" || normalized == "passing period"
 }
 
 private func transitionDates(from schedule: [ScheduleActivityAttributes.ScheduledPeriod]) -> [Date] {
@@ -348,8 +426,12 @@ private struct SchedulePreviewBar: View {
     let schedule: [ScheduleActivityAttributes.ScheduledPeriod]
     var height: CGFloat = 8
 
+    /// Hairline gap between bands. Without it, adjacent similar colors merge
+    /// into one indistinguishable block.
+    private let spacing: CGFloat = 1
+
     private struct Band: Identifiable {
-        let id = UUID()
+        let id: Int
         let fraction: Double
         let color: Color?   // nil = gap
     }
@@ -366,11 +448,12 @@ private struct SchedulePreviewBar: View {
             // Gap before this slot (passing time)
             let gap = slot.startDate.timeIntervalSince(cursor)
             if gap > 0 {
-                result.append(Band(fraction: gap / total, color: nil))
+                result.append(Band(id: result.count, fraction: gap / total, color: nil))
             }
             let duration = slot.endDate.timeIntervalSince(slot.startDate)
             if duration > 0 {
-                result.append(Band(fraction: duration / total, color: Color(hex: slot.colorHex)))
+                result.append(Band(id: result.count, fraction: duration / total,
+                                   color: Color(hex: slot.colorHex)))
             }
             cursor = slot.endDate
         }
@@ -379,8 +462,21 @@ private struct SchedulePreviewBar: View {
 
     var body: some View {
         GeometryReader { geo in
-            HStack(spacing: 1) {
-                ForEach(bands) { band in
+            let items = bands
+            // Subtract the spacing BEFORE distributing width.
+            //
+            // Previously each band took `geo.size.width * fraction` and the
+            // fractions summed to 1.0 — then the HStack added a 1pt gap
+            // between each pair on top of that. With a dozen bands the row
+            // came out ~11pt wider than the space available, so it overflowed
+            // and the Capsule clip sliced the first and last bands off at the
+            // ends. Visible before school, but not during class, because the
+            // in-class bar is a single ProgressView with no bands at all.
+            let gaps = CGFloat(max(0, items.count - 1)) * spacing
+            let available = max(0, geo.size.width - gaps)
+
+            HStack(spacing: spacing) {
+                ForEach(items) { band in
                     Group {
                         if let color = band.color {
                             color
@@ -388,10 +484,14 @@ private struct SchedulePreviewBar: View {
                             Color.white.opacity(0.10)
                         }
                     }
-                    .frame(width: max(1, geo.size.width * band.fraction))
+                    // The last band flexes to absorb sub-pixel rounding from
+                    // the fractions, so the row ends flush with the capsule
+                    // instead of a hair short or a hair long.
+                    .frame(width: band.id == items.count - 1 ? nil : max(1, available * band.fraction))
+                    .frame(maxWidth: band.id == items.count - 1 ? .infinity : nil)
                 }
             }
-            .frame(height: height)
+            .frame(width: geo.size.width, height: height)
             .clipShape(Capsule())
         }
         .frame(height: height)

@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  System launch screen. A storyboard rather than the UILaunchScreen Info.plist
+  dictionary because the dictionary can only center an image — it can't put
+  the logo where LaunchScreen.swift draws it.
+
+  lhs-lightning must NOT be marked "Render As: Template". The system launch
+  snapshot honors that, and the logo comes out as a solid blue silhouette.
+  (The widgets that want a silhouette ask for .renderingMode(.template)
+  themselves.) iOS caches launch-screen assets outside the app container:
+  after changing them, reboot the device or simulator — a reinstall alone
+  can keep showing the old version.
+
+  Geometry mirrors LaunchScreen.swift so the hand-off to SwiftUI doesn't jump:
+  90×90 logo, horizontally centered, 59pt above the safe area's center. That
+  59 is where the SwiftUI VStack puts the logo: content block of 168pt
+  (98 logo+padding, 8, 41 title, 8, 13 label) centered in the safe area minus
+  48pt of bottom padding → 24 + 84 − 49 = 59. Change one, change the other.
+-->
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="23504" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" launchScreen="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="01J-lp-oVM">
+    <dependencies>
+        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="23506"/>
+        <capability name="Named colors" minToolsVersion="9.0"/>
+        <capability name="Safe area layout guides" minToolsVersion="9.0"/>
+        <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
+    </dependencies>
+    <scenes>
+        <scene sceneID="EHf-IW-A2E">
+            <objects>
+                <viewController id="01J-lp-oVM" sceneMemberID="viewController">
+                    <view key="view" contentMode="scaleToFill" id="Ze5-6b-2t3">
+                        <rect key="frame" x="0.0" y="0.0" width="402" height="874"/>
+                        <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                        <subviews>
+                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="lhs-lightning" translatesAutoresizingMaskIntoConstraints="NO" id="Lgo-Im-001">
+                                <rect key="frame" x="156" y="347" width="90" height="90"/>
+                                <constraints>
+                                    <constraint firstAttribute="width" constant="90" id="Lgo-Wd-001"/>
+                                    <constraint firstAttribute="height" constant="90" id="Lgo-Ht-001"/>
+                                </constraints>
+                            </imageView>
+                        </subviews>
+                        <viewLayoutGuide key="safeArea" id="6Tk-OE-BBY"/>
+                        <color key="backgroundColor" name="LaunchBackground"/>
+                        <constraints>
+                            <constraint firstItem="Lgo-Im-001" firstAttribute="centerX" secondItem="6Tk-OE-BBY" secondAttribute="centerX" id="Lgo-Cx-001"/>
+                            <constraint firstItem="Lgo-Im-001" firstAttribute="centerY" secondItem="6Tk-OE-BBY" secondAttribute="centerY" constant="-59" id="Lgo-Cy-001"/>
+                        </constraints>
+                    </view>
+                </viewController>
+                <placeholder placeholderIdentifier="IBFirstResponder" id="iYj-Kq-Ea1" userLabel="First Responder" sceneMemberID="firstResponder"/>
+            </objects>
+            <point key="canvasLocation" x="53" y="375"/>
+        </scene>
+    </scenes>
+    <resources>
+        <image name="lhs-lightning" width="90" height="90"/>
+        <namedColor name="LaunchBackground">
+            <color red="0.94901960784313721" green="0.95294117647058818" blue="0.96862745098039216" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+        </namedColor>
+    </resources>
+</document>

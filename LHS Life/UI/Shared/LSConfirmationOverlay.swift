@@ -155,13 +155,21 @@ struct LSConfirmationOverlay: View {
     private var glyph: some View {
         Group {
             if #available(iOS 26, *) {
-                // .drawOn strokes the symbol like handwriting — the closest
-                // documented equivalent to the Face ID checkmark.
-                // wholeSymbol draws all layers in one movement; byLayer
-                // staggers them, which reads as hesitant at this size.
+                // isActive INVERTED on purpose.
+                //
+                // .drawOn's isActive means "the effect is currently applied"
+                // — i.e. the symbol is held in its NOT-yet-drawn state. It
+                // draws on when the flag goes true → false, not false → true.
+                //
+                // Passing symbolDrawn directly did the opposite of what the
+                // name suggests: the card appeared with the checkmark already
+                // complete, then un-drew it — erasing the check and
+                // retracting the circle. Reading !symbolDrawn keeps the
+                // property honest ("has it been drawn yet") while giving the
+                // modifier the polarity it actually wants.
                 Image(systemName: state.symbolName)
                     .font(.system(size: glyphSize, weight: .regular))
-                    .symbolEffect(.drawOn.wholeSymbol, isActive: state.symbolDrawn)
+                    .symbolEffect(.drawOn.wholeSymbol, isActive: !state.symbolDrawn)
             } else {
                 // Pre-26 fallback: bounce is the nearest documented effect.
                 Image(systemName: state.symbolName)

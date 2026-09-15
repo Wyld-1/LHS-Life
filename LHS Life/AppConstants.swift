@@ -19,4 +19,11 @@ enum AppConstants {
     static var teamReachURL: URL {
         URL(string: "com.teamreach://")! //teamreach://team/\(teamReachChannelID)
     }
+
+    // MARK: - Privacy Policy
+    // Apple requires a link in the app AND in App Store Connect — keep both
+    // pointing here. Renders Docs/PRIVACY.md from main, so it only resolves
+    // once that file is pushed.
+
+    static let privacyPolicyURL = URL(string: "https://github.com/Wyld-1/LHS-Life/blob/main/Docs/PRIVACY.md")!
 }

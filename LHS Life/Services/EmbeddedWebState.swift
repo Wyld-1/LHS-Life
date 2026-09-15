@@ -9,6 +9,43 @@
 import SwiftUI
 internal import WebKit
 internal import os
+import UniformTypeIdentifiers
+import QuickLook
+
+// MARK: - UI Delegate (print, new-tab links)
+
+/// Catches window.open() / target="_blank" and window.print().
+///
+/// WKWebView implements neither browser API by default — that's the whole
+/// reason Schoology's Print and "open in new tab" links did nothing in the
+/// wrapped app while working perfectly in Safari. Safari supplies both;
+/// WKWebView supplies neither, and expects the host app to.
+final class EmbeddedWebUIDelegate: NSObject, WKUIDelegate {
+    weak var state: EmbeddedWebState?
+
+    /// A same-tab embedded browser has nowhere to put a "new window" — so
+    /// target="_blank" links are loaded in the SAME web view instead of
+    /// silently doing nothing, which is what happens if this delegate method
+    /// is left unimplemented.
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction,
+                 windowFeatures: WKWindowFeatures) -> WKWebView? {
+        if navigationAction.targetFrame == nil {
+            webView.load(navigationAction.request)
+        }
+        return nil
+    }
+
+    /// iOS 16.4+ hook for window.print(). Delegates to EmbeddedWebState so
+    /// the actual UIPrintInteractionController presentation logic lives in
+    /// one place rather than duplicated across every page that calls print().
+    @available(iOS 16.4, *)
+    func webView(_ webView: WKWebView, printFrame frame: WKFrameInfo?) {
+        Task { @MainActor [weak state] in
+            state?.presentPrintDialog(for: webView)
+        }
+    }
+}
 
 // MARK: - Navigation Delegate
 
@@ -47,20 +84,97 @@ final class EmbeddedWebDelegate: NSObject, WKNavigationDelegate {
             self?.state?.loadError = e
         }
     }
+
+    // MARK: Downloads
+    //
+    // Content-Disposition is the signal, NOT canShowMIMEType.
+    //
+    // The first version of this checked canShowMIMEType and only downloaded
+    // what WebKit couldn't render. That was wrong: WebKit CAN render
+    // application/pdf, so a PDF returned .allow and navigated inline — which
+    // is exactly the "opens a one-page document inside Schoology" symptom.
+    // Safari downloads the same response because the server sends
+    // Content-Disposition: attachment, and Safari honours that header. WebKit
+    // ignores it unless the host app acts on it.
+    //
+    // Documents are ALSO routed to download even when inline-renderable, so
+    // they land in QuickLook — which paginates properly, and whose toolbar
+    // carries Print, Save to Files and AirDrop. Inline WebKit PDF rendering
+    // inside a wrapped view has none of that.
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
+                 decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        let response = navigationResponse.response
+        let mime = response.mimeType?.lowercased() ?? ""
+        var disposition = ""
+        if let http = response as? HTTPURLResponse,
+           let value = http.value(forHTTPHeaderField: "Content-Disposition") {
+            disposition = value.lowercased()
+        }
+
+        LHSLogger.liveActivity.notice(
+            """
+            [Web] response \(response.url?.lastPathComponent ?? "?", privacy: .public) \
+            mime: \(mime, privacy: .public) \
+            disposition: \(disposition.isEmpty ? "none" : disposition, privacy: .public) \
+            canShow: \(navigationResponse.canShowMIMEType)
+            """
+        )
+
+        let isAttachment = disposition.contains("attachment")
+        let isDocument =
+            mime == "application/pdf" ||
+            mime.contains("officedocument") ||
+            mime.contains("msword") ||
+            mime.contains("ms-excel") ||
+            mime.contains("ms-powerpoint") ||
+            mime == "application/zip" ||
+            mime == "application/octet-stream"
+
+        if isAttachment || isDocument || !navigationResponse.canShowMIMEType {
+            decisionHandler(.download)
+        } else {
+            decisionHandler(.allow)
+        }
+    }
+
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction,
+                 didBecome download: WKDownload) {
+        Task { @MainActor [weak self] in
+            download.delegate = self?.state
+        }
+    }
+
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse,
+                 didBecome download: WKDownload) {
+        Task { @MainActor [weak self] in
+            download.delegate = self?.state
+        }
+    }
 }
 
 // MARK: - Web State
 
 @Observable
-final class EmbeddedWebState {
+final class EmbeddedWebState: NSObject {
 
     var isLoading = false
     var loadError: Error? = nil
     var isReady   = false
     var canGoBack = false
 
+    /// Non-nil while a download is in flight, so the view can show a spinner
+    /// instead of leaving the person wondering whether the tap registered.
+    var isDownloading = false
+
+    /// A completed download waiting to be shown. QuickLook's own share sheet
+    /// button covers "Save to Files" / AirDrop / Print, so nothing custom is
+    /// needed once the file has landed — this hands off to a system-provided
+    /// experience rather than building another one.
+    var downloadedFileURL: URL? = nil
+
     private(set) var webView: WKWebView? = nil
-    private let delegate = EmbeddedWebDelegate()
+    private let navDelegate = EmbeddedWebDelegate()
+    private let uiDelegate  = EmbeddedWebUIDelegate()
 
     let url: URL
     let siteName: String
@@ -70,7 +184,9 @@ final class EmbeddedWebState {
         self.url           = url
         self.siteName      = siteName
         self.injectDarkCSS = injectDarkCSS
-        delegate.state     = self
+        super.init()
+        navDelegate.state  = self
+        uiDelegate.state   = self
     }
 
     // iPhone Mobile Safari user agent — forces mobile/responsive layout on all sites.
@@ -113,10 +229,44 @@ final class EmbeddedWebState {
         })();
         """
 
+    /// Overrides window.print() in every frame and forwards the call to native.
+    ///
+    /// The WKUIDelegate printFrame hook is the documented route, but it never
+    /// fired against Schoology — so rather than keep guessing which code path
+    /// their button uses, this intercepts the API itself. Works regardless of
+    /// whether print() is called from the top document, a nested iframe, an
+    /// onclick handler, or a window opened by their JS.
+    ///
+    /// forMainFrameOnly: false is what makes the iframe case work; Schoology
+    /// renders document previews in nested frames.
+    private static let printOverrideScript = """
+        (function() {
+            if (window.__lhsPrintHooked) return;
+            window.__lhsPrintHooked = true;
+            window.print = function() {
+                try {
+                    window.webkit.messageHandlers.lhsPrint.postMessage({
+                        url: document.location.href
+                    });
+                } catch (e) {}
+            };
+        })();
+        """
+
     private static func userScript(isDark: Bool) -> WKUserScript {
         WKUserScript(
             source: isDark ? injectionScript : removalScript,
             injectionTime: .atDocumentEnd,
+            forMainFrameOnly: false
+        )
+    }
+
+    /// Injected into every frame at document start — before page scripts run,
+    /// so a page that caches a reference to window.print gets ours.
+    private static func printScript() -> WKUserScript {
+        WKUserScript(
+            source: printOverrideScript,
+            injectionTime: .atDocumentStart,
             forMainFrameOnly: false
         )
     }
@@ -132,6 +282,8 @@ final class EmbeddedWebState {
         if injectDarkCSS && isDark {
             config.userContentController.addUserScript(Self.userScript(isDark: true))
         }
+        config.userContentController.addUserScript(Self.printScript())
+        config.userContentController.add(self, name: "lhsPrint")
         let wv = WKWebView(frame: UIScreen.main.bounds, configuration: config)
         wv.customUserAgent = Self.mobileUserAgent
         // Matches the app canvas in whichever mode is actually active —
@@ -141,7 +293,8 @@ final class EmbeddedWebState {
         wv.scrollView.backgroundColor = .clear
         wv.isOpaque = true
         wv.scrollView.contentInsetAdjustmentBehavior = .always
-        wv.navigationDelegate = delegate
+        wv.navigationDelegate = navDelegate
+        wv.uiDelegate = uiDelegate
         // NOTE: translatesAutoresizingMaskIntoConstraints is deliberately left at
         // its UIKit default (true) — see makeUIView. Setting it to false zeroes
         // the frame the instant it's applied (confirmed on device), which made
@@ -164,6 +317,10 @@ final class EmbeddedWebState {
         guard injectDarkCSS else { return }
         wv.configuration.userContentController.removeAllUserScripts()
         wv.configuration.userContentController.addUserScript(Self.userScript(isDark: isDark))
+        // removeAllUserScripts() is indiscriminate — it drops the print hook
+        // too, so it has to be re-added or printing silently stops working
+        // the first time the appearance changes mid-session.
+        wv.configuration.userContentController.addUserScript(Self.printScript())
         let script = isDark ? Self.injectionScript : Self.removalScript
         wv.evaluateJavaScript(script) { _, error in
             if let error {
@@ -233,6 +390,25 @@ final class EmbeddedWebState {
         wv.load(URLRequest(url: url))
     }
 
+    // MARK: - Print
+
+    /// Renders the currently-loaded page via UIPrintInteractionController.
+    ///
+    /// viewPrintFormatter() is what actually paginates and rasterizes the
+    /// page content — it is the ONE piece of this whole feature that WebKit
+    /// does provide, which is why print doesn't need WKDownloadDelegate or
+    /// any file handling at all. It just needed something to call it.
+    @MainActor
+    func presentPrintDialog(for webView: WKWebView) {
+        let controller = UIPrintInteractionController.shared
+        let info = UIPrintInfo(dictionary: nil)
+        info.outputType = .general
+        info.jobName = siteName
+        controller.printInfo = info
+        controller.printFormatter = webView.viewPrintFormatter()
+        controller.present(animated: true, completionHandler: nil)
+    }
+
     // MARK: - Microsoft email autofill
 
     /// Detects the Microsoft login page and injects the stored school email,
@@ -273,6 +449,64 @@ final class EmbeddedWebState {
     }
 }
 
+// MARK: - Script Message Handler (print)
+
+extension EmbeddedWebState: WKScriptMessageHandler {
+    func userContentController(_ userContentController: WKUserContentController,
+                               didReceive message: WKScriptMessage) {
+        guard message.name == "lhsPrint" else { return }
+        LHSLogger.liveActivity.notice("[Web] window.print() intercepted")
+        Task { @MainActor [weak self] in
+            guard let self, let wv = self.webView else { return }
+            self.presentPrintDialog(for: wv)
+        }
+    }
+}
+
+// MARK: - Download Delegate
+
+extension EmbeddedWebState: WKDownloadDelegate {
+
+    /// Picks the destination and lets the download proceed.
+    ///
+    /// Written to the temp directory rather than Documents — this is a
+    /// hand-off point on the way to QuickLook, not a permanent library the
+    /// app is expected to manage; QuickLook's own share sheet is where the
+    /// person decides whether to keep it (Save to Files) or send it
+    /// elsewhere. A stale temp file surviving a relaunch is an acceptable
+    /// cost for not having to build file-lifecycle management for a
+    /// pass-through view.
+    func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
+                  suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
+        Task { @MainActor in
+            self.isDownloading = true
+        }
+        let dir = FileManager.default.temporaryDirectory
+        // Downloading the same document twice in one session must not
+        // collide on the first attempt's leftover file — WKDownload will not
+        // overwrite an existing file and instead fails the whole download.
+        try? FileManager.default.removeItem(at: dir.appendingPathComponent(suggestedFilename))
+        completionHandler(dir.appendingPathComponent(suggestedFilename))
+    }
+
+    func downloadDidFinish(_ download: WKDownload) {
+        Task { @MainActor in
+            self.isDownloading = false
+            if let url = download.progress.fileURL {
+                self.downloadedFileURL = url
+            }
+        }
+    }
+
+    func download(_ download: WKDownload, didFailWithError error: Error,
+                  resumeData: Data?) {
+        Task { @MainActor in
+            self.isDownloading = false
+            print("[Download] Failed: \(error)")
+        }
+    }
+}
+
 // MARK: - View
 
 struct EmbeddedWebView: View {
@@ -304,7 +538,16 @@ struct EmbeddedWebView: View {
                         }
                 }
 
-                if webState.isLoading || !webState.isReady {
+                if !webState.isReady {
+                    // Only the FIRST load gets the opaque cover.
+                    //
+                    // This used to be `isLoading || !isReady`, and isLoading
+                    // flips true on didStartProvisionalNavigation — which
+                    // fires on EVERY navigation. So tapping any link blanked
+                    // the whole page to a background fill and a spinner, then
+                    // flashed the new page in: the jank. A real browser keeps
+                    // showing the current page until the next one is ready
+                    // and reports progress in the chrome instead.
                     Color.lsBackground.ignoresSafeArea(edges: [.top, .bottom])
                     ProgressView()
                         .tint(Color.lsBlue)
@@ -349,6 +592,34 @@ struct EmbeddedWebView: View {
         .onChange(of: colorScheme) { _, newValue in
             webState.updateAppearance(isDark: newValue == .dark)
         }
+        .overlay(alignment: .top) {
+            if webState.isDownloading {
+                // Sits below the toolbar rather than centered — a download
+                // is a background event the person doesn't need to stop and
+                // watch, unlike the full-screen spinner on first load.
+                HStack(spacing: 8) {
+                    ProgressView().tint(.white)
+                    Text("Downloading…")
+                        .font(.lsCaption)
+                        .foregroundStyle(.white)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Color.black.opacity(0.7), in: Capsule())
+                .padding(.top, LS.contentTopInset + LS.sm)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.lsFade, value: webState.isDownloading)
+        // QuickLook rather than a custom viewer: it already renders every
+        // format Schoology serves (PDF, Office docs, images), and its own
+        // toolbar supplies Print, Save to Files, and AirDrop — the exact set
+        // of actions Print/Download were supposed to unlock. Building a
+        // second version of that would be redundant with what iOS ships.
+        .quickLookPreview(Binding(
+            get: { webState.downloadedFileURL },
+            set: { webState.downloadedFileURL = $0 }
+        ))
     }
 }
 

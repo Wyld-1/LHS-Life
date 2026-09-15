@@ -27,6 +27,12 @@ enum PushTokenService {
         return new
     }
 
+    /// For Delete All Data. The next registration mints a new ID.
+    static func resetDeviceId() {
+        UserDefaults.standard.removeObject(forKey: "lhs_device_id")
+        UserDefaults.standard.removeObject(forKey: signatureKey)
+    }
+
     // MARK: - APNs environment
     //
     // Derived from the ACTUAL aps-environment entitlement, not from #if DEBUG.
