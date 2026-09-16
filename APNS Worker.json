@@ -23,7 +23,7 @@
  *       Every phone currently signed up for bell updates: an anonymous
  *       device ID, which app build and iOS version it runs, how many bells
  *       it expects today, and when it last checked in. Never shows push
- *       tokens. A student's name or email is never sent here at all.
+ *       tokens. A student's name or email is never sent here.
  *
  *   WORKER-URL/status?full=1
  *       The same list, but showing the actual bell times each phone is
@@ -38,8 +38,9 @@
  *       ?deviceId=… to target a specific phone.
  *
  *   WORKER-URL/purge?confirm=yes
- *       Removes every phone's registration. Live Activities already on
- *       screen keep running; they simply stop updating. Phones sign back up
+ *       Clears the bell card off every phone's Lock Screen, then removes
+ *       every phone's registration. Nothing is left stuck on screen. Phones
+ *       sign back up
  *       on their own the NEXT DAY — or sooner if the app is updated, the
  *       Live Activity is stopped and restarted, or the student uses
  *       Settings → Delete All Data. Without ?confirm=yes it does nothing.
@@ -395,7 +396,23 @@ async function handleUnregister(request, env) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * GET /purge?confirm=yes — delete every token:{id} record and the registry.
+ * GET /purge?confirm=yes — dismiss every Live Activity, then delete every
+ * registration.
+ *
+ * The end push matters as much as the delete. Without it a purged phone keeps
+ * a Live Activity on its Lock Screen that nothing will ever update again —
+ * frozen on whatever period was current when the purge ran, for the rest of
+ * the day. Sending "end" first means the card disappears on its own.
+ *
+ * Options:
+ *   ?end=no      delete without dismissing (leaves stale cards; rarely right)
+ *   ?limit=N     how many devices to process in this call (default 40)
+ *
+ * WHY A LIMIT: every end push and every KV operation is a subrequest, and a
+ * Worker invocation is capped at 50 of them on the free plan. So a big school
+ * is purged a batch at a time — the response says how many are left, and you
+ * just load the URL again until it reports none. The registry blob is only
+ * cleared on the final batch, so /status stays honest in between.
  *
  * WHEN DEVICES COME BACK, which is the part that surprises people:
  *
@@ -406,45 +423,85 @@ async function handleUnregister(request, env) {
  * changes, which is:
  *
  *   - the next calendar day (the date is part of the signature), or
- *   - a new app build, or a rotated push token, or
+ *   - a new app build, or a rotated push token — which is what stopping and
+ *     restarting the Live Activity produces, making that the quickest way to
+ *     bring one phone back the same day, or
  *   - Settings -> Delete All Data on that device, which drops the signature
  *     and the device ID outright.
- *
- * In other words: purge in the evening and the school re-registers itself by
- * first bell. Purge mid-morning and today's devices stay dark until tomorrow
- * unless they are touched individually.
  */
 async function handlePurge(request, env, url) {
   if (url.searchParams.get("confirm") !== "yes") {
     return json({
       error: "Refusing to purge without confirmation.",
       howTo: "Add ?confirm=yes to this URL.",
-      whatItDoes: "Deletes every device registration. Live Activities already on screen keep running; they simply stop being updated until each device re-registers.",
-      whenDevicesReturn: "Next calendar day, or sooner on a new build, a rotated push token, or Settings -> Delete All Data on the device.",
+      whatItDoes: "Dismisses the Live Activity on every registered phone, then deletes every registration.",
+      whenDevicesReturn: "Next calendar day, or sooner on a new build, a restarted Live Activity, or Settings -> Delete All Data on the device.",
     }, 400);
   }
 
   if (!env.TOKENS) return json({ error: "KV binding 'TOKENS' is not configured." }, 500);
 
-  let cursor, deleted = 0, pages = 0;
-  do {
-    const page = await env.TOKENS.list({ prefix: "token:", cursor });
-    for (const key of page.keys) {
-      await env.TOKENS.delete(key.name);
-      deleted++;
+  const dismiss = url.searchParams.get("end") !== "no";
+  const limit = Math.max(1, Number(url.searchParams.get("limit") ?? 40));
+
+  const page = await env.TOKENS.list({ prefix: "token:" });
+  const keys = page.keys.map(k => k.name);
+  const batch = keys.slice(0, limit);
+
+  // One token signs every push in this batch.
+  let jwt = null, jwtError = null;
+  if (dismiss && batch.length > 0) {
+    try {
+      jwt = await getAPNsJWT(env);
+    } catch (e) {
+      // Still purge: the operator asked for it, and a key problem is exactly
+      // when you most want the stale registrations gone. Just say so plainly.
+      jwtError = e.message;
+      console.error(`[Purge] Could not build an APNs token, deleting without dismissing — ${e.message}`);
     }
-    cursor = page.list_complete ? undefined : page.cursor;
-    pages++;
-    if (pages > 20) break;   // list() is quota-capped; never spin
-  } while (cursor);
+  }
 
-  await env.TOKENS.delete("registry:devices");
+  let dismissed = 0, dismissFailed = 0, deleted = 0;
+  for (const key of batch) {
+    let record = null;
+    try { record = await env.TOKENS.get(key, "json"); } catch { /* unreadable — delete it anyway */ }
 
-  console.log(`[Purge] Deleted ${deleted} device record(s) and the registry blob`);
+    if (jwt && record && record.pushToken) {
+      try {
+        await sendAPNsEnd(
+          record.pushToken,
+          { slotStartMinutes: 0, isEnded: true },
+          jwt, env, record.environment ?? "production"
+        );
+        dismissed++;
+      } catch (e) {
+        // A device that can't be reached still gets purged; its Live Activity
+        // goes stale, which is strictly better than leaving it registered.
+        dismissFailed++;
+        console.log(`[Purge] End push failed for ${record.deviceId ?? key} — ${e.message}`);
+      }
+    }
+
+    await env.TOKENS.delete(key);
+    deleted++;
+  }
+
+  const remaining = keys.length - batch.length;
+  const complete = remaining === 0 && page.list_complete;
+  if (complete) await env.TOKENS.delete("registry:devices");
+
+  console.log(`[Purge] Dismissed ${dismissed}, failed ${dismissFailed}, deleted ${deleted}, remaining ${remaining}`);
   return json({
+    dismissed,
+    dismissFailed,
     purged: deleted,
-    registryCleared: true,
-    whenDevicesReturn: "Next calendar day, or sooner on a new build, a rotated push token, or Settings -> Delete All Data on the device.",
+    remaining: page.list_complete ? remaining : `${remaining}+ (more pages)`,
+    registryCleared: complete,
+    ...(jwtError ? { warning: `Live Activities were NOT dismissed: ${jwtError}` } : {}),
+    next: complete
+      ? "Done. Every phone has been dismissed and unregistered."
+      : "Load this URL again to continue with the next batch.",
+    whenDevicesReturn: "Next calendar day, or sooner on a new build, a restarted Live Activity, or Settings -> Delete All Data on the device.",
   }, 200);
 }
 
