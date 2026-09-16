@@ -167,6 +167,7 @@ enum PushTokenService {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(AppConstants.workerSecret)", forHTTPHeaderField: "Authorization")
         struct RegisterBody: Encodable {
             let deviceId: String
             let pushToken: String
@@ -220,6 +221,7 @@ enum PushTokenService {
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(AppConstants.workerSecret)", forHTTPHeaderField: "Authorization")
         request.httpBody = try? JSONEncoder().encode(["deviceId": deviceId])
 
         do {

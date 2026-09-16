@@ -395,6 +395,38 @@ final class CalendarStore {
             )
         }
 
+        // Serve-a-thon replaces this student's day outright — last, so it
+        // overrides every rule above, including the floor rules that would
+        // otherwise leave them looking at a regular schedule they aren't
+        // attending. Only this student's grade is affected; every other
+        // grade keeps whatever the feed says. See ServeAThonService.
+        let myServeDays = ServeAThonService.serveDayKeys(
+            events: events, graduationYear: settings.graduationYear
+        )
+        for dayKey in myServeDays {
+            let date = events.first { $0.dayKey == dayKey }?.startDate
+                ?? DateFormatter.isoDay.date(from: dayKey)
+            guard let date else { continue }
+            schedules[dayKey] = ServeAThonService.schedule(on: date, dayKey: dayKey)
+        }
+
+        // Everyone NOT serving that day is in class as usual — including the
+        // days the feed forgot to mark. Serve-a-thon week is exactly when
+        // those markers go missing (2026-27 posts none for the soph or junior
+        // days), which otherwise leaves three quarters of the school looking
+        // at a blank day.
+        for dayKey in ServeAThonService.allSeriesDayKeys(in: events)
+        where schedules[dayKey] == nil && !myServeDays.contains(dayKey) {
+            guard let date = DateFormatter.isoDay.date(from: dayKey) else { continue }
+            schedules[dayKey] = BellSchedule(
+                id: "regular-serve-week-\(dayKey)",
+                date: date,
+                scheduleType: .regular,
+                periods: FinalExamParser.regularPeriods(for: date, sourceID: "serve-week-floor"),
+                sourceEventID: "serve-week-floor"
+            )
+        }
+
         bellSchedules = schedules
         cachedTodayKey = ""
         SharedStore.write(events: events, bellSchedules: bellSchedules)
@@ -426,6 +458,8 @@ extension ScheduleType {
         case .earlyRelease, .earlyReleaseLiturgy:         return Color.lsGold
         case .assembly:                                   return Color.lsSuccess
         case .seniorPresentation:                          return Color.lsGold
+        // Same green as the Service category the event itself belongs to.
+        case .serveAThon:                                  return Color.lsSuccess
         case .finals:                                      return Color.lsDestructive
         case .custom, .unknown:                            return Color.lsSecondary
         }

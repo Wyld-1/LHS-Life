@@ -10,7 +10,7 @@ import SwiftUI
 import WidgetKit
 
 struct LaSalle_WidgetsControl: ControlWidget {
-    static let kind: String = "wildcat.lasalle.lhslife.lhs-widgets"
+    static let kind: String = "com.lasalleyakima.lhslife.widgets"
 
     var body: some ControlWidgetConfiguration {
         AppIntentControlConfiguration(

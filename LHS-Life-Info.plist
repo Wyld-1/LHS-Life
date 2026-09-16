@@ -4,7 +4,7 @@
 <dict>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
-		<string>com.lasalle.lhslife.bell.transition</string>
+		<string>com.lasalleyakima.lhslife.bell.transition</string>
 	</array>
 	<key>INAlternativeAppNames</key>
 	<array>
@@ -20,7 +20,5 @@
 		<string>fetch</string>
 		<string>processing</string>
 	</array>
-	<key>UILaunchStoryboardName</key>
-	<string>LaunchScreen</string>
 </dict>
 </plist>

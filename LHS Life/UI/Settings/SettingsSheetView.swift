@@ -25,6 +25,7 @@ struct SettingsSheetView: View {
     @State private var debugSecondaryText = "Next: Lunch at 11:45"
     @State private var debugProgress: Double = 0.6
     @State private var showSignOutDialog = false
+    @State private var showPrivacyPolicy = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -106,6 +107,9 @@ struct SettingsSheetView: View {
             }
         } message: {
             Text("Sign Out clears your email and grad year. Delete All Data resets all customizations and signs you out of PowerSchool, Schoology, and lunch ordering.")
+        }
+        .sheet(isPresented: $showPrivacyPolicy) {
+            PrivacyPolicyView()
         }
     }
 
@@ -711,10 +715,14 @@ struct SettingsSheetView: View {
 
             // Below the card, not inside it, so it reads as a footer rather
             // than a second action next to Sign Out. Apple requires the
-            // policy to be reachable from inside the app.
-            Link("Privacy Policy", destination: AppConstants.privacyPolicyURL)
-                .font(.lsCaption)
-                .foregroundStyle(Color.lsSecondary)
+            // policy to be reachable from inside the app; it opens as a sheet
+            // rather than sending a student out to a browser.
+            Button("Privacy Policy") {
+                HapticEngine.shared.tap()
+                showPrivacyPolicy = true
+            }
+            .font(.lsCaption)
+            .foregroundStyle(Color.lsSecondary)
         }
     }
 }

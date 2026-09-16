@@ -4,20 +4,77 @@
  * Pushes ActivityKit Live Activity updates to registered devices at each
  * period transition throughout the LaSalle school day.
  *
+ * ════════════════════════════════════════════════════════════════════════════
+ * FOR WHOEVER LOOKS AFTER THIS NEXT — everything you can open in a browser
+ * ════════════════════════════════════════════════════════════════════════════
+ *
+ * Sign-in: every address below except /health asks for a username and
+ * password. The username is ignored — type anything, or leave it blank. The
+ * password is the CLIENT_SECRET set on this Worker (see Environment variables
+ * below). The browser remembers it until you quit the browser.
+ *
+ * Replace WORKER-URL with this Worker's address.
+ *
+ *   WORKER-URL/health
+ *       Is the Worker alive, and is its password configured? The only
+ *       address that needs no sign-in. Start here.
+ *
+ *   WORKER-URL/status
+ *       Every phone currently signed up for bell updates: an anonymous
+ *       device ID, which app build and iOS version it runs, how many bells
+ *       it expects today, and when it last checked in. Never shows push
+ *       tokens. A student's name or email is never sent here at all.
+ *
+ *   WORKER-URL/status?full=1
+ *       The same list, but showing the actual bell times each phone is
+ *       registered for ("08:00", "08:55"…) instead of a count. This is the
+ *       view that answers "should a push have gone out at 8:00?"
+ *
+ *   WORKER-URL/test-push
+ *       Sends one update to the most recently registered phone right now and
+ *       reports, in plain English, what Apple said back. Use it when Live
+ *       Activities stop updating: it tells you within seconds whether the
+ *       problem is Apple's keys, this Worker, or the phone. Add
+ *       ?deviceId=… to target a specific phone.
+ *
+ *   WORKER-URL/purge?confirm=yes
+ *       Removes every phone's registration. Live Activities already on
+ *       screen keep running; they simply stop updating. Phones sign back up
+ *       on their own the NEXT DAY — or sooner if the app is updated, the
+ *       Live Activity is stopped and restarted, or the student uses
+ *       Settings → Delete All Data. Without ?confirm=yes it does nothing.
+ *
+ *   WORKER-URL/rebuild
+ *       Recovery only. Rebuilds the device list from the individual records
+ *       if the list is ever lost. Harmless to run, rarely needed.
+ *
+ * Two addresses are used by the app itself and are not meant for people:
+ * POST /register and DELETE /unregister.
+ *
+ * Nothing here can be used to identify a student. The device ID is a random
+ * number the app makes up, and it changes if the app is reset.
+ *
+ * ════════════════════════════════════════════════════════════════════════════
+ *
  * Architecture:
- *   - Cron fires every minute during school hours (Mon–Fri, 6 AM–4 PM PT)
- *   - Worker fetches today's bell schedule from CalendarWiz iCal feed
- *   - At each period transition, sends an APNs push to all registered devices
+ *   - Cron fires every minute during school hours (Mon–Fri, 6 AM–5 PM PT)
+ *   - Each device registers the bell times it expects (POST /register)
+ *   - Within 2 minutes of each of those times, sends an APNs push
  *   - At the last bell of the day, sends an APNs end push — dismisses the LA instantly
- *   - Devices register their push token via POST /register
  *   - Tokens stored in Workers KV under key: token:{deviceId}
  *   - Dead tokens (410 Gone, 400 BadDeviceToken) are deleted automatically
+ *   - A newly registered device joins the push list within about 2 minutes,
+ *     because the cron owns the device list and reconciles on even minutes
  *
  * Environment variables (set in Cloudflare dashboard → Worker → Settings → Variables):
  *   APNS_KEY_ID      — 10-char key ID from Apple Developer (e.g. "ABC1234567")
  *   APNS_TEAM_ID     — 10-char team ID from Apple Developer (e.g. "XYZ9876543")
  *   APNS_BUNDLE_ID   — App bundle ID (e.g. "com.lasalle.lhslife")
  *   APNS_PRIVATE_KEY — Contents of your .p8 file (the whole thing, newlines included)
+ *   CLIENT_SECRET    — Shared secret the app sends on every request (see requireAuth).
+ *                      Must match AppConstants.workerSecret in the iOS app.
+ *                      Also the password for the browser sign-in box on
+ *                      /status and /rebuild (any username).
  *   TOKENS           — KV namespace binding (set in wrangler.toml or dashboard)
  *
  * KV structure:
@@ -62,16 +119,28 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    // /health is the only open route — it says nothing about anyone. Every
+    // other route needs the shared secret (see requireAuth).
+    if (request.method === "GET" && url.pathname === "/health") {
+      // Also reports whether auth is wired up. No secret is exposed — just
+      // whether CLIENT_SECRET exists — so this can stay open, and it's the
+      // first thing to check when the sign-in box refuses to appear.
+      const configured = env.CLIENT_SECRET ? "configured" : "NOT CONFIGURED";
+      return new Response(`OK\nauth: ${configured}\n`, {
+        status: 200,
+        headers: { "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+
+    const denied = requireAuth(request, env);
+    if (denied) return denied;
+
     if (request.method === "POST" && url.pathname === "/register") {
       return handleRegister(request, env);
     }
 
     if (request.method === "DELETE" && url.pathname === "/unregister") {
       return handleUnregister(request, env);
-    }
-
-    if (request.method === "GET" && url.pathname === "/health") {
-      return new Response("OK", { status: 200 });
     }
 
     // Manual recovery: rebuilds registry:devices from the token:{id} backups.
@@ -81,9 +150,37 @@ export default {
       return new Response(`Rebuilt registry with ${count} device(s)`, { status: 200 });
     }
 
+    // Wipes every registration. Requires ?confirm=yes so a stray click or a
+    // prefetching browser can't empty the registry.
+    //
+    // Devices come back on their own — see handlePurge for exactly when,
+    // because "purged and nothing returned" is the obvious next surprise.
+    if (request.method === "GET" && url.pathname === "/purge") {
+      return handlePurge(request, env, url);
+    }
+
+    // Diagnostics: send ONE push right now and report exactly what APNs said.
+    //
+    // The push cycle only fires in the two minutes after a bell, so a
+    // misconfigured key is otherwise invisible until the next period change —
+    // and then only in the logs. This turns "wait 45 minutes and squint at
+    // the log stream" into one click, and reports the failure reason verbatim
+    // (BadEnvironmentKeyInToken, InvalidProviderToken, TopicDisallowed…).
+    //
+    // Never removes a device: a diagnostic that deletes registrations when the
+    // server is misconfigured is exactly backwards.
+    if (request.method === "GET" && url.pathname === "/test-push") {
+      return handleTestPush(request, env, url);
+    }
+
     // Diagnostics: how many devices are registered, without exposing tokens.
     if (request.method === "GET" && url.pathname === "/status") {
       const devices = await readRegistry(env);
+      // ?full=1 prints the actual bell times a device is registered for,
+      // rather than just how many. This is the view that answers "was the
+      // 8:00 transition even stored?" when a push doesn't land — a count of
+      // 15 looks identical whether the times are right or nonsense.
+      const full = url.searchParams.get("full") === "1";
       return new Response(JSON.stringify({
         deviceCount: devices.length,
         devices: devices.map(d => ({
@@ -91,8 +188,10 @@ export default {
           environment: d.environment,
           appVersion: d.appVersion ?? null,
           osVersion: d.osVersion ?? null,
-          transitions: (d.transitions ?? []).length,
-          endMinutes: d.endMinutes,
+          transitions: full
+            ? (d.transitions ?? []).map(clockTime)
+            : (d.transitions ?? []).length,
+          endMinutes: full ? clockTime(d.endMinutes) : d.endMinutes,
           updatedAt: d.updatedAt,
         })),
       }, null, 2), { status: 200, headers: { "content-type": "application/json" } });
@@ -106,6 +205,120 @@ export default {
     ctx.waitUntil(runPushCycle(env));
   },
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: - Auth
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Shared-secret gate on every route except /health.
+ *
+ * This is a lock on the front door, not a vault. The secret ships inside the
+ * app, so anyone who unpacks the binary can read it — what it stops is the
+ * drive-by: /status used to hand out every device ID to anyone who asked, and
+ * /unregister would then take any of them, which is a one-command way to kill
+ * Live Activities for the whole school. It also keeps randoms from burning the
+ * KV write quota through /register.
+ *
+ * Three ways to present the secret, all checking the same value:
+ *
+ *   1. "Authorization: Bearer <secret>"      — what the iOS app sends.
+ *   2. "Authorization: Basic <base64>"       — what a BROWSER sends after the
+ *      sign-in box. Any username works; the password is the secret. A refusal
+ *      carries WWW-Authenticate, which is what makes the browser show that box
+ *      in the first place, so an admin can open /status and simply log in.
+ *   3. "X-LHS-Auth: <secret>"                — for scripts and curl.
+ *
+ * Set CLIENT_SECRET in the Cloudflare dashboard (Worker → Settings →
+ * Variables). If it is unset the worker refuses every authenticated route
+ * rather than falling open — a misconfigured deploy should break loudly
+ * instead of quietly serving the world.
+ */
+function requireAuth(request, env) {
+  const expected = env.CLIENT_SECRET;
+  if (!expected) {
+    console.error("[Auth] CLIENT_SECRET is not set on this worker — refusing all authenticated routes");
+    // Spelled out, because the person who hits this is an admin in a browser
+    // with no logs in front of them. Fail closed, but say why and how to fix.
+    return new Response(
+      [
+        "This worker has no CLIENT_SECRET set, so it is refusing every request.",
+        "",
+        "Fix it in the Cloudflare dashboard:",
+        "  Workers & Pages -> this worker -> Settings -> Variables and Secrets",
+        "  Add a variable named exactly CLIENT_SECRET (case-sensitive),",
+        "  set its value, then click Deploy.",
+        "",
+        "Check it worked by loading /health — it reports 'auth: configured'.",
+        "",
+        "Nothing is broken for students: bell-schedule pushes keep working.",
+        "Only registration and the admin pages are refused until this is set.",
+      ].join("\n"),
+      { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } }
+    );
+  }
+
+  const header = request.headers.get("authorization") || "";
+  const scheme = header.slice(0, header.indexOf(" ")).toLowerCase();
+  const value  = header.slice(header.indexOf(" ") + 1).trim();
+
+  let presented = "";
+  if (scheme === "bearer") {
+    presented = value;
+  } else if (scheme === "basic") {
+    presented = basicPassword(value);
+  } else {
+    presented = (request.headers.get("x-lhs-auth") || "").trim();
+  }
+
+  if (!presented || !timingSafeEqual(presented, expected)) {
+    console.log(`[Auth] rejected ${request.method} ${new URL(request.url).pathname}`);
+    return unauthorized();
+  }
+  return null;
+}
+
+/**
+ * The password half of a Basic credential. The username is deliberately
+ * ignored: an admin typing anything at all in that field still gets in, which
+ * is one less thing to explain and one less support call.
+ */
+function basicPassword(encoded) {
+  try {
+    const decoded = atob(encoded);
+    const split = decoded.indexOf(":");
+    return split === -1 ? "" : decoded.slice(split + 1);
+  } catch {
+    return "";   // not valid base64
+  }
+}
+
+/**
+ * 401 with the header that makes a browser pop its own sign-in box. Without
+ * WWW-Authenticate the browser just renders the body and there is nowhere to
+ * type a password — which is why this exists at all.
+ */
+function unauthorized() {
+  return new Response(
+    "LHS Life Push Worker — sign in to continue. Username: anything. Password: ask ASB.",
+    {
+      status: 401,
+      headers: {
+        "WWW-Authenticate": 'Basic realm="LHS Life Push Worker", charset="UTF-8"',
+        "content-type": "text/plain; charset=utf-8",
+      },
+    }
+  );
+}
+
+/** Length-independent comparison, so the check can't be timed character by character. */
+function timingSafeEqual(a, b) {
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+  }
+  return diff === 0;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MARK: - Token registration
@@ -175,6 +388,201 @@ async function handleUnregister(request, env) {
   await removeDevice(deviceId, env);
   console.log(`[Unregister] Device ${deviceId} removed`);
   return new Response("OK", { status: 200 });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: - Purge (diagnostics)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * GET /purge?confirm=yes — delete every token:{id} record and the registry.
+ *
+ * WHEN DEVICES COME BACK, which is the part that surprises people:
+ *
+ * The app skips a registration whose payload it has already sent (see
+ * PushTokenService.registrationSignature) to stay inside the KV write quota,
+ * and that signature lives on the DEVICE. Deleting the server's copy does not
+ * clear it. So a purged device re-registers the next time its signature
+ * changes, which is:
+ *
+ *   - the next calendar day (the date is part of the signature), or
+ *   - a new app build, or a rotated push token, or
+ *   - Settings -> Delete All Data on that device, which drops the signature
+ *     and the device ID outright.
+ *
+ * In other words: purge in the evening and the school re-registers itself by
+ * first bell. Purge mid-morning and today's devices stay dark until tomorrow
+ * unless they are touched individually.
+ */
+async function handlePurge(request, env, url) {
+  if (url.searchParams.get("confirm") !== "yes") {
+    return json({
+      error: "Refusing to purge without confirmation.",
+      howTo: "Add ?confirm=yes to this URL.",
+      whatItDoes: "Deletes every device registration. Live Activities already on screen keep running; they simply stop being updated until each device re-registers.",
+      whenDevicesReturn: "Next calendar day, or sooner on a new build, a rotated push token, or Settings -> Delete All Data on the device.",
+    }, 400);
+  }
+
+  if (!env.TOKENS) return json({ error: "KV binding 'TOKENS' is not configured." }, 500);
+
+  let cursor, deleted = 0, pages = 0;
+  do {
+    const page = await env.TOKENS.list({ prefix: "token:", cursor });
+    for (const key of page.keys) {
+      await env.TOKENS.delete(key.name);
+      deleted++;
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+    pages++;
+    if (pages > 20) break;   // list() is quota-capped; never spin
+  } while (cursor);
+
+  await env.TOKENS.delete("registry:devices");
+
+  console.log(`[Purge] Deleted ${deleted} device record(s) and the registry blob`);
+  return json({
+    purged: deleted,
+    registryCleared: true,
+    whenDevicesReturn: "Next calendar day, or sooner on a new build, a rotated push token, or Settings -> Delete All Data on the device.",
+  }, 200);
+}
+
+/** 480 -> "08:00". Minutes since local midnight, as a human reads a bell schedule. */
+function clockTime(minutes) {
+  if (minutes === null || minutes === undefined) return null;
+  const h = Math.floor(minutes / 60), m = minutes % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: - Test push (diagnostics)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * GET /test-push[?deviceId=…][&minutes=…]
+ *
+ * Pushes to one device immediately and returns APNs's raw verdict per
+ * endpoint. Defaults to the most recently registered device, and to that
+ * device's first transition of the day, so a bare /test-push is useful.
+ */
+async function handleTestPush(request, env, url) {
+  const devices = await readRegistry(env);
+  if (devices.length === 0) {
+    return json({ error: "No devices registered." }, 404);
+  }
+
+  const wanted = url.searchParams.get("deviceId");
+  const device = wanted
+    ? devices.find(d => d.deviceId === wanted)
+    : [...devices].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0];
+  if (!device) return json({ error: `No device with id ${wanted}.` }, 404);
+
+  const minutesParam = url.searchParams.get("minutes");
+  const slotStartMinutes = minutesParam !== null
+    ? Number(minutesParam)
+    : (device.transitions ?? [480])[0];
+
+  let jwt;
+  try {
+    jwt = await getAPNsJWT(env);
+  } catch (e) {
+    // A JWT that won't even build means the key itself is malformed — most
+    // often a .p8 pasted with the BEGIN/END lines mangled or newlines eaten.
+    return json({
+      step: "building the APNs token",
+      ok: false,
+      error: e.message,
+      hint: "Check APNS_PRIVATE_KEY (whole .p8 including BEGIN/END lines), APNS_KEY_ID, APNS_TEAM_ID.",
+    }, 500);
+  }
+
+  const payload = {
+    aps: {
+      timestamp: Math.floor(Date.now() / 1000),
+      event: "update",
+      "content-state": { slotStartMinutes, isEnded: false },
+      alert: {},
+    },
+  };
+
+  // Try both endpoints regardless of what the device claims, so the answer
+  // includes "it works, just on the other host".
+  const attempts = [];
+  for (const host of ["sandbox", "production"]) {
+    attempts.push(await probeAPNs(device.pushToken, payload, jwt, env, host));
+  }
+
+  return json({
+    deviceId: device.deviceId,
+    registeredEnvironment: device.environment,
+    appVersion: device.appVersion,
+    topic: `${env.APNS_BUNDLE_ID}.push-type.liveactivity`,
+    sentSlotStartMinutes: slotStartMinutes,
+    attempts,
+    verdict: attempts.some(a => a.ok)
+      ? "APNs accepted the push. If the Lock Screen did not change, the problem is on the device, not here."
+      : "APNs rejected every attempt — see reason above.",
+  }, 200);
+}
+
+/** One APNs attempt that reports rather than acts. No device is ever removed. */
+async function probeAPNs(pushToken, payload, jwt, env, environment) {
+  const host = (environment === "sandbox") ? "api.sandbox.push.apple.com" : "api.push.apple.com";
+  try {
+    const resp = await fetch(`https://${host}/3/device/${pushToken}`, {
+      method: "POST",
+      headers: {
+        "authorization":  `bearer ${jwt}`,
+        "apns-topic":     `${env.APNS_BUNDLE_ID}.push-type.liveactivity`,
+        "apns-push-type": "liveactivity",
+        "apns-priority":  "10",
+        "content-type":   "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    const body = await resp.text();
+    return {
+      endpoint: environment,
+      status: resp.status,
+      ok: resp.ok,
+      apnsId: resp.headers.get("apns-id"),
+      response: body || "(empty — this is what success looks like)",
+      meaning: explainAPNs(resp.status, body),
+    };
+  } catch (e) {
+    return { endpoint: environment, status: null, ok: false, error: e.message };
+  }
+}
+
+/** Plain-English translation of the APNs reasons this app actually hits. */
+function explainAPNs(status, body) {
+  if (status === 200) return "Accepted.";
+  if (body.includes("BadEnvironmentKeyInToken")) {
+    return "The .p8 key is restricted to the other environment. Generate a key valid for both Sandbox and Production, or test with a matching build.";
+  }
+  if (body.includes("InvalidProviderToken")) {
+    return "APNs rejected the signing key: APNS_KEY_ID does not match APNS_PRIVATE_KEY, or the key belongs to a different team than APNS_TEAM_ID.";
+  }
+  if (body.includes("TopicDisallowed")) {
+    return "APNS_BUNDLE_ID does not match an app this key can push to. It must be the app's bundle ID exactly.";
+  }
+  if (body.includes("DeviceTokenNotForTopic")) {
+    return "This token was minted for a different bundle ID — usually a device still running the pre-migration build.";
+  }
+  if (body.includes("BadDeviceToken")) {
+    return "Token not valid for this endpoint — right token, wrong sandbox/production host, or a stale token.";
+  }
+  if (body.includes("ExpiredProviderToken")) return "The signing token expired; the worker should mint a fresh one.";
+  if (status === 410) return "The Live Activity already ended on that device.";
+  return "Unrecognized APNs response — quote it verbatim when asking Apple.";
+}
+
+function json(obj, status) {
+  return new Response(JSON.stringify(obj, null, 2), {
+    status,
+    headers: { "content-type": "application/json; charset=utf-8" },
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

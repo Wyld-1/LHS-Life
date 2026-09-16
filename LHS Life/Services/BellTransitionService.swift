@@ -6,7 +6,7 @@
 //  Each task fires exactly at the bell, wakes the app for ~30 seconds,
 //  pushes the new ContentState to the Live Activity, and exits.
 //
-//  Task identifier: lasalle.bell.transition
+//  Task identifier: com.lasalleyakima.lhslife.bell.transition
 //  Must be registered in BGTaskSchedulerPermittedIdentifiers in Info.plist.
 //
 
@@ -16,7 +16,7 @@ import ActivityKit
 
 enum BellTransitionService {
 
-    static let taskIdentifier = "com.lasalle.lhslife.bell.transition"
+    static let taskIdentifier = "com.lasalleyakima.lhslife.bell.transition"
 
     // MARK: - Registration
     // Call once at app launch, before the first scene connects.

@@ -36,6 +36,8 @@ enum ScheduleType: String, Codable, CaseIterable {
     case earlyReleaseLiturgy = "Early Release Liturgy"
     case assembly              = "Assembly"
     case seniorPresentation    = "Senior Presentation"
+    /// One grade's whole day of service, 8:00–3:00, no classes.
+    case serveAThon            = "Serve-a-thon"
     case finals                = "Finals"
     case custom                = "Custom"
     case unknown               = "Unknown"
@@ -47,6 +49,7 @@ extension ScheduleType {
     var scheduleLabel: String {
         switch self {
         case .seniorPresentation: return rawValue  // "Senior Presentation" — already complete
+        case .serveAThon:         return rawValue  // "Serve-a-thon" — a day, not a schedule variant
         case .finals:             return rawValue  // "Finals" — no suffix needed
         case .assembly:           return rawValue  // "Assembly" — no suffix needed
         default:                  return rawValue + " Schedule"
