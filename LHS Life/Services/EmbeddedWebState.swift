@@ -538,27 +538,20 @@ struct EmbeddedWebView: View {
                         }
                 }
 
-                if !webState.isReady {
-                    // Only the FIRST load gets the opaque cover.
-                    //
-                    // This used to be `isLoading || !isReady`, and isLoading
-                    // flips true on didStartProvisionalNavigation — which
-                    // fires on EVERY navigation. So tapping any link blanked
-                    // the whole page to a background fill and a spinner, then
-                    // flashed the new page in: the jank. A real browser keeps
-                    // showing the current page until the next one is ready
-                    // and reports progress in the chrome instead.
-                    Color.lsBackground.ignoresSafeArea(edges: [.top, .bottom])
-                    ProgressView()
-                        .tint(Color.lsBlue)
-                        .scaleEffect(1.3)
-                        // The enclosing ZStack is alignment: .top, which pinned
-                        // this to the top edge — and since the web view ignores
-                        // the top safe area, that edge is above the visible area
-                        // entirely. Filling the space centers it instead of
-                        // inheriting the stack's top alignment.
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
+                // No loading cover, first load included.
+                //
+                // Progress is reported by the toolbar instead: the back button
+                // becomes a spinner while a page is in flight, on iPhone and
+                // iPad alike (PhoneToolbar, iPadRootView.isWebTabLoading).
+                // That was already true for every navigation AFTER the first
+                // one; the first load kept an opaque full-screen cover, which
+                // on iPad is a lot of screen to black out while the chrome
+                // sits there with a perfectly good spinner in it.
+                //
+                // What's underneath during a first load is the empty web view
+                // on the app's own background, which is what a browser shows
+                // too. The error state below still takes the screen, because
+                // an error is a dead end rather than a wait.
 
                 if let error = webState.loadError {
                     Color.lsBackground.ignoresSafeArea(edges: [.top, .bottom])

@@ -38,6 +38,15 @@ enum SharedStore {
         suite.set(Date(), forKey: Keys.lastUpdated)
     }
 
+    /// Wipes the shared blob. Part of Delete All Data — without it the
+    /// widgets keep rendering the previous student's schedule from the app
+    /// group long after the app itself has been reset.
+    static func clear() {
+        suite.removeObject(forKey: Keys.events)
+        suite.removeObject(forKey: Keys.bellSchedules)
+        suite.removeObject(forKey: Keys.lastUpdated)
+    }
+
     // MARK: - Read (app + widgets)
 
     static func readEvents() -> [SchoolEvent] {

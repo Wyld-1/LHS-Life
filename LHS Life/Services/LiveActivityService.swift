@@ -45,6 +45,18 @@ final class LiveActivityService {
     /// for us. These are for a sophomore reading a card on their phone.
     private(set) var lastStartFailure: String?
 
+    /// Set when the school's worker refuses this device because it is full.
+    ///
+    /// Held rather than shown as a passing toast: the student can do something
+    /// about it — ask for the server to be upgraded — and an address they can
+    /// write to is not something to flash for two seconds. AppTabContainer
+    /// turns this into an alert, once a day at most.
+    var capacityBlock: CapacityBlock?
+
+    struct CapacityBlock: Equatable {
+        let contact: String
+    }
+
     /// Observes the running activity so we can tell, from the DEVICE side,
     /// whether pushes are arriving at all.
     ///
@@ -182,7 +194,12 @@ final class LiveActivityService {
             // Relying solely on pushTokenUpdates risks missing the first token
             // if the stream doesn't emit before the app backgrounds.
             if let initialToken = activity.pushToken {
-                Task { await PushTokenService.register(token: initialToken, periods: periods) }
+                Task { @MainActor in
+                    let result = await PushTokenService.register(token: initialToken, periods: periods)
+                    if case .overCapacity(let contact) = result {
+                        await handleOverCapacity(contact: contact)
+                    }
+                }
             }
             PushTokenService.observeTokenUpdates(for: activity, periods: periods)
 
@@ -268,6 +285,31 @@ final class LiveActivityService {
     }
 
     // MARK: - End
+
+    /// The server refused this device, so nothing will ever update the card.
+    ///
+    /// Ending it is the honest move. A Live Activity that is never pushed to
+    /// doesn't look broken — it looks CONFIDENT, sitting on the Lock Screen
+    /// all day insisting it is still first period. Better to take it down and
+    /// say why than to leave a lie on the student's phone.
+    @MainActor
+    private func handleOverCapacity(contact: String) async {
+        LHSLogger.liveActivity.error(
+            "Server at capacity — ending activity, nothing would update it (contact: \(contact, privacy: .public))"
+        )
+        await end()
+        lastStartFailure = "The school's Live Activity server is full"
+        capacityBlock = CapacityBlock(contact: contact)
+    }
+
+    #if DEBUG
+    /// Debug-only: pretend the worker refused this device, so the alert and
+    /// the "end the doomed activity" behaviour can be checked without
+    /// actually filling the server.
+    func simulateOverCapacity() {
+        Task { await handleOverCapacity(contact: "phudson@lasalleyakima.org") }
+    }
+    #endif
 
     func end() async {
         isDebugSession = false

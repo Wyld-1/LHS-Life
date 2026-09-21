@@ -2,6 +2,25 @@
 //  SettingsSheetView.swift
 //  LHS Life
 //
+//  A stock iOS grouped list. The previous version built its own cards,
+//  section labels, dividers, capsule pop-up buttons and inline edit states —
+//  all of it a hand-made imitation of what List already does, and all of it
+//  one more thing to keep visually in sync with the rest of the app.
+//
+//  Settings is the one screen where being unremarkable is the whole job:
+//  students already know how iOS Settings works, so anything we invent here
+//  is something they have to learn for no benefit. The previous version is
+//  kept at Docs/legacy/SettingsSheetView-cards.swift.orig.
+//
+//  Three interactions changed shape because the native idiom is better:
+//    - Graduation year: was an inline text field that swapped places with a
+//      chip. Now a menu (Enter Year… / Not a Student) plus an alert.
+//    - Class names: were tap-to-edit, one row at a time, with focus juggling.
+//      Now always-editable text fields, the way Contacts edits a card.
+//  ASB working days deliberately kept their tappable pills: five weekdays with
+//  three states each is a grid, and a grid wants to be seen at a glance rather
+//  than navigated to.
+//
 
 import SwiftUI
 import UserNotifications
@@ -9,75 +28,62 @@ import ActivityKit
 import UIKit
 
 struct SettingsSheetView: View {
+
     @Bindable var settings: UserSettings
     @Environment(CalendarStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
-    @State private var editingPeriodID: Int? = nil
-    @FocusState private var gradYearFocused: Bool
-    @State private var gradYearInput = ""
-    @State private var isEditingGradYear = false
     @State private var apModeEnabled = false
+    @State private var showGradYearAlert = false
+    @State private var gradYearInput = ""
+    @State private var showSignOutDialog = false
+    @State private var showPrivacyPolicy = false
+    @State private var showMapSheet = false
+
+    // Debug-only state. Mirrors DebugClock, which outlives this view.
     @State private var debugTimeEnabled = false
     @State private var debugTimeValue = Date()
     @State private var debugForceTextEnabled = false
     @State private var debugPrimaryText = "22 min left in Period 3"
     @State private var debugSecondaryText = "Next: Lunch at 11:45"
     @State private var debugProgress: Double = 0.6
-    @State private var showSignOutDialog = false
-    @State private var showPrivacyPolicy = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Settings")
-                    .font(.lsTitle)
-                    .foregroundStyle(Color.lsPrimary)
-                Spacer()
-                Button("Done") {
-                    commitGradYear()
-                    settings.apModeEnabledToday = apModeEnabled
-                    settings.save()
-                    HapticEngine.shared.success()
-                    dismiss()
-                }
-                .font(.lsHeadline)
-                .foregroundStyle(Color.lsBlue)
+        NavigationStack {
+            List {
+                apExamSection
+                myInfoSection
+                classesSection
+                alertsSection
+                mapSection
+                #if DEBUG
+                debugSection
+                #endif
+                signOutSection
+                aboutSection
             }
-            .padding(.horizontal, LS.md)
-            .padding(.top, LS.lg)
-            .padding(.bottom, LS.md)
-
-            Rectangle()
-                .fill(Color.lsTertiary.opacity(LSDivider.sectionOpacity))
-                .frame(height: LSDivider.thickness)
-
-            ScrollView {
-                LazyVStack(spacing: LS.lg, pinnedViews: []) {
-                    apExamBannerSection
-                    gradYearSection
-                    periodsSection
-                    notificationsSection
-                    mapSection
-                    #if DEBUG
-                    debugSection
-                    #endif
-                    signOutSection
+            .listStyle(.insetGrouped)
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        settings.apModeEnabledToday = apModeEnabled
+                        settings.save()
+                        HapticEngine.shared.success()
+                        dismiss()
+                    }
                 }
-                .padding(.horizontal, LS.md)
-                .padding(.top, LS.md)
-                .padding(.bottom, LS.sm)
             }
         }
-        .background(Color.lsSurface)
+        .tint(Color.lsBlue)
         .onAppear {
             apModeEnabled = settings.apModeEnabledToday
             // Sync FROM the DebugClock singleton, not just to it — it
-            // outlives this view (recreated fresh every time Settings
-            // opens), so without this the toggle shows "off" while an
-            // override might still silently be active underneath, and
-            // re-toggling would reset it to "right now" instead of
-            // restoring whatever was actually set before.
+            // outlives this view (recreated fresh every time Settings opens),
+            // so without this the toggle shows "off" while an override might
+            // still be active underneath, and re-toggling would reset it to
+            // "right now" instead of restoring whatever was set before.
             if let override = DebugClock.shared.overrideDate {
                 debugTimeEnabled = true
                 debugTimeValue = override
@@ -92,6 +98,14 @@ struct SettingsSheetView: View {
             }
         }
         .onDisappear { settings.save() }
+        .alert("Graduation Year", isPresented: $showGradYearAlert) {
+            TextField("2029", text: $gradYearInput)
+                .keyboardType(.numberPad)
+            Button("Cancel", role: .cancel) { }
+            Button("Save") { commitGradYear() }
+        } message: {
+            Text("The year you graduate. Sets your class for class-specific alerts.")
+        }
         .confirmationDialog(
             "Sign Out of LHS Life?",
             isPresented: $showSignOutDialog,
@@ -108,24 +122,18 @@ struct SettingsSheetView: View {
         } message: {
             Text("Sign Out clears your email and grad year. Delete All Data resets all customizations and signs you out of PowerSchool, Schoology, and lunch ordering.")
         }
-        .sheet(isPresented: $showPrivacyPolicy) {
-            PrivacyPolicyView()
+        .sheet(isPresented: $showPrivacyPolicy) { PrivacyPolicyView() }
+        .sheet(isPresented: $showMapSheet) {
+            MapTabView()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
     }
 
-    // MARK: - AP Exam Banner (top of settings)
-
-    private var apExamState: APExamService.APExamState {
-        let dayKey = DateFormatter.isoDay.string(from: Date())
-        return APExamService.examState(
-            for: dayKey,
-            events: store.events(on: dayKey),
-            settings: settings
-        )
-    }
+    // MARK: - AP Exam
 
     @ViewBuilder
-    private var apExamBannerSection: some View {
+    private var apExamSection: some View {
         let dayKey = DateFormatter.isoDay.string(from: Date())
         let examState = APExamService.examState(
             for: dayKey,
@@ -135,75 +143,60 @@ struct SettingsSheetView: View {
         switch examState {
         case .mine(let name, _, _, let config):
             let color = config.map { Color.paletteColor(for: $0) } ?? Color.lsBlue
-            APExamBanner(
-                examName: name,
-                isSilenced: apModeEnabled,
-                accentColor: color,
-                onToggle: { HapticEngine.shared.tap(); apModeEnabled.toggle() }
-            )
+            Section {
+                APExamBanner(
+                    examName: name,
+                    isSilenced: apModeEnabled,
+                    accentColor: color,
+                    onToggle: { HapticEngine.shared.tap(); apModeEnabled.toggle() }
+                )
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+            }
         case .someoneElses(let name, _):
-            APExamBanner(
-                examName: name,
-                isSilenced: apModeEnabled,
-                accentColor: Color.lsBlue,
-                onToggle: { HapticEngine.shared.tap(); apModeEnabled.toggle() }
-            )
+            Section {
+                APExamBanner(
+                    examName: name,
+                    isSilenced: apModeEnabled,
+                    accentColor: Color.lsBlue,
+                    onToggle: { HapticEngine.shared.tap(); apModeEnabled.toggle() }
+                )
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+            }
         case .none:
             EmptyView()
         }
     }
 
-    // MARK: - Grad Year
+    // MARK: - My Info
 
-    private var gradYearSection: some View {
-        VStack(alignment: .leading, spacing: LS.sm) {
-            sectionLabel("My Info")
-            HStack {
-                Text("Class Of:")
-                    .font(.lsHeadline)
-                    .foregroundStyle(Color.lsPrimary)
-                Spacer()
-                ZStack(alignment: .trailing) {
-                    HStack(spacing: LS.sm) {
-                        TextField("", text: $gradYearInput)
-                            .font(.lsTime)
-                            .foregroundStyle(Color.lsBlue)
-                            .keyboardType(.numberPad)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 60)
-                            .focused($gradYearFocused)
-                            .onSubmit { commitGradYear() }
-                        Button("Save") { commitGradYear() }
-                            .font(.lsCaption)
-                            .foregroundStyle(Color.lsBlue)
+    private var myInfoSection: some View {
+        Section("My Info") {
+            LabeledContent("Class Of") {
+                Menu {
+                    Button("Enter Year...") {
+                        // Restores the last real year for someone who tapped
+                        // "Not a student" and came back, rather than starting
+                        // them from an empty field.
+                        let prefill = settings.prefillGraduationYear
+                        gradYearInput = prefill == 0 ? "" : String(prefill)
+                        showGradYearAlert = true
                     }
-                    .opacity(isEditingGradYear ? 1 : 0)
-                    .allowsHitTesting(isEditingGradYear)
-
-                    // Menu + Divider + opt-out, matching the Live Activities
-                    // row below and HomeworkPopup's class picker — same shape
-                    // of choice (a value, or explicitly none), same idiom.
-                    Menu {
-                        Button("Enter Year\u{2026}") { beginEditingGradYear() }
-                        Divider()
-                        Button("Not a Student") { setNotAStudent() }
-                    } label: {
+                    Divider()
+                    Button("Not a Student") { setNotAStudent() }
+                } label: {
+                    // .tint, not .secondary: the Live Activities picker one
+                    // section down renders its value in the tint color, and a
+                    // gray value next to a blue one reads as disabled.
+                    HStack(spacing: LS.xs) {
                         Text(gradYearLabel)
-                            .font(settings.isStudent ? .lsTime : .lsBody)
-                            .foregroundStyle(Color.lsBlue)
-                            .lineLimit(1)
-                            .padding(.horizontal, LS.sm)
-                            .frame(height: LS.chipHeight)
-                            .background(Color.lsBlue.opacity(0.12))
-                            .clipShape(Capsule())
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
                     }
-                    .tint(Color.lsPrimary)
-                    .opacity(isEditingGradYear ? 0 : 1)
-                    .allowsHitTesting(!isEditingGradYear)
+                    .foregroundStyle(.tint)
                 }
             }
-            .padding(LS.md)
-            .lsCard()
         }
     }
 
@@ -211,539 +204,248 @@ struct SettingsSheetView: View {
         settings.isStudent ? String(settings.graduationYear) : "Not a student"
     }
 
-    private func beginEditingGradYear() {
-        // Restores the last real year for someone who tapped "Not a student"
-        // and came back, rather than starting them from an empty field.
-        let prefill = settings.prefillGraduationYear
-        gradYearInput = prefill == 0 ? "" : String(prefill)
-        isEditingGradYear = true
-        gradYearFocused = true
-    }
-
     private func setNotAStudent() {
         // setGraduationYear stashes the outgoing year first, so Enter Year…
         // can bring it back.
         settings.setGraduationYear(0)
         // ASB is student leadership — the toggle disappears below when
-        // isStudent is false, so clear it rather than leaving it stuck on
-        // and invisibly scheduling reminders.
+        // isStudent is false, so clear it rather than leaving it stuck on and
+        // invisibly scheduling reminders.
         settings.isASBMember = false
-        isEditingGradYear = false
-        gradYearFocused = false
         HapticEngine.shared.tick()
     }
 
     private func commitGradYear() {
-        if let year = Int(gradYearInput), year > 2020, year < 2040, year != graduationYearBeforeEdit {
-            settings.setGraduationYear(year)
-            HapticEngine.shared.tick()
-        }
-        isEditingGradYear = false
-        gradYearFocused = false
+        guard let year = Int(gradYearInput.trimmingCharacters(in: .whitespaces)),
+              year > 2020, year < 2040, year != settings.graduationYear else { return }
+        settings.setGraduationYear(year)
+        HapticEngine.shared.tick()
     }
 
-    private var graduationYearBeforeEdit: Int { settings.graduationYear }
+    // MARK: - My Classes
 
-    // MARK: - Periods
-
-    private var periodsSection: some View {
-        VStack(alignment: .leading, spacing: LS.sm) {
-            sectionLabel("My Classes")
-            VStack(spacing: 0) {
-                ForEach($settings.periodConfigs) { $config in
-                    PeriodRow(
-                        config: $config,
-                        isEditing: editingPeriodID == config.id,
-                        onTapName: {
-                            withAnimation(.lsSnappy) {
-                                editingPeriodID = editingPeriodID == config.id ? nil : config.id
-                            }
-                        }
-                    )
-                    if config.id < 8 {
-                        rowDivider
-                            .padding(.leading, 56)
-                    }
-                }
+    private var classesSection: some View {
+        Section {
+            ForEach($settings.periodConfigs) { $config in
+                PeriodRow(config: $config)
             }
-            .lsCard()
+        } header: {
+            Text("My Classes")
         }
     }
 
-    // MARK: - Notifications + Live Activity + ASB (all under Alerts)
+    // MARK: - Alerts
 
-    private static let weekdayNames = ["Mon", "Tue", "Wed", "Thu", "Fri"]
-
-    private var notificationsSection: some View {
-        VStack(alignment: .leading, spacing: LS.sm) {
-            sectionLabel("Alerts")
-            VStack(spacing: 0) {
-                Toggle(isOn: $settings.professionalDressNotificationsEnabled) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Professional Dress")
-                            .font(.lsHeadline)
-                            .foregroundStyle(Color.lsPrimary)
-                        Text("Notify the evening before dress days")
-                            .font(.lsCaption)
-                            .foregroundStyle(Color.lsSecondary)
-                    }
-                }
-                .tint(Color.lsBlue)
-                .padding(LS.md)
+    private var alertsSection: some View {
+        Section {
+            Toggle("Professional Dress", isOn: $settings.professionalDressNotificationsEnabled)
                 .onChange(of: settings.professionalDressNotificationsEnabled) { _, _ in
                     HapticEngine.shared.tap()
                 }
 
-                rowDivider
-
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Live Activities")
-                            .font(.lsHeadline)
-                            .foregroundStyle(Color.lsPrimary)
-                        Text(settings.liveActivityMode.description)
-                            .font(.lsCaption)
-                            .foregroundStyle(Color.lsSecondary)
-                    }
-                    Spacer()
-                    Menu {
-                        Picker("Live Activities", selection: $settings.liveActivityMode) {
-                            ForEach(LiveActivityMode.allCases.filter { $0 != .off }, id: \.rawValue) { mode in
-                                Text(mode.label).tag(mode)
-                            }
-                        }
-                        Divider()
-                        Picker("Live Activities", selection: $settings.liveActivityMode) {
-                            Text(LiveActivityMode.off.label).tag(LiveActivityMode.off)
-                        }
-                    } label: {
-                        HStack(spacing: LS.xs) {
-                            Text(settings.liveActivityMode.label)
-                                .font(.lsBody)
-                                .foregroundStyle(Color.lsBlue)
-                            Image(systemName: "chevron.up.chevron.down")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(Color.lsBlue)
-                        }
-                        .padding(.horizontal, LS.sm)
-                        .frame(height: LS.chipHeight)
-                        .background(Color.lsBlue.opacity(0.12))
-                        .clipShape(Capsule())
-                    }
-                    .tint(Color.lsPrimary)
-                    .onChange(of: settings.liveActivityMode) { _, _ in HapticEngine.shared.tick() }
-                }
-                .padding(LS.md)
-
-                // ASB is student leadership only — hidden entirely for staff
-                // and parents rather than shown-and-disabled, since there's
-                // no path by which a non-student would want it.
-                if settings.isStudent {
-                    rowDivider
-
-                    Toggle(isOn: $settings.isASBMember) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("ASB Member")
-                                .font(.lsHeadline)
-                                .foregroundStyle(Color.lsPrimary)
-                            Text("Enables student leadership reminders")
-                                .font(.lsCaption)
-                                .foregroundStyle(Color.lsSecondary)
-                        }
-                    }
-                    .tint(Color.lsBlue)
-                    .padding(LS.md)
-                    .onChange(of: settings.isASBMember) { _, _ in HapticEngine.shared.tap() }
-
-                    if settings.isASBMember {
-                    rowDivider
-
-                    VStack(alignment: .leading, spacing: LS.md) {
-                        Text("Working days:")
-                            .font(.lsCaption)
-                            .foregroundStyle(Color.lsSecondary)
-                            .padding(.horizontal, LS.md)
-                            .padding(.top, LS.md)
-
-                        HStack(spacing: LS.sm) {
-                            ForEach(0..<5, id: \.self) { i in
-                                let mode = settings.asbWorkDays[i]
-                                Button {
-                                    HapticEngine.shared.tick()
-                                    settings.asbWorkDays[i] = mode.next
-                                } label: {
-                                    Text(Self.weekdayNames[i])
-                                        .font(.lsCaption)
-                                        .foregroundStyle(mode == .off ? Color.lsSecondary : .white)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, LS.sm)
-                                        .background(
-                                            mode == .off
-                                                ? Color.lsSurfaceRaised
-                                                : Color(hex: mode.color)
-                                        )
-                                        .clipShape(Capsule())
-                                }
-                                .buttonStyle(.plain)
-                                .animation(.lsSnappy, value: mode)
-                            }
-                        }
-                        .padding(.horizontal, LS.md)
-
-                        VStack(alignment: .leading, spacing: LS.xs) {
-                            ForEach(ASBDayMode.allCases.filter { $0 != .off }, id: \.rawValue) { m in
-                                HStack(spacing: LS.xs) {
-                                    Circle()
-                                        .fill(Color(hex: m.color))
-                                        .frame(width: 8, height: 8)
-                                    Text(m.label)
-                                        .font(.lsCaption)
-                                        .foregroundStyle(Color.lsSecondary)
-                                }
-                            }
-                        }
-                        .padding(.horizontal, LS.md)
-                        .padding(.bottom, LS.md)
-                    }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
+            Picker("Live Activities", selection: $settings.liveActivityMode) {
+                ForEach(LiveActivityMode.allCases, id: \.rawValue) { mode in
+                    Text(mode.label).tag(mode)
                 }
             }
-            .lsCard()
-            .animation(.lsSnappy, value: settings.isASBMember)
-            .animation(.lsSnappy, value: settings.isStudent)
+            .pickerStyle(.menu)
+            .onChange(of: settings.liveActivityMode) { _, _ in HapticEngine.shared.tick() }
+
+            // ASB is student leadership only — hidden entirely for staff and
+            // parents rather than shown-and-disabled, since there's no path by
+            // which a non-student would want it.
+            if settings.isStudent {
+                Toggle("ASB Member", isOn: $settings.isASBMember)
+                    .onChange(of: settings.isASBMember) { _, _ in HapticEngine.shared.tap() }
+
+                if settings.isASBMember {
+                    // Inline, tappable, one tap per state — deliberately not a
+                    // sub-screen. Five weekdays with three states each is a
+                    // grid, and a grid wants to be seen all at once; burying it
+                    // behind a disclosure turns "glance and adjust" into
+                    // "navigate, adjust, go back."
+                    ASBWorkingDaysRow(settings: settings)
+                        .listRowInsets(EdgeInsets(top: LS.sm, leading: LS.md,
+                                                  bottom: LS.sm, trailing: LS.md))
+                }
+            }
+        } header: {
+            Text("Alerts")
+        } footer: {
+            Text("Professional Dress reminds you at 9:00 PM the evening before. Live Activities pin the live bell schedule to your Lock Screen.")
         }
     }
-
-    @State private var showMapSheet = false
 
     // MARK: - Map
 
     private var mapSection: some View {
-        VStack(alignment: .leading, spacing: LS.sm) {
-            sectionLabel("Map")
-            VStack(spacing: 0) {
-                // Toggle first: it's the setting, and settings rows belong
-                // above actions. "Open Campus Map" stays blue because blue is
-                // the action color here — it's a destination, not a preference.
-                Toggle(isOn: $settings.showMapTab) {
-                    Text("Show Map in Tab Bar")
-                        .font(.lsHeadline)
-                        .foregroundStyle(Color.lsPrimary)
-                }
-                .tint(Color.lsBlue)
-                .padding(LS.md)
+        Section("Map") {
+            Toggle("Show Map in Tab Bar", isOn: $settings.showMapTab)
                 .onChange(of: settings.showMapTab) { _, _ in HapticEngine.shared.tap() }
 
-                rowDivider
-
-                Button {
-                    if settings.showMapTab {
-                        // Tab is visible — navigate to it
-                        settings.save()
-                        dismiss()
-                        AppNavigationCoordinator.shared.pendingTab = .map
-                    } else {
-                        // Tab is hidden — open as sheet so anyone can still see it
-                        showMapSheet = true
-                    }
-                } label: {
-                    HStack {
-                        Image(systemName: "map.fill")
-                            .foregroundStyle(Color.lsBlue)
-                        Text("Open Campus Map")
-                            .font(.lsHeadline)
-                            .foregroundStyle(Color.lsBlue)
-                        Spacer()
-                        Image(systemName: "arrow.up.right")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Color.lsTertiary)
-                    }
-                    .padding(LS.md)
+            Button {
+                if settings.showMapTab {
+                    // Tab is visible — navigate to it.
+                    settings.save()
+                    dismiss()
+                    AppNavigationCoordinator.shared.pendingTab = .map
+                } else {
+                    // Tab is hidden — open as a sheet so anyone can still see it.
+                    showMapSheet = true
                 }
-                .sheet(isPresented: $showMapSheet) {
-                    MapTabView()
-                        .presentationDetents([.large])
-                        .presentationDragIndicator(.visible)
-                }
+            } label: {
+                Label("Open Campus Map", systemImage: "map.fill")
             }
-            .lsCard()
         }
     }
 
+    // MARK: - Debug
+
+    #if DEBUG
     private var debugSection: some View {
-        VStack(alignment: .leading, spacing: LS.sm) {
-            sectionLabel("Debug")
-            VStack(spacing: 0) {
-                // Screenshot tool: forces the header pill's rendered text/
-                // progress directly, bypassing the real schedule-state
-                // computation entirely. Faking a "now" that flows correctly
-                // through schedule lookup + engine + period matching is
-                // fragile for a one-off screenshot; forcing the output
-                // directly can't produce nonsense regardless of what
-                // schedule data does or doesn't exist. See DebugClock.swift.
-                Toggle(isOn: $debugForceTextEnabled) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Force Header Text")
-                            .font(.lsHeadline)
-                            .foregroundStyle(Color.lsPrimary)
-                        Text("Overrides the pill's text + progress directly")
-                            .font(.lsCaption)
-                            .foregroundStyle(Color.lsSecondary)
-                    }
-                }
-                .tint(Color.lsBlue)
-                .padding(LS.md)
+        Section {
+            // Screenshot tool: forces the header pill's rendered text and
+            // progress directly, bypassing the real schedule-state
+            // computation. Faking a "now" that flows correctly through
+            // schedule lookup + engine + period matching is fragile for a
+            // one-off screenshot; forcing the output can't produce nonsense
+            // regardless of what schedule data does or doesn't exist.
+            Toggle("Force Header Text", isOn: $debugForceTextEnabled)
                 .onChange(of: debugForceTextEnabled) { _, enabled in
-                    if enabled {
-                        DebugClock.shared.forcedPrimaryText = debugPrimaryText
-                        DebugClock.shared.forcedSecondaryText = debugSecondaryText.isEmpty ? nil : debugSecondaryText
-                        DebugClock.shared.forcedProgress = debugProgress
-                    } else {
-                        DebugClock.shared.forcedPrimaryText = nil
-                        DebugClock.shared.forcedSecondaryText = nil
-                        DebugClock.shared.forcedProgress = nil
-                    }
+                    DebugClock.shared.forcedPrimaryText = enabled ? debugPrimaryText : nil
+                    DebugClock.shared.forcedSecondaryText = enabled
+                        ? (debugSecondaryText.isEmpty ? nil : debugSecondaryText) : nil
+                    DebugClock.shared.forcedProgress = enabled ? debugProgress : nil
                 }
 
-                if debugForceTextEnabled {
-                    Divider().background(Color.lsTertiary.opacity(0.3))
-
-                    VStack(alignment: .leading, spacing: LS.sm) {
-                        TextField("Primary text", text: $debugPrimaryText)
-                            .font(.lsBody)
-                            .foregroundStyle(Color.lsPrimary)
-                            .onChange(of: debugPrimaryText) { _, newValue in
-                                DebugClock.shared.forcedPrimaryText = newValue
+            if debugForceTextEnabled {
+                TextField("Primary text", text: $debugPrimaryText)
+                    .onChange(of: debugPrimaryText) { _, new in
+                        DebugClock.shared.forcedPrimaryText = new
+                    }
+                TextField("Secondary text (optional)", text: $debugSecondaryText)
+                    .onChange(of: debugSecondaryText) { _, new in
+                        DebugClock.shared.forcedSecondaryText = new.isEmpty ? nil : new
+                    }
+                LabeledContent("Progress") {
+                    HStack {
+                        Slider(value: $debugProgress, in: 0...1)
+                            .onChange(of: debugProgress) { _, new in
+                                DebugClock.shared.forcedProgress = new
                             }
-                        TextField("Secondary text (optional)", text: $debugSecondaryText)
-                            .font(.lsCaption)
-                            .foregroundStyle(Color.lsSecondary)
-                            .onChange(of: debugSecondaryText) { _, newValue in
-                                DebugClock.shared.forcedSecondaryText = newValue.isEmpty ? nil : newValue
-                            }
-                        HStack {
-                            Text("Progress")
-                                .font(.lsCaption)
-                                .foregroundStyle(Color.lsSecondary)
-                            Slider(value: $debugProgress, in: 0...1)
-                                .tint(Color.lsBlue)
-                                .onChange(of: debugProgress) { _, newValue in
-                                    DebugClock.shared.forcedProgress = newValue
-                                }
-                            Text("\(Int(debugProgress * 100))%")
-                                .font(.lsCaption)
-                                .foregroundStyle(Color.lsSecondary)
-                                .frame(width: 40, alignment: .trailing)
-                        }
-                    }
-                    .padding(LS.md)
-
-                    Divider().background(Color.lsTertiary.opacity(0.3))
-                }
-
-                // Calendar's "Now" ticker — which date it treats as today,
-                // and where vertically it sits. Separate from the text/
-                // progress force above since the calendar reads real
-                // schedule data directly, not the header pill's computation.
-                Toggle(isOn: $debugTimeEnabled) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Override Now-Ticker Date")
-                            .font(.lsHeadline)
-                            .foregroundStyle(Color.lsPrimary)
-                        Text("Shows the red Now line on this date/time")
-                            .font(.lsCaption)
-                            .foregroundStyle(Color.lsSecondary)
+                        Text("\(Int(debugProgress * 100))%")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 44, alignment: .trailing)
                     }
                 }
-                .tint(Color.lsBlue)
-                .padding(LS.md)
+            }
+
+            Toggle("Override Now-Ticker Date", isOn: $debugTimeEnabled)
                 .onChange(of: debugTimeEnabled) { _, enabled in
                     DebugClock.shared.overrideDate = enabled ? debugTimeValue : nil
                 }
 
-                if debugTimeEnabled {
-                    Divider().background(Color.lsTertiary.opacity(0.3))
-
-                    DatePicker("Fake time", selection: $debugTimeValue, displayedComponents: [.date, .hourAndMinute])
-                        .datePickerStyle(.compact)
-                        .tint(Color.lsBlue)
-                        .padding(LS.md)
-                        .onChange(of: debugTimeValue) { _, newValue in
-                            DebugClock.shared.overrideDate = newValue
-                        }
-
-                    Divider().background(Color.lsTertiary.opacity(0.3))
-
-                    Button {
-                        store.debugInjectRegularSchedule(for: debugTimeValue)
-                    } label: {
-                        HStack {
-                            Image(systemName: "calendar.badge.plus")
-                                .foregroundStyle(Color.lsSuccess)
-                            Text("Inject Regular Schedule for This Date")
-                                .font(.lsHeadline)
-                                .foregroundStyle(Color.lsSuccess)
-                            Spacer()
-                        }
-                        .padding(LS.md)
+            if debugTimeEnabled {
+                DatePicker("Fake time", selection: $debugTimeValue,
+                           displayedComponents: [.date, .hourAndMinute])
+                    .onChange(of: debugTimeValue) { _, new in
+                        DebugClock.shared.overrideDate = new
                     }
-
-                    Divider().background(Color.lsTertiary.opacity(0.3))
-                }
-
-                #if DEBUG
-                Button {
-                    Task {
-                        let content = UNMutableNotificationContent()
-                        content.title = "Morning Announcements"
-                        content.body  = "> This is a DEBUG test"
-                        content.sound = .default
-                        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 3, repeats: false)
-                        try? await UNUserNotificationCenter.current().add(
-                            UNNotificationRequest(identifier: "debug-announcement", content: content, trigger: trigger)
-                        )
-                    }
-                } label: {
-                    HStack {
-                        Image(systemName: "bell.circle.fill")
-                            .foregroundStyle(Color.lsBlue)
-                        Text("Send Announcement Notification")
-                            .font(.lsHeadline)
-                            .foregroundStyle(Color.lsBlue)
-                        Spacer()
-                        Text("3s")
-                            .font(.lsLabel)
-                            .foregroundStyle(Color.lsTertiary)
-                    }
-                    .padding(LS.md)
-                }
-                Divider().background(Color.lsTertiary.opacity(0.3))
-                #endif
-                
-                Button {
-                    LiveActivityService.shared.startDummy()
-                } label: {
-                    HStack {
-                        Image(systemName: "bolt.circle.fill")
-                            .foregroundStyle(Color.lsOrange)
-                        Text("Force Start Live Activity")
-                            .font(.lsHeadline)
-                            .foregroundStyle(Color.lsOrange)
-                        Spacer()
-                        Text("Dummy")
-                            .font(.lsLabel)
-                            .foregroundStyle(Color.lsTertiary)
-                    }
-                    .padding(LS.md)
-                }
-
-                Divider().background(Color.lsTertiary.opacity(0.3))
-
-                Button {
-                    let now      = Date()
-                    let dayKey   = DateFormatter.isoDay.string(from: now)
-                    let schedule = store.bellSchedules[dayKey]
-                    LiveActivityService.shared.startIfNeeded(
-                        schedule: schedule,
-                        settings: settings
-                    )
-                    print("[Debug] Real start attempted")
-                } label: {
-                    HStack {
-                        Image(systemName: "bolt.circle.fill")
-                            .foregroundStyle(Color.lsGold)
-                        Text("Force Start Live Activity")
-                            .font(.lsHeadline)
-                            .foregroundStyle(Color.lsGold)
-                        Spacer()
-                        Text("Real")
-                            .font(.lsLabel)
-                            .foregroundStyle(Color.lsTertiary)
-                    }
-                    .padding(LS.md)
-                }
-
-                Divider().background(Color.lsTertiary.opacity(0.3))
-
-                Button(role: .destructive) {
-                    Task {
-                        for activity in Activity<ScheduleActivityAttributes>.activities {
-                            await activity.end(nil, dismissalPolicy: .immediate)
-                        }
-                    }
-                } label: {
-                    HStack {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(Color.lsDestructive)
-                        Text("End Live Activity")
-                            .font(.lsHeadline)
-                            .foregroundStyle(Color.lsDestructive)
-                        Spacer()
-                    }
-                    .padding(LS.md)
+                Button("Inject Regular Schedule for This Date") {
+                    store.debugInjectRegularSchedule(for: debugTimeValue)
                 }
             }
-            .lsCard()
+
+            Button("Send Announcement Notification") {
+                Task {
+                    let content = UNMutableNotificationContent()
+                    content.title = "Morning Announcements"
+                    content.body  = "> This is a DEBUG test"
+                    content.sound = .default
+                    let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 3, repeats: false)
+                    try? await UNUserNotificationCenter.current().add(
+                        UNNotificationRequest(identifier: "debug-announcement",
+                                              content: content, trigger: trigger)
+                    )
+                }
+            }
+
+            Button("Force Start Live Activity (Dummy)") {
+                LiveActivityService.shared.startDummy()
+            }
+
+            Button("Force Start Live Activity (Real)") {
+                let dayKey = DateFormatter.isoDay.string(from: Date())
+                LiveActivityService.shared.startIfNeeded(
+                    schedule: store.bellSchedules[dayKey],
+                    settings: settings
+                )
+                print("[Debug] Real start attempted")
+            }
+
+            Button("Simulate Server Full") {
+                LiveActivityService.shared.simulateOverCapacity()
+                dismiss()
+            }
+
+            Button("End Live Activity", role: .destructive) {
+                Task {
+                    for activity in Activity<ScheduleActivityAttributes>.activities {
+                        await activity.end(nil, dismissalPolicy: .immediate)
+                    }
+                }
+            }
+        } header: {
+            Text("Debug")
+        } footer: {
+            Text("Debug builds only. None of this ships to students.")
         }
     }
+    #endif
 
-    private func sectionLabel(_ text: String, showsDivider: Bool = true) -> some View {
-        LSSectionLabel(text: text, showsDivider: showsDivider)
-    }
-
-    private var rowDivider: some View { LSRowDivider() }
-
-    // MARK: - Sign Out
+    // MARK: - Sign Out / About
 
     private var signOutSection: some View {
-        VStack(spacing: LS.md) {
-            Button {
-                HapticEngine.shared.tap()
+        Section {
+            Button("Sign Out", role: .destructive) {
                 showSignOutDialog = true
-            } label: {
-                HStack {
-                    Spacer()
-                    Text("Sign Out")
-                        .font(.lsHeadline)
-                        .foregroundStyle(Color.lsDestructive)
-                    Spacer()
-                }
-                .padding(LS.md)
             }
-            .lsCard()
+        }
+    }
 
-            // Below the card, not inside it, so it reads as a footer rather
-            // than a second action next to Sign Out. Apple requires the
-            // policy to be reachable from inside the app; it opens as a sheet
-            // rather than sending a student out to a browser.
+    private var aboutSection: some View {
+        Section {
+            // Apple requires the policy to be reachable from inside the app;
+            // it opens as a sheet rather than sending a student to a browser.
             Button("Privacy Policy") {
-                HapticEngine.shared.tap()
                 showPrivacyPolicy = true
             }
-            .font(.lsCaption)
-            .foregroundStyle(Color.lsSecondary)
+        } footer: {
+            Text("LHS Life \(Self.versionString)· La Salle High School · Yakima")
         }
+    }
+
+    private static var versionString: String {
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+        return "\(short) (\(build))"
     }
 }
 
 // MARK: - Period Row
 
 private struct PeriodRow: View {
-    @Binding var config: PeriodConfig
-    let isEditing: Bool
-    let onTapName: () -> Void
 
-    @State private var nameInput = ""
+    @Binding var config: PeriodConfig
     @State private var showColorPicker = false
-    @FocusState private var fieldFocused: Bool
 
     var body: some View {
         HStack(spacing: LS.md) {
             Text(String(config.id))
-                .font(.lsLabel)
-                .foregroundStyle(Color.lsTertiary)
-                .frame(width: 12, alignment: .center)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.tertiary)
+                .frame(width: 14, alignment: .center)
 
             Button {
                 showColorPicker = true
@@ -752,77 +454,93 @@ private struct PeriodRow: View {
                     .fill(Color.paletteColor(for: config))
                     .frame(width: 22, height: 22)
                     .lsSphereRim()
-                    .ifTrue(config.isEnabled) {
-                        $0.lsTintShadow(Color.paletteColor(for: config), opacity: 0.35)
-                    }
             }
             .buttonStyle(.plain)
             .opacity(config.isEnabled ? 1.0 : 0.4)
             .popover(isPresented: $showColorPicker, arrowEdge: .bottom) {
                 ColorPickerPopup(selectedIndex: config.colorIndex) { index in
-                    config = PeriodConfig(
-                        id: config.id,
-                        customName: config.customName,
-                        colorIndex: index,
-                        isEnabled: config.isEnabled
-                    )
+                    config = PeriodConfig(id: config.id, customName: config.customName,
+                                          colorIndex: index, isEnabled: config.isEnabled)
                     showColorPicker = false
                     HapticEngine.shared.tick()
                 }
                 .presentationCompactAdaptation(.popover)
             }
 
-            if isEditing {
-                TextField("Period \(config.id)", text: $nameInput)
-                    .font(.lsBody)
-                    .foregroundStyle(Color.lsPrimary)
-                    .focused($fieldFocused)
-                    .submitLabel(.done)
-                    .onSubmit { commitName() }
-                    .onAppear {
-                        nameInput = config.customName
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            fieldFocused = true
-                        }
-                    }
-            } else {
-                // The whole space between the color dot and the toggle is the
-                // edit target — previously only the text itself was tappable,
-                // so the gap between the label and the toggle did nothing. The
-                // Spacer lives INSIDE the button, and contentShape makes the
-                // empty area count as part of it.
-                Button(action: onTapName) {
-                    HStack(spacing: 0) {
-                        Text(config.displayName)
-                            .font(.lsBody)
-                            .foregroundStyle(config.isEnabled ? Color.lsPrimary : Color.lsSecondary)
-                        Spacer(minLength: 0)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
+            // Always editable — no tap-to-edit state, no focus juggling. The
+            // placeholder carries the period number when there's no name yet.
+            TextField(config.id == 0 ? "Period 0" : "Period \(config.id)",
+                      text: Binding(
+                        get: { config.customName },
+                        set: { config = PeriodConfig(id: config.id, customName: $0,
+                                                     colorIndex: config.colorIndex,
+                                                     isEnabled: config.isEnabled) }
+                      ))
+            .foregroundStyle(config.isEnabled ? Color.primary : Color.secondary)
+            .submitLabel(.done)
 
             Toggle("", isOn: $config.isEnabled)
                 .labelsHidden()
-                .tint(Color.lsBlue)
-                .frame(width: 51)
                 .onChange(of: config.isEnabled) { _, _ in HapticEngine.shared.tap() }
         }
-        .padding(.horizontal, LS.md)
-        .padding(.vertical, LS.sm)
-        .contentShape(Rectangle())
-        .onChange(of: isEditing) { _, editing in
-            if !editing { commitName() }
-        }
     }
+}
 
-    private func commitName() {
-        let trimmed = nameInput.trimmingCharacters(in: .whitespaces)
-        config = PeriodConfig(id: config.id, customName: trimmed,
-                              colorIndex: config.colorIndex, isEnabled: config.isEnabled)
-        fieldFocused = false
-        if isEditing { onTapName() }
+// MARK: - ASB Working Days
+
+/// Five weekdays, three states each, tapped to cycle: Off → Announcements &
+/// Store → Announcements → Off. The legend underneath is what makes the colors
+/// readable; without it the row is a puzzle.
+private struct ASBWorkingDaysRow: View {
+
+    @Bindable var settings: UserSettings
+
+    private static let weekdayNames = ["Mon", "Tue", "Wed", "Thu", "Fri"]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: LS.md) {
+            Text("Working days")
+                .font(.lsCaption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: LS.sm) {
+                ForEach(0..<5, id: \.self) { i in
+                    let mode = settings.asbWorkDays[i]
+                    Button {
+                        HapticEngine.shared.tick()
+                        settings.asbWorkDays[i] = mode.next
+                    } label: {
+                        Text(Self.weekdayNames[i])
+                            .font(.lsCaption)
+                            .foregroundStyle(mode == .off ? Color.lsSecondary : .white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, LS.sm)
+                            .background(
+                                mode == .off
+                                    ? Color.lsSurfaceRaised
+                                    : Color(hex: mode.color)
+                            )
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .animation(.lsSnappy, value: mode)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: LS.xs) {
+                ForEach(ASBDayMode.allCases.filter { $0 != .off }, id: \.rawValue) { m in
+                    HStack(spacing: LS.xs) {
+                        Circle()
+                            .fill(Color(hex: m.color))
+                            .frame(width: 8, height: 8)
+                        Text(m.label)
+                            .font(.lsCaption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, LS.xs)
     }
 }
 
@@ -833,18 +551,12 @@ private struct ColorPickerPopup: View {
     let onSelect: (Int) -> Void
 
     // Sized so the grid exactly fills the frame: 5 × 34 + 4 × 10 + 2 × 14 = 238.
-    // The old version declared .fixed(40) cells with LS.md padding, which
-    // needed 264pt inside a 240pt frame — that overflow is what made the
-    // spacing look broken.
     private static let dot: CGFloat = 34
     private static let gap: CGFloat = 10
     private static let inset: CGFloat = 14
     private static let width: CGFloat = (dot * 5) + (gap * 4) + (inset * 2)
 
-    private let columns = Array(
-        repeating: GridItem(.fixed(34), spacing: 10),
-        count: 5
-    )
+    private let columns = Array(repeating: GridItem(.fixed(34), spacing: 10), count: 5)
 
     var body: some View {
         LazyVGrid(columns: columns, spacing: Self.gap) {
@@ -873,13 +585,9 @@ private struct ColorPickerPopup: View {
         .padding(Self.inset)
         .frame(width: Self.width)
         // SwiftUI gives no API for the popover's arrow color — presentation
-        // background (which I tried first) paints the content rect only, and
-        // the system keeps drawing the arrow from its own backdrop, which is
-        // why it picked up the color of whatever block sat behind it.
-        //
-        // The standard workaround is to over-extend the background past the
-        // content bounds with negative padding so it bleeds into the arrow's
-        // area. -80 comfortably covers the arrow on every edge.
+        // background paints the content rect only, and the system keeps
+        // drawing the arrow from its own backdrop. Over-extending the
+        // background with negative padding bleeds it into the arrow's area.
         .background(Color.lsSurface.padding(-80))
     }
 }

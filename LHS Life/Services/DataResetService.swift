@@ -12,12 +12,15 @@
 //       person to sign in on a shared iPad lands in the previous student's
 //       grades.
 //    2. The Live Activity worker's record of this device.
+//    3. The calendar — in memory, the disk cache, and the app-group blob the
+//       widgets render from.
 //
 //  Deliberately still untouched: anything saved to Calendar or Reminders.
 //  See UserSettings.deleteAllData() for why.
 //
 
 import Foundation
+import WidgetKit
 internal import WebKit
 
 @MainActor
@@ -28,6 +31,15 @@ enum DataResetService {
         // swaps the whole tab container (and its web views) out for the
         // sign-in screen before the cleanup below runs.
         settings.deleteAllData()
+
+        // The calendar: in memory, on disk, and in the app group the widgets
+        // read from. Also synchronous, so the sign-in screen is already
+        // standing on an empty store by the time anyone can type into it.
+        CalendarStore.shared.clearAll()
+
+        // Widgets hold their own rendered timelines and would otherwise keep
+        // showing the cleared schedule until their next scheduled refresh.
+        WidgetCenter.shared.reloadAllTimelines()
 
         Task {
             await WKWebsiteDataStore.default().removeData(

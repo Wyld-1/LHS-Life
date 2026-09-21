@@ -137,7 +137,18 @@ enum PushTokenService {
         ].joined(separator: "|")
     }
 
-    static func register(token: Data, periods: [ScheduleActivityAttributes.ScheduledPeriod]) async {
+    /// What the worker said about this registration.
+    enum RegistrationResult: Equatable {
+        case registered
+        /// The school's server is full — see the worker's capacity gate. The
+        /// device is NOT registered and no pushes will arrive, so a Live
+        /// Activity started now would freeze on its first period.
+        case overCapacity(contact: String)
+        case failed
+    }
+
+    @discardableResult
+    static func register(token: Data, periods: [ScheduleActivityAttributes.ScheduledPeriod]) async -> RegistrationResult {
         let tokenString = token.map { String(format: "%02x", $0) }.joined()
 
         let apnsEnvironment = Self.apnsEnvironment
@@ -157,12 +168,12 @@ enum PushTokenService {
         )
         if UserDefaults.standard.string(forKey: signatureKey) == signature {
             LHSLogger.liveActivity.notice("PushToken: unchanged since last registration, skipping")
-            return
+            return .registered
         }
 
         LHSLogger.liveActivity.notice("PushToken: registering \(tokenString.prefix(16), privacy: .public)…")
 
-        guard let url = URL(string: "\(workerURL)/register") else { return }
+        guard let url = URL(string: "\(workerURL)/register") else { return .failed }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -190,6 +201,23 @@ enum PushTokenService {
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+
+            // Checked before the status code, not after it. The worker
+            // refuses with 507 so that OLDER builds fall into their failure
+            // branch and retry later instead of caching a false success; this
+            // build recognises the refusal by its payload, so the exact code
+            // it arrives with never matters.
+            if let payload = try? JSONDecoder().decode(RegisterResponse.self, from: data),
+               payload.status == "over_capacity" {
+                // Deliberately NOT saving the signature: a slot may free up
+                // tomorrow, and the app should ask again rather than remember
+                // the refusal forever.
+                LHSLogger.liveActivity.error(
+                    "PushToken: REFUSED — server at capacity (\(payload.registered ?? -1)/\(payload.limit ?? -1))"
+                )
+                return .overCapacity(contact: payload.contact ?? "the school office")
+            }
+
             if status == 200 {
                 UserDefaults.standard.set(signature, forKey: signatureKey)
                 // deviceId is logged so a worker log line can be matched to
@@ -204,13 +232,25 @@ enum PushTokenService {
                     first: \(transitions.first ?? -1) last: \(transitions.last ?? -1) end: \(endMinutes)
                     """
                 )
-            } else {
-                let body = String(data: data, encoding: .utf8) ?? "<no body>"
-                LHSLogger.liveActivity.error("PushToken: registration FAILED — HTTP \(status): \(body, privacy: .public)")
+                return .registered
             }
+
+            let body = String(data: data, encoding: .utf8) ?? "<no body>"
+            LHSLogger.liveActivity.error("PushToken: registration FAILED — HTTP \(status): \(body, privacy: .public)")
+            return .failed
         } catch {
             LHSLogger.liveActivity.error("PushToken: registration network error — \(String(describing: error), privacy: .public)")
+            return .failed
         }
+    }
+
+    /// The worker's JSON reply to /register.
+    private struct RegisterResponse: Decodable {
+        let status: String
+        let limit: Int?
+        let registered: Int?
+        let contact: String?
+        let message: String?
     }
 
     // MARK: - Unregister

@@ -25,6 +25,12 @@
  *       it expects today, and when it last checked in. Never shows push
  *       tokens. A student's name or email is never sent here.
  *
+ *       It also reports how many phones this Worker will accept (limit) and
+ *       how many slots are left. When the slots run out, the app tells new
+ *       students the server is full and points them at the address in
+ *       CAPACITY_CONTACT below, rather than letting them sit with a frozen
+ *       bell card. Raising the limit means moving to the Workers Paid plan.
+ *
  *   WORKER-URL/status?full=1
  *       The same list, but showing the actual bell times each phone is
  *       registered for ("08:00", "08:55"…) instead of a count. This is the
@@ -72,6 +78,12 @@
  *   APNS_TEAM_ID     — 10-char team ID from Apple Developer (e.g. "XYZ9876543")
  *   APNS_BUNDLE_ID   — App bundle ID (e.g. "com.lasalle.lhslife")
  *   APNS_PRIVATE_KEY — Contents of your .p8 file (the whole thing, newlines included)
+ *   MAX_DEVICES      — How many phones this Worker will accept (default 40).
+ *                      The Free plan allows 50 subrequests per invocation and
+ *                      KV operations count toward that, so a bell that pushes
+ *                      to more than ~45 devices dies partway through the loop.
+ *                      Raise this after moving to the Workers Paid plan, where
+ *                      the cap is 10,000.
  *   CLIENT_SECRET    — Shared secret the app sends on every request (see requireAuth).
  *                      Must match AppConstants.workerSecret in the iOS app.
  *                      Also the password for the browser sign-in box on
@@ -182,8 +194,16 @@ export default {
       // 8:00 transition even stored?" when a push doesn't land — a count of
       // 15 looks identical whether the times are right or nonsense.
       const full = url.searchParams.get("full") === "1";
+      const { limit: capacity, source } = await effectiveLimit(env);
+      const observed = await readCapacity(env);
       return new Response(JSON.stringify({
         deviceCount: devices.length,
+        limit: capacity,
+        limitSource: source,
+        slotsFree: Math.max(0, capacity - devices.length),
+        atCapacity: devices.length >= capacity,
+        provenCapacity: observed.proven,
+        ceilingHitAt: observed.wallAt,
         devices: devices.map(d => ({
           deviceId: d.deviceId,
           environment: d.environment,
@@ -206,6 +226,61 @@ export default {
     ctx.waitUntil(runPushCycle(env));
   },
 };
+
+/**
+ * Who to contact about raising the device limit. Sent to the app so the
+ * message a student sees names a real person rather than "contact support".
+ */
+const CAPACITY_CONTACT = "phudson@lasalleyakima.org";
+
+/**
+ * What the Worker has learned about its own capacity, stored in KV under
+ * capacity:observed as { proven, wall, wallAt }.
+ *
+ *   proven — the most pushes a bell has ever completed without complaint.
+ *            Evidence the budget is AT LEAST this high.
+ *   wall   — how many got through on a run that died with "Too many
+ *            subrequests". That is the real ceiling, measured rather than
+ *            assumed, and it is what /register enforces from then on.
+ *
+ * This exists so nobody has to know that the Free plan allows 50 subrequests
+ * per invocation, or remember to retune MAX_DEVICES after moving to Paid. The
+ * platform tells us; we write it down. An explicit MAX_DEVICES still wins,
+ * for when a human wants to hold the number down deliberately.
+ */
+const CAPACITY_KEY = "capacity:observed";
+const DEFAULT_MAX_DEVICES = 40;
+
+/**
+ * Subrequests one invocation will spend before it stops pushing. The Free
+ * plan allows 50 (KV operations included); 45 leaves margin, and
+ * CAPACITY_WRITE_RESERVE keeps room for the write that records the shortfall.
+ * On the Workers Paid plan the allowance is 10,000 — set SUBREQUEST_BUDGET to
+ * something like 900 there and the limit lifts itself from then on.
+ */
+const DEFAULT_SUBREQUEST_BUDGET = 45;
+const CAPACITY_WRITE_RESERVE = 3;
+
+async function readCapacity(env) {
+  const raw = await env.TOKENS.get(CAPACITY_KEY, "json");
+  return raw ?? { proven: 0, wall: null, wallAt: null };
+}
+
+/** The number /register enforces, and where it came from. */
+async function effectiveLimit(env) {
+  if (env.MAX_DEVICES) {
+    return { limit: Number(env.MAX_DEVICES), source: "MAX_DEVICES" };
+  }
+  const observed = await readCapacity(env);
+  if (observed.wall) {
+    return { limit: observed.wall, source: "measured at the wall" };
+  }
+  // Never hit the wall: trust what has actually worked, floor at the default.
+  return {
+    limit: Math.max(DEFAULT_MAX_DEVICES, observed.proven),
+    source: observed.proven > DEFAULT_MAX_DEVICES ? "proven in service" : "default",
+  };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MARK: - Auth
@@ -343,6 +418,43 @@ async function handleRegister(request, env) {
     return new Response(msg, { status: 500 });
   }
 
+  // Capacity gate.
+  //
+  // Without this the overflow is silent AND unfair: the push loop runs out of
+  // subrequests partway through, and because the device list comes back in a
+  // stable order it is the same students at the end of that list who lose
+  // their bell updates every single day, with nothing on screen to say why.
+  //
+  // Refusing the registration outright is worse for one student and better for
+  // everyone: the app can tell them plainly that the server is full, instead
+  // of leaving a Live Activity on their Lock Screen that silently freezes at
+  // first period. Devices already registered are always readmitted, so a
+  // student who had it yesterday does not lose their place to a newcomer.
+  const existing = await env.TOKENS.get(`token:${deviceId}`, "json");
+  if (!existing) {
+    const { limit, source } = await effectiveLimit(env);
+    const registered = await readRegistry(env);
+    if (registered.length >= limit) {
+      console.log(`[Register] REFUSED ${deviceId} — at capacity (${registered.length}/${limit}, ${source})`);
+      // 507, not 200.
+      //
+      // Builds released before this feature existed treat ANY 200 as "you are
+      // registered" and cache that for the rest of the day, so a 200 here
+      // would make an older app stop asking — even if a slot frees up an hour
+      // later. A non-2xx lands in their existing failure branch, which caches
+      // nothing and retries on the next launch. They still cannot show the
+      // explanation (that needs the app update), but they recover on their own
+      // the moment there is room.
+      return json({
+        status: "over_capacity",
+        limit,
+        registered: registered.length,
+        contact: CAPACITY_CONTACT,
+        message: "This school's Live Activity server is full.",
+      }, 507);
+    }
+  }
+
   const record = {
     deviceId,
     pushToken,
@@ -374,7 +486,7 @@ async function handleRegister(request, env) {
   }
 
   console.log(`[Register] Device ${deviceId} registered (${environment ?? "production"}) — ${(transitions ?? []).length} transitions, build ${appVersion ?? "?"} on iOS ${osVersion ?? "?"}, live within 2min`);
-  return new Response("OK", { status: 200 });
+  return json({ status: "registered" }, 200);
 }
 
 async function handleUnregister(request, env) {
@@ -646,7 +758,12 @@ function json(obj, status) {
 // MARK: - Push cycle
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function runPushCycle(env) {
+async function runPushCycle(rawEnv) {
+  // Everything this run touches goes through a counted KV handle, so the
+  // budget check below knows what has already been spent. Reset per run.
+  const tally = { n: 0 };
+  const env = { ...rawEnv, TOKENS: countingKV(rawEnv.TOKENS, tally), __tally: tally };
+
   const nowPT = nowInPT();
   const todayKey = formatDate(nowPT);
   const currentMinutes = nowPT.hours * 60 + nowPT.minutes;
@@ -691,61 +808,159 @@ async function runPushCycle(env) {
     return;
   }
 
-  const jwt = await getAPNsJWT(env);
+  const jwt = await getAPNsJWT(env);   // crypto only — not a subrequest
+  env.__jwt = jwt;
 
-  for (const device of devices) {
-    const transitions = device.transitions ?? [];
-    const endMinutes  = device.endMinutes  ?? null;
+  // Sent in parallel chunks rather than one device at a time.
+  //
+  // Sequentially, a bell reached the last phone N × round-trip later: at 500
+  // devices and ~60ms each that is half a minute of drift, and the next cron
+  // fires at 60s. In chunks of 25 the same bell lands in about a second.
+  //
+  // This does NOT change how many devices fit on a plan. Subrequests are
+  // counted per invocation, not per wave — 60 pushes is 60 subrequests
+  // whether they go out one at a time or all at once — so the Free plan's
+  // 50-per-invocation cap (KV operations included) still bites at roughly 45
+  // devices. Chunking buys latency, nothing else. The cap is why the chunk
+  // size is modest: a wave that overruns the limit fails unpredictably within
+  // that wave, and smaller waves keep the damage legible in the logs.
+  const CHUNK_SIZE = 25;
+  const budget = Number(env.SUBREQUEST_BUDGET ?? DEFAULT_SUBREQUEST_BUDGET);
+  let pushed = 0;
+  let stoppedShort = false;
 
-    if (transitions.length === 0) {
-      console.log(`[Cron] ${device.deviceId} — no transitions stored, skipping`);
-      continue;
-    }
-
-    // Find a transition that just fired (within the last 2 minutes)
-    const firedMinutes = transitions.find(t => {
-      const diff = currentMinutes - t;
-      return diff >= 0 && diff < 2;
-    });
-
-    if (firedMinutes !== undefined) {
-      const isLast = firedMinutes === transitions[transitions.length - 1];
-      console.log(`[Cron] ${device.deviceId} → transition at ${firedMinutes}min${isLast ? " (last)" : ""}`);
-
-      const { dead, environment: workingEnv } = await sendAPNsUpdate(device.pushToken,
-        { slotStartMinutes: firedMinutes, isEnded: false },
-        jwt, env, device.environment).catch(err => { console.log(`[APNs] ✗ ${device.deviceId}: ${err.message}`); return { dead: false }; });
-
-      if (dead) {
-        console.log(`[APNs] 💀 ${device.deviceId} — dead token, removing`);
-        await removeDevice(device.deviceId, env);
-        continue;
-      }
-
-      // The retry found the other endpoint — persist it so subsequent pushes
-      // go straight there instead of paying the failed attempt every time.
-      if (workingEnv && workingEnv !== device.environment) {
-        await updateDeviceEnvironment(device.deviceId, workingEnv, env);
-      }
-    }
-
-    // End-of-day dismissal.
+  for (let i = 0; i < devices.length; i += CHUNK_SIZE) {
+    // Stop BEFORE the platform stops us.
     //
-    // Fired directly off endMinutes rather than via an endpush:{id}:{date}
-    // key. That key cost one KV READ per device per minute (half the read
-    // budget) and one WRITE per device per day, purely to remember something
-    // already present in the record. The same 2-minute window used for
-    // transitions applies; a duplicate "end" event is harmless because iOS
-    // has already dismissed the activity and the second push is a no-op.
-    if (endMinutes !== null && endMinutes > 0) {
-      const endDiff = currentMinutes - endMinutes;
-      if (endDiff >= 0 && endDiff < 2) {
-        console.log(`[Cron] ${device.deviceId} — sending end push (${endMinutes}min)`);
-        const { dead } = await sendAPNsEnd(device.pushToken,
-          { slotStartMinutes: 0, isEnded: true },
-          jwt, env, device.environment).catch(err => { console.log(`[APNs] ✗ ${device.deviceId}: ${err.message}`); return { dead: false }; });
-        if (dead) await removeDevice(device.deviceId, env);
-      }
+    // Cloudflare throws once an invocation exceeds its subrequest allowance
+    // (50 on Free, KV operations included). The catch is that after that
+    // throw every further subrequest fails too — including the KV write that
+    // would record what just happened. So the ceiling cannot be discovered by
+    // running into it; it has to be respected in advance.
+    //
+    // RESERVE leaves room for the bookkeeping write below, so the run always
+    // has enough budget left to say what it could not do.
+    const remaining = budget - spent(env) - CAPACITY_WRITE_RESERVE;
+    if (remaining <= 0) { stoppedShort = true; break; }
+
+    const chunk = devices.slice(i, i + Math.min(CHUNK_SIZE, remaining));
+    await Promise.all(chunk.map(device => pushToDevice(device, currentMinutes, env)));
+    pushed += chunk.length;
+    if (chunk.length < CHUNK_SIZE && i + chunk.length < devices.length) { stoppedShort = true; break; }
+  }
+
+  if (stoppedShort) {
+    console.error(
+      `[Cron] SUBREQUEST CEILING — pushed ${pushed} of ${devices.length}; ` +
+      `the rest get no bell this minute. Recording capacity.`
+    );
+    await recordCapacityWall(env, pushed);
+  } else {
+    await recordCapacityProven(env, pushed);
+  }
+}
+
+/**
+ * How many subrequests this invocation has spent so far.
+ *
+ * Every KV read, write, delete, list and every APNs push counts against the
+ * same allowance, so they are all tallied through one counter that
+ * scheduled() resets at the start of each run.
+ */
+function spent(env) { return env.__tally ? env.__tally.n : 0; }
+
+/** Wraps a KV namespace so every operation is counted. */
+function countingKV(tokens, tally) {
+  return {
+    get:    (...a) => { tally.n++; return tokens.get(...a); },
+    put:    (...a) => { tally.n++; return tokens.put(...a); },
+    delete: (...a) => { tally.n++; return tokens.delete(...a); },
+    list:   (...a) => { tally.n++; return tokens.list(...a); },
+  };
+}
+
+/** Remember the ceiling this run had to stop at. */
+async function recordCapacityWall(env, pushed) {
+  const observed = await readCapacity(env);
+  // Keep the LOWEST ceiling ever seen: that is the number that actually fits.
+  const wall = observed.wall ? Math.min(observed.wall, pushed) : pushed;
+  await env.TOKENS.put(CAPACITY_KEY, JSON.stringify({
+    proven: observed.proven, wall, wallAt: new Date().toISOString(),
+  }));
+}
+
+/**
+ * Remember a bell that went out in full. Only written when the number grows,
+ * so this costs one KV write on the day the school adds its biggest cohort
+ * and nothing on any other day. This is what lets the limit rise on its own
+ * after a move to the Paid plan — no retuning, no redeploy.
+ */
+async function recordCapacityProven(env, pushed) {
+  if (pushed === 0) return;
+  const observed = await readCapacity(env);
+  if (pushed <= observed.proven) return;
+  await env.TOKENS.put(CAPACITY_KEY, JSON.stringify({ ...observed, proven: pushed }));
+  console.log(`[Capacity] ${pushed} pushes completed cleanly — new proven capacity`);
+}
+
+/**
+ * Everything one device needs this minute: the transition push, and the
+ * end-of-day dismissal. Each device is independent, which is what makes the
+ * chunked parallelism above safe — no two of these touch the same KV key.
+ */
+async function pushToDevice(device, currentMinutes, env) {
+  const jwt = env.__jwt;
+  const transitions = device.transitions ?? [];
+  const endMinutes  = device.endMinutes  ?? null;
+
+  if (transitions.length === 0) {
+    console.log(`[Cron] ${device.deviceId} — no transitions stored, skipping`);
+    return;
+  }
+
+  // Find a transition that just fired (within the last 2 minutes)
+  const firedMinutes = transitions.find(t => {
+    const diff = currentMinutes - t;
+    return diff >= 0 && diff < 2;
+  });
+
+  if (firedMinutes !== undefined) {
+    const isLast = firedMinutes === transitions[transitions.length - 1];
+    console.log(`[Cron] ${device.deviceId} → transition at ${firedMinutes}min${isLast ? " (last)" : ""}`);
+
+    const { dead, environment: workingEnv } = await sendAPNsUpdate(device.pushToken,
+      { slotStartMinutes: firedMinutes, isEnded: false },
+      jwt, env, device.environment).catch(err => { console.log(`[APNs] ✗ ${device.deviceId}: ${err.message}`); return { dead: false }; });
+
+    if (dead) {
+      console.log(`[APNs] 💀 ${device.deviceId} — dead token, removing`);
+      await removeDevice(device.deviceId, env);
+      return;
+    }
+
+    // The retry found the other endpoint — persist it so subsequent pushes
+    // go straight there instead of paying the failed attempt every time.
+    if (workingEnv && workingEnv !== device.environment) {
+      await updateDeviceEnvironment(device.deviceId, workingEnv, env);
+    }
+  }
+
+  // End-of-day dismissal.
+  //
+  // Fired directly off endMinutes rather than via an endpush:{id}:{date}
+  // key. That key cost one KV READ per device per minute (half the read
+  // budget) and one WRITE per device per day, purely to remember something
+  // already present in the record. The same 2-minute window used for
+  // transitions applies; a duplicate "end" event is harmless because iOS
+  // has already dismissed the activity and the second push is a no-op.
+  if (endMinutes !== null && endMinutes > 0) {
+    const endDiff = currentMinutes - endMinutes;
+    if (endDiff >= 0 && endDiff < 2) {
+      console.log(`[Cron] ${device.deviceId} — sending end push (${endMinutes}min)`);
+      const { dead } = await sendAPNsEnd(device.pushToken,
+        { slotStartMinutes: 0, isEnded: true },
+        jwt, env, device.environment).catch(err => { console.log(`[APNs] ✗ ${device.deviceId}: ${err.message}`); return { dead: false }; });
+      if (dead) await removeDevice(device.deviceId, env);
     }
   }
 }
@@ -824,6 +1039,7 @@ async function sendAPNsPayload(pushToken, payload, jwt, env, environment = "prod
 
 /** Single APNs attempt against one host. Returns { dead, badToken }. */
 async function sendToHost(pushToken, payload, jwt, env, environment) {
+  if (env.__tally) env.__tally.n++;   // an APNs push is a subrequest like any other
   const bundleId = env.APNS_BUNDLE_ID;
   const host = (environment === "sandbox")
     ? "api.sandbox.push.apple.com"

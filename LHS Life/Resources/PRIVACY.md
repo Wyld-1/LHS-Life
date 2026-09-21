@@ -60,7 +60,7 @@ Anything saved to Calendar or Reminders belongs to you and stays there, even if 
 - **Turn off Live Activities** (LHS Life Settings) to stop sending anything to the LHS Life server. Your record there is removed when the current Live Activity ends.
 - **Turn off notifications, calendar, or reminders access** at any time in the iOS Settings app, under LHS Life.
 - **Sign Out** (LHS Life Settings) clears your email and graduation year.
-- **Delete All Data** (LHS Life Settings) resets all LHS Life settings on your device and in iCloud, signs you out of PowerSchool, Schoology, and lunch ordering, and removes your device from the LHS Life server.
+- **Delete All Data** (LHS Life Settings) resets all LHS Life settings on your device and in iCloud, clears the saved copy of the school calendar, signs you out of PowerSchool, Schoology, and lunch ordering, and removes your device from the LHS Life server.
 - **Deleting the app** removes everything it stored on your device.
 
 Because the server doesn't know who you are, there's nothing about you to look up or delete on request beyond the steps above. If you have questions, contact us below.

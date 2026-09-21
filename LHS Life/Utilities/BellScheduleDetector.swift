@@ -36,6 +36,38 @@ enum BellScheduleDetector {
         return bellKeywords.contains { t.contains($0) }
     }
 
+    // MARK: - Schedule Type From Title
+
+    /// Which flavour of day a schedule event's TITLE describes.
+    ///
+    /// BellScheduleParser infers the same thing from the posted table's own
+    /// heading lines, which is better when a table exists. This exists for the
+    /// days where there is no text at all to read — the times came out of a
+    /// picture (ScheduleImageParser) — and the title is the only signal left.
+    /// The keyword order mirrors that inference exactly, so the two agree.
+    static func scheduleType(fromTitle title: String) -> ScheduleType {
+        let t = title.lowercased()
+        let hasLiturgy  = t.contains("liturgy") || t.contains("mass")
+        let hasOdd      = t.contains("odd")
+        let hasEven     = t.contains("even")
+        let hasBlock    = t.contains("block")
+        let hasEarlyRel = t.contains("early release") || t.contains("early dismissal")
+
+        if t.contains("final exam") || t.contains("finals") { return .finals }
+        if t.contains("late start")                          { return .lateStart }
+        if hasEarlyRel && hasLiturgy                         { return .earlyReleaseLiturgy }
+        if hasEarlyRel                                       { return .earlyRelease }
+        if hasOdd  && hasBlock && hasLiturgy                 { return .oddBlockLiturgy }
+        if hasEven && hasBlock && hasLiturgy                 { return .evenBlockLiturgy }
+        if hasOdd  && hasBlock                               { return .oddBlock }
+        if hasEven && hasBlock                               { return .evenBlock }
+        if t.contains("assembly") || t.contains("rally")     { return .assembly }
+        if t.contains("regular") && hasLiturgy               { return .regularLiturgy }
+        if t.contains("regular")                             { return .regular }
+        if hasLiturgy                                        { return .regularLiturgy }
+        return .unknown
+    }
+
     // MARK: - Category Inference (fallback only)
     //
     // LaSalle's real feed tags every event with CATEGORIES:, which

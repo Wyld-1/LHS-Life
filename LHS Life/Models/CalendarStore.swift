@@ -9,6 +9,7 @@
 
 import Foundation
 import Observation
+import OSLog
 import SwiftUI
 
 // MARK: - CalendarUIState
@@ -202,6 +203,9 @@ final class CalendarStore {
             let fetched = try await iCalService.fetchEvents()
             cache.saveEvents(fetched)
             applyEvents(fetched)
+            // Before notifications, because a day whose times come from a
+            // picture still needs its reminders fired against the real bells.
+            await applyImageSchedules(in: fetched)
             lastFetched = Date()
             await scheduleNotifications(for: fetched)
         } catch {
@@ -232,6 +236,66 @@ final class CalendarStore {
         await NotificationService.scheduleAbnormalScheduleNotifications(settings: settings, store: self)
         await NotificationService.scheduleLiveActivityReminderNotifications(settings: settings, store: self)
         await NotificationService.scheduleClassOrientationNotification(events: fetched, settings: settings)
+    }
+
+    /// Installs schedules for days whose times were posted as a PICTURE.
+    ///
+    /// Runs after applyEvents because it needs the floor rules to have already
+    /// had their say: a day like the Liturgy schedule has no parseable table,
+    /// so the Professional Dress floor will have quietly filled in a REGULAR
+    /// schedule. Reading the picture replaces that guess with the real bells.
+    /// See ScheduleImageParser for why this reads an image at all.
+    ///
+    /// Only floor-sourced days are overridden. A real posted table always
+    /// wins — it is authoritative and free, where this costs a download and
+    /// an OCR pass.
+    private func applyImageSchedules(in fetched: [SchoolEvent]) async {
+        for event in fetched where event.hasBellSchedule {
+            let dayKey = event.dayKey
+            let existing = bellSchedules[dayKey]
+            // Parsed from a real table already — leave it alone.
+            if let existing, existing.sourceEventID != "floor", existing.sourceEventID != "serve-week-floor" {
+                continue
+            }
+            guard let url = ScheduleImageParser.imageURL(inHTML: event.htmlDescription) else { continue }
+            guard let periods = await ScheduleImageParser.periods(at: url, eventID: event.id),
+                  !periods.isEmpty else {
+                LHSLogger.parser.error("Schedule image for \(dayKey, privacy: .public) could not be read")
+                continue
+            }
+
+            bellSchedules[dayKey] = BellSchedule(
+                id: "\(event.id)-image",
+                date: event.startDate,
+                scheduleType: BellScheduleDetector.scheduleType(fromTitle: event.title),
+                periods: periods,
+                sourceEventID: event.id
+            )
+            LHSLogger.parser.notice(
+                "Schedule for \(dayKey, privacy: .public) read from image — \(periods.count) periods"
+            )
+        }
+        cachedTodayKey = ""
+        SharedStore.write(events: events, bellSchedules: bellSchedules)
+    }
+
+    /// Every trace of the calendar this device has loaded: memory, the disk
+    /// cache, and the app-group blob the widgets read.
+    ///
+    /// Part of Delete All Data. Without it, "delete my data" left the events
+    /// file on disk and today's bell schedule in the widget, so the next
+    /// student to sign in on a shared phone would see the previous student's
+    /// schedule until the first fetch landed.
+    func clearAll() {
+        events = []
+        bellSchedules = [:]
+        lastFetched = nil
+        error = nil
+        cachedTodayKey = ""
+        cachedTodayIsHoliday = false
+        cachedTodayIsPathways = false
+        cache.clearCache()
+        SharedStore.clear()
     }
 
     // MARK: - Queries

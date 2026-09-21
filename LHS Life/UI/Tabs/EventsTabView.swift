@@ -1339,7 +1339,9 @@ private struct YearView: View {
                     ScrollView(.vertical, showsIndicators: false) {
                         LazyVStack(spacing: LS.xl) {
                             ForEach(yearRange, id: \.self) { offset in
-                                YearGrid(year: year(for: offset), store: store) { date in
+                                YearGrid(year: year(for: offset),
+                                         store: store,
+                                         availableWidth: geo.size.width) { date in
                                     uiState.zoomIn(to: date)
                                 }
                                 .id(offset)
@@ -1364,11 +1366,30 @@ private struct YearView: View {
 private struct YearGrid: View {
     let year: Int
     let store: CalendarStore
+    /// Width of the whole view, so the day cells can be sized to fit rather
+    /// than assumed.
+    let availableWidth: CGFloat
     let onTap: (Date) -> Void
 
     private let cal   = Calendar.current
     private let today = Calendar.current.startOfDay(for: Date())
     private let cols  = 3
+
+    /// Day cells used to be a fixed 18pt, which made each mini-month exactly
+    /// 7 × 18 = 126pt wide no matter the device. Three of those plus the
+    /// gutters needed 426pt on a screen that is 402pt, so the outer columns
+    /// ran off both edges and the year label looked cut off — it read as
+    /// "smashed against the bezel" but was really overflow.
+    ///
+    /// Derived from the real width instead: subtract the outer padding and
+    /// the two gaps between columns, split what's left three ways, then seven
+    /// ways again for the days of the week. Capped so a wide iPad window
+    /// doesn't inflate 8pt numerals inside enormous cells.
+    private var daySize: CGFloat {
+        let gutters = (LS.sm * 2) + (LS.sm * CGFloat(cols - 1))
+        let perMonth = (availableWidth - gutters) / CGFloat(cols)
+        return min(floor(perMonth / 7 * 10) / 10, 22)
+    }
 
     private var isCurrentYear: Bool { year == cal.component(.year, from: today) }
 
@@ -1382,7 +1403,7 @@ private struct YearGrid: View {
             Text(String(format: "%d", year))
                 .font(.system(size: 26, weight: .bold, design: .rounded))
                 .foregroundStyle(isCurrentYear ? Color.lsBlue : Color.lsPrimary)
-                .padding(.horizontal, LS.md)
+                .padding(.horizontal, LS.sm)
 
             Rectangle()
                 .fill(Color.lsTertiary.opacity(0.2))
@@ -1401,12 +1422,13 @@ private struct YearGrid: View {
                             firstOfMonth: firstOfMonth(month),
                             store: store,
                             today: today,
+                            daySize: daySize,
                             onTap: onTap
                         )
                         .frame(maxWidth: .infinity)
                     }
                 }
-                .padding(.horizontal, LS.md)
+                .padding(.horizontal, LS.sm)
             }
         }
     }
@@ -1418,10 +1440,10 @@ private struct MiniMonthView: View {
     let firstOfMonth: Date
     let store: CalendarStore
     let today: Date
+    let daySize: CGFloat
     let onTap: (Date) -> Void
 
     private let cal = Calendar.current
-    private let daySize: CGFloat = 18
 
     private var monthName: String {
         let f = DateFormatter(); f.dateFormat = "MMM"; return f.string(from: firstOfMonth)

@@ -31,7 +31,6 @@ struct PrivacyPolicyView: View {
                     .foregroundStyle(Color.lsPrimary)
                 Spacer()
                 Button("Done") {
-                    HapticEngine.shared.success()
                     dismiss()
                 }
                 .font(.lsHeadline)

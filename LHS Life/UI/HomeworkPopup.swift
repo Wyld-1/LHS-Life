@@ -3,7 +3,13 @@
 //  LHS Life
 //
 //  Centered popup card floating over the current tab.
-//  Fixed vertical position — ignores keyboard movements entirely.
+//
+//  The card centers in whatever space the keyboard leaves, rather than
+//  holding a fixed position. It used to ignore the keyboard entirely with a
+//  fixed -40 offset, tuned for an iPhone in portrait; on an iPad in landscape
+//  the keyboard is half the screen and swallowed the Save and Cancel buttons
+//  whole. The dimming layer still covers everything, keyboard included — only
+//  the card moves.
 //
 
 import SwiftUI
@@ -45,9 +51,8 @@ struct HomeworkPopup: View {
             card
                 .frame(maxWidth: 400)
                 .padding(.horizontal, LS.xl)
-                .offset(y: -40)
+                .padding(.bottom, LS.md)
         }
-        .ignoresSafeArea(.keyboard)
         .onAppear {
             selectedPeriodID = defaultPeriodID()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { titleFocused = true }

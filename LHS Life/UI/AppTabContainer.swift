@@ -109,6 +109,11 @@ struct AppTabContainer: View {
     /// the appearance of a fast one makes the app worse for everyone, and a
     /// slow launch is more noticeable than a brief flash.
     @State private var launchScreenDue = false
+    @State private var showCapacityAlert = false
+    /// Observed so the capacity refusal below can reach the UI; the
+    /// service is @Observable and a singleton, so this is a reference to
+    /// the same instance LiveActivityService.shared hands everyone else.
+    @State private var liveActivity = LiveActivityService.shared
     @State private var calendarUI   = CalendarUIState()
     @State private var navCoordinator = AppNavigationCoordinator.shared
 
@@ -148,6 +153,34 @@ struct AppTabContainer: View {
         (!store.events.isEmpty || launchDeadlinePassed) ? 1.0 : 0.0
     }
 
+    /// Spelled out rather than terse: this is the one failure in the app the
+    /// student can actually act on, and the ask ("please upgrade the server")
+    /// makes no sense without saying what is full and what still works.
+    private var capacityMessage: String {
+        let contact = liveActivity.capacityBlock?.contact ?? "the school office"
+        return """
+        Live Activities couldn't be started because the school's server is at capacity.
+
+        Everything else works normally. This only affects the live bell schedule on your Lock Screen.
+
+        If you'd like Live Activities, email \(contact) and ask for a server upgrade.
+        """
+    }
+
+    /// Drops the launch screen once the gate is satisfied. Safe to call as
+    /// often as you like; it does nothing after the first time.
+    ///
+    /// Deliberately NOT wrapped in withAnimation. That opens an animated
+    /// transaction around the whole state write, so every geometry change
+    /// resulting from it gets animated from old to new — which is what made
+    /// the UI appear to fly in from the edges on both iPhone and iPad. The
+    /// fade lives on LaunchScreen's own transition, which is the only thing
+    /// that should animate.
+    private func resolveLaunchIfReady() {
+        guard isLaunching, launchProgress >= 1.0 else { return }
+        isLaunching = false
+    }
+
     var body: some View {
         Group {
             if isPhone { iPhoneLayout } else { iPadLayout }
@@ -160,18 +193,7 @@ struct AppTabContainer: View {
             default:          break
             }
         }
-        .onChange(of: launchProgress) { _, progress in
-            if progress >= 1.0 && isLaunching {
-                // Deliberately NOT wrapped in withAnimation. That opens an
-                // animated transaction around the whole state write, so every
-                // geometry change resulting from it gets animated from old to
-                // new — which is what made the UI appear to fly in from the
-                // edges on both iPhone and iPad. The fade now lives on
-                // LaunchScreen's own transition, which is the only thing that
-                // should animate.
-                isLaunching = false
-            }
-        }
+        .onChange(of: launchProgress) { _, _ in resolveLaunchIfReady() }
         .onChange(of: selectedTab) { _, new in
             if new == .homework {
                 selectedTab = previousTab
@@ -199,11 +221,50 @@ struct AppTabContainer: View {
             async let s: () = schoologyState.initialize()
             _ = await (l, p, s)
         }
+        // The school's worker refused this device because it is full.
+        .onChange(of: liveActivity.capacityBlock) { _, block in
+            guard block != nil else { return }
+            // Once a day at most. The student cannot fix this themselves —
+            // it is someone else's budget decision — so repeating it every
+            // launch would be nagging them about it.
+            let today = DateFormatter.isoDay.string(from: Date())
+            let key = "lhs_capacity_notice_day"
+            guard UserDefaults.standard.string(forKey: key) != today else { return }
+            UserDefaults.standard.set(today, forKey: key)
+            showCapacityAlert = true
+        }
+        .alert("Live Activities Are Full", isPresented: $showCapacityAlert) {
+            if let contact = liveActivity.capacityBlock?.contact,
+               let url = URL(string: "mailto:\(contact)?subject=LHS%20Life%20server%20upgrade&body=Hello%2C%0A%0AI%20would%20like%20to%20use%20Live%20Activities%20in%20LHS%20Life%2C%20but%20the%20app%20says%20the%20school%27s%20server%20is%20full.%20Could%20the%20server%20be%20upgraded%3F%0A%0AThank%20you%21") {
+                Link("Ask for an Upgrade", destination: url)
+            }
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(capacityMessage)
+        }
+        .task {
+            // Catches the case onChange structurally cannot: a launch that is
+            // ALREADY finished when this view is created.
+            //
+            // onChange only fires on a change. When a student signs in while
+            // the app is running — the second sign-in after Delete All Data or
+            // Sign Out — CalendarStore is a singleton that still holds the
+            // events it loaded the first time, so launchProgress is 1.0 from
+            // the very first render of this view. Nothing ever changed, so
+            // nothing ever cleared isLaunching, and the launch screen sat
+            // there until the app was force-quit. That is the whole bug: the
+            // gate was watching for an edge that had already passed.
+            resolveLaunchIfReady()
+        }
         .task {
             // Safety net — see launchProgress. Never let the launch screen
             // outlive this, regardless of what the calendar is doing.
             try? await Task.sleep(for: .seconds(2.5))
             launchDeadlinePassed = true
+            // Explicit, not implied: if launchProgress was already 1.0 the
+            // line above changes nothing, and the onChange above would not
+            // fire. This is the unconditional backstop.
+            resolveLaunchIfReady()
         }
         .task {
             // Delay-then-show. If loading beats this, isLaunching is already

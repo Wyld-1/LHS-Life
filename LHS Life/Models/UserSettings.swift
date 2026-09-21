@@ -51,7 +51,7 @@ enum ASBDayMode: Int, Codable, CaseIterable {
     var label: String {
         switch self {
         case .off:                   return "Off"
-        case .announcementsAndStore: return "Announcements & Store"
+        case .announcementsAndStore: return "Announcements & Student Store"
         case .announcementsOnly:     return "Announcements"
         }
     }
