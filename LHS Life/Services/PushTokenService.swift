@@ -286,7 +286,19 @@ enum PushTokenService {
             for await token in activity.pushTokenUpdates {
                 await register(token: token, periods: periods)  // re-sends on token rotation
             }
-            // Token stream ended — activity ended, unregister
+            // Token stream ended — this activity is gone. Unregister only if
+            // no OTHER activity replaced it.
+            //
+            // Registration is keyed by device, not by activity. When a card is
+            // replaced mid-day because its schedule changed, the old card's
+            // stream ends at about the moment the new card registers — and an
+            // unregister landing after that registration would delete the new
+            // card's record, silently stopping every push for the rest of the
+            // day. The replacement is still the device's live registration.
+            let replaced = Activity<ScheduleActivityAttributes>.activities.contains {
+                $0.id != activity.id && ($0.activityState == .active || $0.activityState == .stale)
+            }
+            guard !replaced else { return }
             await unregister()
         }
     }

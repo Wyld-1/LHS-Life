@@ -30,6 +30,7 @@ import OSLog
 import Vision
 import CoreGraphics
 import ImageIO
+import CryptoKit
 
 enum ScheduleImageParser {
 
@@ -70,6 +71,19 @@ enum ScheduleImageParser {
 
         Cache.save(parsed, for: url)
         return parsed.asPeriods(eventID: eventID)
+    }
+
+    /// The reading from a previous run, straight from disk — no network, no
+    /// OCR, no waiting. Synchronous on purpose: the calendar loads its cached
+    /// events the instant the app opens, and this lets an image-posted day be
+    /// correct in that same instant instead of ~12 seconds later, once the
+    /// network fetch and the async read have finished.
+    ///
+    /// That gap is not cosmetic. The Live Activity is started as soon as the
+    /// app becomes active, and it keeps whatever schedule it was started with
+    /// for the rest of the day.
+    static func cachedPeriods(at url: URL, eventID: String) -> [Period]? {
+        Cache.load(for: url)?.asPeriods(eventID: eventID)
     }
 
     // MARK: - Download
@@ -247,9 +261,12 @@ enum ScheduleImageParser {
         }
 
         private static func file(for url: URL) -> URL? {
-            // The URL's last component is unique per posted picture and already
-            // filename-shaped; hashing keeps it short and legal regardless.
-            let key = String(abs(url.absoluteString.hashValue))
+            // SHA-256, NOT hashValue: Swift reseeds String.hashValue on every
+            // launch, so a hashValue key names a different file each run and
+            // the cache never hits after a cold start — exactly when the Live
+            // Activity needs it.
+            let digest = SHA256.hash(data: Data(url.absoluteString.utf8))
+            let key = digest.prefix(12).map { String(format: "%02x", $0) }.joined()
             return directory?.appendingPathComponent("schedule-image-\(key).json")
         }
 

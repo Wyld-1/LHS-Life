@@ -64,27 +64,37 @@ enum NotificationService {
 
     // MARK: - Professional Dress
 
-    static func scheduleProfessionalDressNotifications(for events: [SchoolEvent]) async {
-        center.removePendingNotificationRequests(withIdentifiers: events.map { "dress-\($0.id)" })
-        guard await isAuthorized else { return }
+    static func scheduleProfessionalDressNotifications(for events: [SchoolEvent],
+                                                        settings: UserSettings) async {
+        // By prefix, not by the IDs of the events passed in — an event that
+        // was since removed from the calendar would otherwise keep its reminder.
+        let existing = await center.pendingNotificationRequests()
+        let ids = existing.filter { $0.identifier.hasPrefix("dress-") }.map { $0.identifier }
+        center.removePendingNotificationRequests(withIdentifiers: ids)
+
+        guard settings.professionalDressNotificationsEnabled, await isAuthorized else { return }
         for event in events.filter({ $0.isProfessionalDress }) {
-            await scheduleDressNotification(for: event)
+            await scheduleDressNotification(for: event, minutes: settings.professionalDressReminderMinutes)
         }
     }
 
-    private static func scheduleDressNotification(for event: SchoolEvent) async {
+    /// `minutes` is the chosen time of day: noon or later fires the evening
+    /// before the event, earlier than noon the morning of it.
+    private static func scheduleDressNotification(for event: SchoolEvent, minutes: Int) async {
         let calendar = Calendar.current
-        guard let evening = calendar.date(byAdding: .day, value: -1, to: event.startDate) else { return }
-        var comps = calendar.dateComponents([.year, .month, .day], from: evening)
-        comps.hour = 21; comps.minute = 0; comps.second = 0
+        let nightBefore = minutes >= 12 * 60
+        guard let day = calendar.date(byAdding: .day, value: nightBefore ? -1 : 0, to: event.startDate)
+        else { return }
+        var comps = calendar.dateComponents([.year, .month, .day], from: day)
+        comps.hour = minutes / 60; comps.minute = minutes % 60; comps.second = 0
         guard let fireDate = calendar.date(from: comps), fireDate > Date() else { return }
 
         let content = UNMutableNotificationContent()
-        content.title = "Professional Dress Tomorrow"
+        content.title = nightBefore ? "Professional Dress Tomorrow" : "Professional Dress Today"
         content.body  = "For \(event.title)."
         content.sound = .default
-        // Deliberately left .active. This fires at 9 PM about TOMORROW — if a
-        // student has a Focus on at 9 PM, breaking through it is presumptuous.
+        // Deliberately left .active. Evening or early morning, a student with
+        // a Focus on has chosen quiet — breaking through it is presumptuous.
         // Time Sensitive is a limited budget of user goodwill; spending it on
         // something with twelve hours of lead time devalues it for the
         // notifications that genuinely can't wait.
@@ -275,9 +285,9 @@ enum NotificationService {
     // MARK: - Live Activity Start Reminder
 
     /// Schedules a "School starts soon" notification 30 min before the first
-    /// enabled period on regular school days, for users with liveActivityMode == .everyDay.
-    /// .abnormalOnly users already get the abnormal schedule notification.
-    /// .off users don't have live activities so the nudge is pointless.
+    /// enabled period on every day the user's mode would start a Live
+    /// Activity — every school day for Every Day, abnormal days for Abnormal
+    /// Days. .off users get the abnormal schedule notification instead.
     static func scheduleLiveActivityReminderNotifications(
         settings: UserSettings,
         store: CalendarStore
@@ -287,7 +297,7 @@ enum NotificationService {
         let ids = existing.filter { $0.identifier.hasPrefix("lareminder-") }.map { $0.identifier }
         center.removePendingNotificationRequests(withIdentifiers: ids)
 
-        guard settings.liveActivityMode == .everyDay, await isAuthorized else { return }
+        guard settings.liveActivityMode != .off, await isAuthorized else { return }
 
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
@@ -300,8 +310,11 @@ enum NotificationService {
             let dayKey = DateFormatter.isoDay.string(from: date)
             guard let schedule = store.bellSchedule(for: dayKey) else { continue }
 
-            // Only on regular days — abnormal days are covered by the abnormal notification
-            guard schedule.scheduleType == .regular else { continue }
+            // Same rule that decides whether the Live Activity starts. This
+            // used to be `scheduleType == .regular`, which silently skipped
+            // every block day, late start and liturgy for Every Day users and
+            // left Abnormal Days users with no reminder at all.
+            guard settings.modeWantsLiveActivity(on: schedule.scheduleType) else { continue }
 
             // Skip Pathways Days
             let isPathways = PathwaysService.isPathwaysDay(
@@ -362,8 +375,8 @@ enum NotificationService {
         center.removePendingNotificationRequests(withIdentifiers: ids)
 
         // Send abnormal notifications only for .off users.
-        // .everyDay — already see Dynamic Island, no notification needed.
-        // .abnormalOnly — already get Dynamic Island on odd days, no notification needed.
+        // .everyDay and .abnormalOnly get the Live Activity reminder on these
+        // days instead — see scheduleLiveActivityReminderNotifications.
         guard settings.liveActivityMode == .off, await isAuthorized else { return }
 
         let cal = Calendar.current

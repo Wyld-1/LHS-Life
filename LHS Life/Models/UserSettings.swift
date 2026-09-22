@@ -88,6 +88,12 @@ final class UserSettings {
     var schoolEmail: String
     var periodConfigs: [PeriodConfig]
     var professionalDressNotificationsEnabled: Bool
+    /// When the Professional Dress reminder fires, as minutes after midnight.
+    /// Noon or later means the evening BEFORE the event; earlier than noon
+    /// means the morning OF it. 7:00 PM, 11:00 PM and 6:30 AM all read the
+    /// way people say them, with no separate "night before / day of" switch.
+    var professionalDressReminderMinutes: Int
+    static let defaultDressReminderMinutes = 21 * 60   // 9:00 PM the night before
     var liveActivityMode: LiveActivityMode
     /// Temporary per-day override: Live Activity enabled just for today.
     var liveActivityEnabledToday: Bool
@@ -180,6 +186,7 @@ final class UserSettings {
         }
         
         self.professionalDressNotificationsEnabled = d.object(forKey: Keys.dressNotifs) as? Bool ?? true
+        self.professionalDressReminderMinutes = d.object(forKey: Keys.dressTime) as? Int ?? Self.defaultDressReminderMinutes
         let rawMode = d.integer(forKey: Keys.liveActivityMode)
         self.liveActivityMode = LiveActivityMode(rawValue: rawMode) ?? .off
         self.isASBMember = d.bool(forKey: Keys.asbMember)
@@ -256,8 +263,22 @@ final class UserSettings {
             liveActivityEnabledToday = false
             liveActivityTodayKey = todayKey
         }
+        if liveActivityMode == .off { return liveActivityEnabledToday }
+        return modeWantsLiveActivity(on: scheduleType)
+    }
+
+    /// Whether the chosen mode asks for a Live Activity on a day with this
+    /// schedule — for ANY day, not just today, and without the side effects
+    /// above. The morning reminder is scheduled from this, so it goes out on
+    /// exactly the days the Live Activity would start: every school day for
+    /// Every Day, abnormal days for Abnormal Days. It once used its own
+    /// rule and skipped every block day.
+    ///
+    /// .off always answers false — "just for today" is turned on from the
+    /// notification itself, so it is never a reason to send one.
+    func modeWantsLiveActivity(on scheduleType: ScheduleType?) -> Bool {
         switch liveActivityMode {
-        case .off:          return liveActivityEnabledToday
+        case .off:          return false
         case .everyDay:     return true
         case .abnormalOnly:
             let abnormal: Set<ScheduleType> = [
@@ -292,6 +313,7 @@ final class UserSettings {
         store.set(graduationYear, forKey: Keys.gradYear)
         store.set(lastGraduationYear, forKey: Keys.lastGradYear)
         store.set(professionalDressNotificationsEnabled, forKey: Keys.dressNotifs)
+        store.set(professionalDressReminderMinutes, forKey: Keys.dressTime)
         store.set(liveActivityMode.rawValue, forKey: Keys.liveActivityMode)
         store.set(isASBMember, forKey: Keys.asbMember)
         store.set(showMapTab, forKey: Keys.showMapTab)
@@ -335,6 +357,7 @@ final class UserSettings {
         lastGraduationYear = 0
         periodConfigs = PeriodConfig.defaults
         professionalDressNotificationsEnabled = true
+        professionalDressReminderMinutes = Self.defaultDressReminderMinutes
         liveActivityMode = .off
         liveActivityEnabledToday = false
         isASBMember = false
@@ -371,6 +394,7 @@ final class UserSettings {
         static let lastGradYear         = "last_graduation_year"
         static let periodConfigs        = "period_configs"
         static let dressNotifs          = "dress_notifications_enabled"
+        static let dressTime            = "dress_reminder_minutes"
         static let liveActivityMode      = "live_activity_mode"
         static let abnormalNotifs        = "abnormal_schedule_notifications"  // legacy, unused
         static let liveActivityToday    = "live_activity_today"
@@ -390,6 +414,7 @@ final class UserSettings {
     // One person should only have to set up their profile once.
     //
     // Synced:     periodConfigs, graduationYear, professionalDressNotificationsEnabled,
+    //             professionalDressReminderMinutes,
     //             isASBMember, asbWorkDays, apSilencedKey, apBadgeClearedKey,
     //             hasCompletedOnboarding, accessApproved, schoolEmail
     // Not synced: liveActivityMode, liveActivityEnabledToday (per-device preference)
@@ -416,6 +441,7 @@ final class UserSettings {
         let icloud = NSUbiquitousKeyValueStore.default
         icloud.set(Int64(graduationYear), forKey: ICloudKeys.gradYear)
         icloud.set(professionalDressNotificationsEnabled, forKey: ICloudKeys.dressNotifs)
+        icloud.set(Int64(professionalDressReminderMinutes), forKey: ICloudKeys.dressTime)
         icloud.set(isASBMember, forKey: ICloudKeys.asbMember)
         icloud.set(hasCompletedOnboarding, forKey: ICloudKeys.onboarding)
         icloud.set(accessApproved, forKey: ICloudKeys.accessApproved)
@@ -455,6 +481,14 @@ final class UserSettings {
             changed = true
         }
         
+        if icloud.object(forKey: ICloudKeys.dressTime) != nil {
+            let remoteTime = Int(icloud.longLong(forKey: ICloudKeys.dressTime))
+            if remoteTime != professionalDressReminderMinutes {
+                professionalDressReminderMinutes = remoteTime
+                changed = true
+            }
+        }
+
         let remoteASB = icloud.object(forKey: ICloudKeys.asbMember) as? Bool
         if let remoteASB, remoteASB != isASBMember {
             isASBMember = remoteASB
@@ -513,6 +547,7 @@ final class UserSettings {
     private enum ICloudKeys {
         static let gradYear          = "icloud_graduation_year"
         static let dressNotifs       = "icloud_dress_notifications_enabled"
+        static let dressTime         = "icloud_dress_reminder_minutes"
         static let asbMember         = "icloud_asb_member"
         static let onboarding        = "icloud_onboarding_complete"
         static let accessApproved    = "icloud_access_approved"

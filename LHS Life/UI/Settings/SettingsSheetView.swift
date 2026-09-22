@@ -33,6 +33,28 @@ struct SettingsSheetView: View {
     @Environment(CalendarStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
+    /// The picker shows a plain time; the label says which day it lands on,
+    /// so choosing 6:30 AM visibly flips it to the morning of.
+    private var dressReminderLabel: String {
+        settings.professionalDressReminderMinutes >= 12 * 60 ? "Remind Night Before" : "Remind Morning Of"
+    }
+
+    /// Bridges the stored minutes-after-midnight to the Date a DatePicker wants.
+    private var dressReminderTime: Binding<Date> {
+        Binding(
+            get: {
+                let minutes = settings.professionalDressReminderMinutes
+                return Calendar.current.date(
+                    bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: Date()
+                ) ?? Date()
+            },
+            set: { date in
+                let c = Calendar.current.dateComponents([.hour, .minute], from: date)
+                settings.professionalDressReminderMinutes = (c.hour ?? 21) * 60 + (c.minute ?? 0)
+            }
+        )
+    }
+
     @State private var apModeEnabled = false
     @State private var showGradYearAlert = false
     @State private var gradYearInput = ""
@@ -97,7 +119,13 @@ struct SettingsSheetView: View {
                 debugProgress = progress
             }
         }
-        .onDisappear { settings.save() }
+        .onDisappear {
+            settings.save()
+            // The mode and notification toggles all decide which reminders are
+            // queued. Without this, a change here took effect only at the next
+            // calendar refresh.
+            Task { await CalendarStore.shared.rescheduleNotifications() }
+        }
         .alert("Graduation Year", isPresented: $showGradYearAlert) {
             TextField("2029", text: $gradYearInput)
                 .keyboardType(.numberPad)
@@ -243,6 +271,14 @@ struct SettingsSheetView: View {
                     HapticEngine.shared.tap()
                 }
 
+            if settings.professionalDressNotificationsEnabled {
+                DatePicker(
+                    dressReminderLabel,
+                    selection: dressReminderTime,
+                    displayedComponents: .hourAndMinute
+                )
+            }
+
             Picker("Live Activities", selection: $settings.liveActivityMode) {
                 ForEach(LiveActivityMode.allCases, id: \.rawValue) { mode in
                     Text(mode.label).tag(mode)
@@ -272,7 +308,7 @@ struct SettingsSheetView: View {
         } header: {
             Text("Alerts")
         } footer: {
-            Text("Professional Dress reminds you at 9:00 PM the evening before. Live Activities pin the live bell schedule to your Lock Screen.")
+            Text("Pick an evening time to be reminded the night before, or a morning time for the day of. Live Activities pin the live bell schedule to your Lock Screen.")
         }
     }
 

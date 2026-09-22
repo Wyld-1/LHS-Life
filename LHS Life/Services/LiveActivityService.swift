@@ -86,7 +86,14 @@ final class LiveActivityService {
 
     func reconnect() {
         guard currentActivity == nil else { return }
-        currentActivity = Activity<ScheduleActivityAttributes>.activities.first
+        // Only an activity that is still on screen. ActivityKit keeps ended
+        // and dismissed activities in this list for a while afterwards, and
+        // adopting one of those made startIfNeeded bail with "already running"
+        // while nothing was actually running — the reason a Live Activity
+        // ended from the debug menu could not be restarted without a relaunch.
+        currentActivity = Activity<ScheduleActivityAttributes>.activities.first {
+            $0.activityState == .active || $0.activityState == .stale
+        }
         if let a = currentActivity {
             LHSLogger.liveActivity.notice("Reconnected to existing activity — id: \(a.id, privacy: .public)")
             // Reconnecting after a relaunch must re-observe, or a warm-start
@@ -116,8 +123,25 @@ final class LiveActivityService {
 
     func startIfNeeded(schedule: BellSchedule?, settings: UserSettings) {
         reconnect()
-        guard currentActivity == nil else {
-            LHSLogger.liveActivity.notice("bail: activity already running (id: \(self.currentActivity!.id, privacy: .public))")
+        if let running = currentActivity {
+            // A Live Activity's schedule is fixed when it is created and can
+            // never be edited afterwards. So if today's schedule changed after
+            // this one started — an image-posted day that finished reading,
+            // an event edited in CalendarWiz, a class turned on or off — the
+            // only correction is to replace it. Otherwise it carries the wrong
+            // bells for the rest of the day, and so does the server, which
+            // was told the old times when it registered.
+            if !isDebugSession, let schedule, scheduleHasChanged(since: running, to: schedule, settings: settings) {
+                LHSLogger.liveActivity.notice(
+                    "Schedule changed since this Live Activity started — replacing \(running.id, privacy: .public)"
+                )
+                Task { @MainActor in
+                    await end()
+                    startIfNeeded(schedule: schedule, settings: settings)
+                }
+                return
+            }
+            LHSLogger.liveActivity.notice("bail: activity already running (id: \(running.id, privacy: .public))")
             // Already running is a success from the user's point of view —
             // they asked for a Live Activity and there is one.
             lastStartFailure = nil
@@ -348,6 +372,29 @@ final class LiveActivityService {
     }
 
     // MARK: - Schedule Builder
+
+    /// Whether the periods still ahead on a running card differ from what
+    /// today's schedule would produce now.
+    ///
+    /// Only the periods that haven't ended are compared, on both sides.
+    /// buildSchedule drops finished periods, so a card started at 8:00 and a
+    /// rebuild at noon legitimately differ in length; comparing whole lists
+    /// would replace the card every time the app opened. What matters is
+    /// whether anything still to come is wrong.
+    private func scheduleHasChanged(
+        since activity: Activity<ScheduleActivityAttributes>,
+        to schedule: BellSchedule,
+        settings: UserSettings
+    ) -> Bool {
+        struct Slot: Equatable { let name: String; let start: Date; let end: Date }
+        let now = Date()
+        let running = activity.attributes.schedule
+            .filter { $0.endDate > now }
+            .map { Slot(name: $0.displayName, start: $0.startDate, end: $0.endDate) }
+        let wanted = buildSchedule(from: schedule, settings: settings)
+            .map { Slot(name: $0.displayName, start: $0.startDate, end: $0.endDate) }
+        return running != wanted
+    }
 
     func buildSchedule(
         from schedule: BellSchedule,

@@ -227,12 +227,11 @@ final class CalendarStore {
     }
 
     private func scheduleNotifications(for fetched: [SchoolEvent]) async {
-        if settings.professionalDressNotificationsEnabled {
-            await NotificationService.scheduleProfessionalDressNotifications(for: fetched)
-        }
-        if settings.isASBMember {
-            await NotificationService.scheduleASBNotifications(settings: settings, store: self)
-        }
+        // Called unconditionally: each one clears its own queued reminders
+        // first and checks its setting after. Gating the call on the setting
+        // meant switching it OFF left the already-queued reminders to fire.
+        await NotificationService.scheduleProfessionalDressNotifications(for: fetched, settings: settings)
+        await NotificationService.scheduleASBNotifications(settings: settings, store: self)
         await NotificationService.scheduleAbnormalScheduleNotifications(settings: settings, store: self)
         await NotificationService.scheduleLiveActivityReminderNotifications(settings: settings, store: self)
         await NotificationService.scheduleClassOrientationNotification(events: fetched, settings: settings)
@@ -252,11 +251,8 @@ final class CalendarStore {
     private func applyImageSchedules(in fetched: [SchoolEvent]) async {
         for event in fetched where event.hasBellSchedule {
             let dayKey = event.dayKey
-            let existing = bellSchedules[dayKey]
             // Parsed from a real table already — leave it alone.
-            if let existing, existing.sourceEventID != "floor", existing.sourceEventID != "serve-week-floor" {
-                continue
-            }
+            if let existing = bellSchedules[dayKey], !Self.isFloorSchedule(existing) { continue }
             guard let url = ScheduleImageParser.imageURL(inHTML: event.htmlDescription) else { continue }
             guard let periods = await ScheduleImageParser.periods(at: url, eventID: event.id),
                   !periods.isEmpty else {
@@ -264,19 +260,30 @@ final class CalendarStore {
                 continue
             }
 
-            bellSchedules[dayKey] = BellSchedule(
-                id: "\(event.id)-image",
-                date: event.startDate,
-                scheduleType: BellScheduleDetector.scheduleType(fromTitle: event.title),
-                periods: periods,
-                sourceEventID: event.id
-            )
+            bellSchedules[dayKey] = Self.imageSchedule(for: event, periods: periods)
             LHSLogger.parser.notice(
                 "Schedule for \(dayKey, privacy: .public) read from image — \(periods.count) periods"
             )
         }
         cachedTodayKey = ""
         SharedStore.write(events: events, bellSchedules: bellSchedules)
+    }
+
+    /// True for the stand-in schedules the floor rules invent when a day has
+    /// no parseable table. These are guesses, and a schedule read from the
+    /// day's picture is always better than a guess.
+    private static func isFloorSchedule(_ schedule: BellSchedule) -> Bool {
+        schedule.sourceEventID == "floor" || schedule.sourceEventID == "serve-week-floor"
+    }
+
+    private static func imageSchedule(for event: SchoolEvent, periods: [Period]) -> BellSchedule {
+        BellSchedule(
+            id: "\(event.id)-image",
+            date: event.startDate,
+            scheduleType: BellScheduleDetector.scheduleType(fromTitle: event.title),
+            periods: periods,
+            sourceEventID: event.id
+        )
     }
 
     /// Every trace of the calendar this device has loaded: memory, the disk
@@ -457,6 +464,25 @@ final class CalendarStore {
                 periods: FinalExamParser.regularPeriods(for: date, sourceID: "floor"),
                 sourceEventID: "floor"
             )
+        }
+
+        // Days whose times were posted as a picture, using the reading saved
+        // from a previous run. Synchronous and network-free, so the very
+        // first frame of a launch is already right; applyImageSchedules only
+        // has to do real work the first time a device sees a given picture.
+        //
+        // Without this, launch showed the Pro Dress floor's REGULAR schedule
+        // for the ~12 seconds the fetch and OCR took — and the Live Activity,
+        // started the moment the app became active, captured that wrong
+        // schedule for the rest of the day. That is exactly what happened on
+        // the Sep 21 Liturgy day.
+        for event in fetched where event.hasBellSchedule {
+            let dayKey = event.dayKey
+            if let existing = schedules[dayKey], !Self.isFloorSchedule(existing) { continue }
+            guard let url = ScheduleImageParser.imageURL(inHTML: event.htmlDescription),
+                  let periods = ScheduleImageParser.cachedPeriods(at: url, eventID: event.id),
+                  !periods.isEmpty else { continue }
+            schedules[dayKey] = Self.imageSchedule(for: event, periods: periods)
         }
 
         // Serve-a-thon replaces this student's day outright — last, so it
