@@ -196,6 +196,21 @@ final class CalendarStore {
         await refresh()
     }
 
+    /// Refresh on returning to the foreground.
+    ///
+    /// The calendar was previously fetched only on a cold launch, so a phone
+    /// that kept the app in the background over a weekend could still be
+    /// showing Friday's calendar on Monday, with no way to correct itself.
+    ///
+    /// The 30-second floor is only there to stop a burst of fetches when
+    /// someone flicks between apps; it is far below the rate at which the
+    /// posted calendar ever changes.
+    func refreshOnForeground() async {
+        if let last = lastFetched, Date().timeIntervalSince(last) < 30 { return }
+        guard !isLoading else { return }
+        await refresh()
+    }
+
     func refresh() async {
         isLoading = true
         error = nil
@@ -207,9 +222,11 @@ final class CalendarStore {
             // picture still needs its reminders fired against the real bells.
             await applyImageSchedules(in: fetched)
             lastFetched = Date()
+            LHSLogger.ical.notice("Calendar refreshed — \(fetched.count) events")
             await scheduleNotifications(for: fetched)
         } catch {
             self.error = AppError(underlying: error)
+            LHSLogger.ical.error("Calendar refresh failed — \(String(describing: error), privacy: .public)")
         }
         isLoading = false
     }

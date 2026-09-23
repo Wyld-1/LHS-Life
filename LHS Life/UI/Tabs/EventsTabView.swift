@@ -279,6 +279,12 @@ private struct DayView: View {
                     }
                 }
                 .coordinateSpace(name: Self.gridSpace)
+                // Pull down from the top of the grid to refetch the calendar.
+                // The day grid opens scrolled to now, so this is reachable
+                // after scrolling up to 6 AM — deliberate, since the calendar
+                // also refreshes on every foreground and this is the manual
+                // "I know it just changed" path rather than the usual one.
+                .refreshable { await store.refresh() }
                 .onPreferenceChange(DayScrollOffsetKey.self) { y in
                     // Don't record anything until the initial scroll has been
                     // applied — the first layout pass reports 0, which would

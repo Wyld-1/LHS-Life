@@ -75,6 +75,8 @@ struct LaSalle_ScheduleApp: App {
                     guard phase == .active else { return }
                     startLiveActivity()
                     resolvePendingConfirmation()
+                    guard settings.accessApproved else { return }
+                    Task { await store.refreshOnForeground() }
                 }
         }
     }
