@@ -55,6 +55,7 @@ enum DataResetService {
             // A fresh random ID next time, so nothing the worker or its logs
             // saw before the reset can be tied to whoever uses this device next.
             PushTokenService.resetDeviceId()
+            IssueReporter.resetDedupe()
         }
     }
 }

@@ -31,6 +31,10 @@ To keep the bell schedule on your Lock Screen and Dynamic Island up to date, a s
 
 **How long it's kept:** the server keeps a device's record only while that device's Live Activity is running. The record is deleted when the Live Activity ends, when Apple reports the push token is no longer valid, or when you use Delete All Data.
 
+## Problem reports
+
+When something breaks in a way the school can fix — the school calendar can't be reached, a posted schedule can't be read, a school website won't load — the app tells the same server, so the school can see how many devices are affected instead of waiting for someone to report it. It sends the random device ID, the app and iOS version, and a short description of the failure, at most once per device per problem per day. It never sends what you typed, what you were looking at, or anything about you. These reports are deleted automatically after a week.
+
 ## Who else is involved
 
 - **Cloudflare** hosts the LHS Life server. Cloudflare can see the IP address of each request. The server doesn't store IP addresses, but Cloudflare keeps short-term request logs (a few days), which include the random device ID.

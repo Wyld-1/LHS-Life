@@ -82,6 +82,7 @@ final class EmbeddedWebDelegate: NSObject, WKNavigationDelegate {
             self?.state?.isLoading = false
             self?.state?.isReady = true
             self?.state?.loadError = e
+            self?.state?.reportIfSiteIsBroken(e)
         }
     }
 
@@ -179,6 +180,28 @@ final class EmbeddedWebState: NSObject {
     let url: URL
     let siteName: String
     let injectDarkCSS: Bool
+
+    /// Reports a load failure to the worker, but only when the SITE looks
+    /// broken.
+    ///
+    /// A student on a dead bus-wifi connection fails here constantly, and
+    /// those failures say nothing about PowerSchool or Schoology — counting
+    /// them would bury the case that matters, which is the site itself moving
+    /// or going down for everyone.
+    @MainActor
+    func reportIfSiteIsBroken(_ error: Error) {
+        let code = (error as NSError).code
+        let studentSideCodes: Set<Int> = [
+            NSURLErrorNotConnectedToInternet,
+            NSURLErrorNetworkConnectionLost,
+            NSURLErrorTimedOut,
+            NSURLErrorDataNotAllowed,       // cellular data off for the app
+            NSURLErrorInternationalRoamingOff,
+            NSURLErrorCancelled,            // a tap away mid-load
+        ]
+        guard (error as NSError).domain == NSURLErrorDomain, !studentSideCodes.contains(code) else { return }
+        IssueReporter.report(.webLoad, detail: "\(siteName): \(error.localizedDescription)", subject: siteName)
+    }
 
     init(url: URL, siteName: String, injectDarkCSS: Bool = false) {
         self.url           = url

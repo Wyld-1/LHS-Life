@@ -16,8 +16,6 @@ import UIKit
 
 enum PushTokenService {
 
-    private static let workerURL = "https://lhslife-liveactivityworker.liam-lefohn.workers.dev"
-
     // Persistent device ID — stable across app launches, used as the KV key
     static var deviceId: String {
         let key = "lhs_device_id"
@@ -173,7 +171,7 @@ enum PushTokenService {
 
         LHSLogger.liveActivity.notice("PushToken: registering \(tokenString.prefix(16), privacy: .public)…")
 
-        guard let url = URL(string: "\(workerURL)/register") else { return .failed }
+        guard let url = URL(string: "\(AppConstants.workerURL)/register") else { return .failed }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -215,6 +213,10 @@ enum PushTokenService {
                 LHSLogger.liveActivity.error(
                     "PushToken: REFUSED — server at capacity (\(payload.registered ?? -1)/\(payload.limit ?? -1))"
                 )
+                IssueReporter.report(
+                    .overCapacity,
+                    detail: "registered \(payload.registered ?? -1) of \(payload.limit ?? -1)"
+                )
                 return .overCapacity(contact: payload.contact ?? "the school office")
             }
 
@@ -237,6 +239,7 @@ enum PushTokenService {
 
             let body = String(data: data, encoding: .utf8) ?? "<no body>"
             LHSLogger.liveActivity.error("PushToken: registration FAILED — HTTP \(status): \(body, privacy: .public)")
+            IssueReporter.report(.registration, detail: "HTTP \(status): \(body)")
             return .failed
         } catch {
             LHSLogger.liveActivity.error("PushToken: registration network error — \(String(describing: error), privacy: .public)")
@@ -256,7 +259,7 @@ enum PushTokenService {
     // MARK: - Unregister
 
     static func unregister() async {
-        guard let url = URL(string: "\(workerURL)/unregister") else { return }
+        guard let url = URL(string: "\(AppConstants.workerURL)/unregister") else { return }
 
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"

@@ -31,6 +31,11 @@ enum AppConstants {
     // school-wide. Rotate it here and in Cloudflare together.
     static let workerSecret = "com.lasalleyakima.lhslife"
 
+    /// The Live Activity worker. One place to change when the worker moves to
+    /// the school's own Cloudflare account — it is used by both the push
+    /// registration and the problem reports.
+    static let workerURL = "https://lhslife-liveactivityworker.liam-lefohn.workers.dev"
+
     // MARK: - Privacy Policy
     // Shown in the app by PrivacyPolicyView, rendered from
     // Resources/PRIVACY.md — no URL, so nothing to break when the repo moves.

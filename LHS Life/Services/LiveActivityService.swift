@@ -235,6 +235,7 @@ final class LiveActivityService {
             // generated before Push Notifications was enabled on the App ID
             // won't carry it. Logged at .error so it survives to Console.app.
             LHSLogger.liveActivity.error("Failed to start: \(String(describing: error), privacy: .public)")
+            IssueReporter.report(.liveActivityStart, detail: String(describing: error))
             lastStartFailure = "Couldn't start Live Activities"
         }
     }

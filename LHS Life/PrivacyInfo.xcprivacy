@@ -6,8 +6,10 @@
 	<false/>
 	<key>NSPrivacyTrackingDomains</key>
 	<array/>
-	<!-- What PushTokenService sends the Live Activity worker, only while Live
-	     Activities are on. Keep in sync with Docs/PRIVACY.md and the App Store
+	<!-- What PushTokenService sends the Live Activity worker while Live
+	     Activities are on, plus what IssueReporter sends when something fails
+	     (same device ID, app/iOS version, and a short description of the
+	     failure). Keep in sync with Resources/PRIVACY.md and the App Store
 	     Connect privacy answers. -->
 	<key>NSPrivacyCollectedDataTypes</key>
 	<array>
@@ -24,7 +26,7 @@
 				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
 			</array>
 		</dict>
-		<!-- App version and iOS version -->
+		<!-- App version, iOS version, and failure descriptions from IssueReporter -->
 		<dict>
 			<key>NSPrivacyCollectedDataType</key>
 			<string>NSPrivacyCollectedDataTypeOtherDiagnosticData</string>

@@ -227,6 +227,7 @@ final class CalendarStore {
         } catch {
             self.error = AppError(underlying: error)
             LHSLogger.ical.error("Calendar refresh failed — \(String(describing: error), privacy: .public)")
+            IssueReporter.report(.calendarFetch, detail: String(describing: error))
         }
         isLoading = false
     }
@@ -274,6 +275,7 @@ final class CalendarStore {
             guard let periods = await ScheduleImageParser.periods(at: url, eventID: event.id),
                   !periods.isEmpty else {
                 LHSLogger.parser.error("Schedule image for \(dayKey, privacy: .public) could not be read")
+                IssueReporter.report(.scheduleImage, detail: "\(dayKey): \(event.title)", subject: dayKey)
                 continue
             }
 
