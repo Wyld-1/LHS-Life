@@ -1,125 +1,57 @@
 /**
  * LHS Life — Cloudflare Worker
  *
- * Pushes ActivityKit Live Activity updates to registered devices at each
- * period transition throughout the LaSalle school day.
+ * Pushes the bell schedule to students' Lock Screens (Live Activities) at each
+ * period change during the school day.
  *
- * ════════════════════════════════════════════════════════════════════════════
- * FOR WHOEVER LOOKS AFTER THIS NEXT — everything you can open in a browser
- * ════════════════════════════════════════════════════════════════════════════
+ * ── Pages you can open in a browser ─────────────────────────────────────────
+ * Sign-in: any username, and the password is this Worker's CLIENT_SECRET
+ * (Cloudflare → Worker → Settings → Variables). /health needs no sign-in.
  *
- * Sign-in: every address below except /health asks for a username and
- * password. The username is ignored — type anything, or leave it blank. The
- * password is the CLIENT_SECRET set on this Worker (see Environment variables
- * below). The browser remembers it until you quit the browser.
+ *   /health   Alive? Password configured? Start here.
+ *   /status   Start here for "is something wrong?". Two parts:
+ *               issues  — what the app reports as broken TODAY, each problem
+ *                         once, with how many phones hit it.
+ *                         devicesReportingToday: 0 means all clear. Three
+ *                         phones is somebody's wifi; 180 is an outage, and
+ *                         "example" names what broke.
+ *               devices — every phone signed up, with an anonymous ID, app
+ *                         build, iOS version and bells expected, plus the
+ *                         device limit and slots left. When slots run out the
+ *                         app tells students the server is full and points
+ *                         them at CAPACITY_CONTACT; raising the limit means
+ *                         the Workers Paid plan.
+ *   /status?full=1   Shows the past week of problems with the phones behind
+ *             each, and every phone's actual bell times ("08:00", "08:55"…) —
+ *             the view that answers "should a push have gone out at 8:00?"
+ *   /test-push   Sends one update now and says in plain English what Apple
+ *             answered, so you know within seconds whether the problem is
+ *             Apple's keys, this Worker, or the phone. ?deviceId=… picks one.
+ *   /purge?confirm=yes   Clears every Lock Screen card and every
+ *             registration. Phones sign back up by themselves the next day.
+ *   /rebuild  Recovery only: rebuilds the device list. Rarely needed.
  *
- * Replace WORKER-URL with this Worker's address.
+ * POST /register, /unregister and /report belong to the app, not to people.
+ * Nothing here identifies a student — the device ID is a random number the
+ * app invents, and it changes if the app is reset.
  *
- *   WORKER-URL/health
- *       Is the Worker alive, and is its password configured? The only
- *       address that needs no sign-in. Start here.
+ * ── How it works ────────────────────────────────────────────────────────────
+ * Phones register the bell times they expect. A cron runs every minute,
+ * Mon–Fri 6 AM–5 PM Pacific, pushes an update within 2 minutes of each of
+ * those times, and a dismissal at the last bell. A new phone joins within
+ * about 2 minutes; phones Apple reports as dead are dropped automatically.
  *
- *   WORKER-URL/status
- *       Every phone currently signed up for bell updates: an anonymous
- *       device ID, which app build and iOS version it runs, how many bells
- *       it expects today, and when it last checked in. Never shows push
- *       tokens. A student's name or email is never sent here.
+ * In KV: registry:devices, every record in one blob, written only by the cron
+ * (why: see readRegistry); token:{deviceId}, written only by that device;
+ * issue:{day}:{kind}:{subject}:{deviceId}, a reported problem whose details
+ * live in KV metadata and which expires by itself after 7 days.
  *
- *       It also reports how many phones this Worker will accept (limit) and
- *       how many slots are left. When the slots run out, the app tells new
- *       students the server is full and points them at the address in
- *       CAPACITY_CONTACT below, rather than letting them sit with a frozen
- *       bell card. Raising the limit means moving to the Workers Paid plan.
- *
- *   WORKER-URL/status?full=1
- *       The same list, but showing the actual bell times each phone is
- *       registered for ("08:00", "08:55"…) instead of a count. This is the
- *       view that answers "should a push have gone out at 8:00?"
- *
- *   WORKER-URL/test-push
- *       Sends one update to the most recently registered phone right now and
- *       reports, in plain English, what Apple said back. Use it when Live
- *       Activities stop updating: it tells you within seconds whether the
- *       problem is Apple's keys, this Worker, or the phone. Add
- *       ?deviceId=… to target a specific phone.
- *
- *   WORKER-URL/purge?confirm=yes
- *       Clears the bell card off every phone's Lock Screen, then removes
- *       every phone's registration. Nothing is left stuck on screen. Phones
- *       sign back up
- *       on their own the NEXT DAY — or sooner if the app is updated, the
- *       Live Activity is stopped and restarted, or the student uses
- *       Settings → Delete All Data. Without ?confirm=yes it does nothing.
- *
- *   WORKER-URL/rebuild
- *       Recovery only. Rebuilds the device list from the individual records
- *       if the list is ever lost. Harmless to run, rarely needed.
- *
- * Two addresses are used by the app itself and are not meant for people:
- * POST /register and DELETE /unregister.
- *
- * Nothing here can be used to identify a student. The device ID is a random
- * number the app makes up, and it changes if the app is reset.
- *
- * ════════════════════════════════════════════════════════════════════════════
- *
- * Architecture:
- *   - Cron fires every minute during school hours (Mon–Fri, 6 AM–5 PM PT)
- *   - Each device registers the bell times it expects (POST /register)
- *   - Within 2 minutes of each of those times, sends an APNs push
- *   - At the last bell of the day, sends an APNs end push — dismisses the LA instantly
- *   - Tokens stored in Workers KV under key: token:{deviceId}
- *   - Dead tokens (410 Gone, 400 BadDeviceToken) are deleted automatically
- *   - A newly registered device joins the push list within about 2 minutes,
- *     because the cron owns the device list and reconciles on even minutes
- *
- * Environment variables (set in Cloudflare dashboard → Worker → Settings → Variables):
- *   APNS_KEY_ID      — 10-char key ID from Apple Developer (e.g. "ABC1234567")
- *   APNS_TEAM_ID     — 10-char team ID from Apple Developer (e.g. "XYZ9876543")
- *   APNS_BUNDLE_ID   — App bundle ID (e.g. "com.lasalle.lhslife")
- *   APNS_PRIVATE_KEY — Contents of your .p8 file (the whole thing, newlines included)
- *   MAX_DEVICES      — How many phones this Worker will accept (default 40).
- *                      The Free plan allows 50 subrequests per invocation and
- *                      KV operations count toward that, so a bell that pushes
- *                      to more than ~45 devices dies partway through the loop.
- *                      Raise this after moving to the Workers Paid plan, where
- *                      the cap is 10,000.
- *   CLIENT_SECRET    — Shared secret the app sends on every request (see requireAuth).
- *                      Must match AppConstants.workerSecret in the iOS app.
- *                      Also the password for the browser sign-in box on
- *                      /status and /rebuild (any username).
- *   TOKENS           — KV namespace binding (set in wrangler.toml or dashboard)
- *
- * KV structure:
- *   token:{deviceId}   → { deviceId, pushToken, environment, transitions,
- *                        endMinutes, updatedAt }
- *                      Written ONLY by that device's own registration, with
- *                      metadata { u: updatedAt } so reconciliation can spot a
- *                      change from list() alone, without reading the value.
- *   registry:devices   → JSON array of all the above records. Written ONLY by
- *                        the cron. Never written by a request handler.
- *
- * WHY THIS SHAPE — two separate problems:
- *
- * 1. READS. The push cycle used to read token:{deviceId} for every device
- *    every minute, plus an endpush:{id}:{date} key each: 1 + 2N reads × 1440
- *    minutes against a 100,000/day free-tier cap put the ceiling at ~34
- *    devices, and KV caps are hard failures rather than throttling. Reading
- *    one blob makes the cycle 1,440 reads/day regardless of device count.
- *
- * 2. WRITES RACING. Having each registration read-modify-write the shared
- *    blob loses records: KV is eventually consistent, reads are edge-cached
- *    for up to 60s by default, and concurrent writes to one key silently
- *    overwrite each other (last write wins). With a few hundred handsets
- *    registering across a morning that is regular data loss, not a rare edge
- *    case. Cloudflare's own guidance is to funnel writes for a key through a
- *    single process.
- *
- *    So: devices write only their OWN key (one writer each, no contention),
- *    and the cron — a single scheduled process — owns the blob. It reconciles
- *    every 2 minutes via list(), which is capped at 1,000/day: 720 fits, 1440
- *    would not. The cost is that a newly registered device may wait up to two
- *    minutes to be picked up.
+ * Variables: APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID, APNS_PRIVATE_KEY (the
+ * .p8 file's full contents) from Apple Developer; CLIENT_SECRET, matching
+ * AppConstants.workerSecret in the iOS app and doubling as the password
+ * above; TOKENS, the KV binding; MAX_DEVICES, how many phones to accept
+ * (default 40 — on the Free plan a bell pushing to more than ~45 dies partway
+ * through; raise it on the Paid plan, where the cap is 10,000).
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -186,6 +118,11 @@ export default {
       return handleTestPush(request, env, url);
     }
 
+    // The app tells us something is broken. See handleReport.
+    if (request.method === "POST" && url.pathname === "/report") {
+      return handleReport(request, env);
+    }
+
     // Diagnostics: how many devices are registered, without exposing tokens.
     if (request.method === "GET" && url.pathname === "/status") {
       const devices = await readRegistry(env);
@@ -196,8 +133,10 @@ export default {
       const full = url.searchParams.get("full") === "1";
       const { limit: capacity, source } = await effectiveLimit(env);
       const observed = await readCapacity(env);
+      const issues = await readIssues(env, full);
       return new Response(JSON.stringify({
         deviceCount: devices.length,
+        issues,
         limit: capacity,
         limitSource: source,
         slotsFree: Math.max(0, capacity - devices.length),
@@ -747,6 +686,190 @@ function explainAPNs(status, body) {
   return "Unrecognized APNs response — quote it verbatim when asking Apple.";
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: - Problem reports
+//
+// The app posts here when something is broken in a way the SCHOOL can fix:
+// the calendar feed is down, a schedule was posted as a picture nobody can
+// read, this Worker is full. /status then shows each problem once with a
+// count of how many phones hit it, which is the only number that matters —
+// three phones is a student's wifi, a hundred and eighty is an outage.
+//
+// WHY NOT EMAIL: one outage would send a mail per phone per retry. A page
+// that is checked when something seems wrong beats an inbox nobody reads.
+//
+// STORAGE: one key per phone per problem per day,
+//
+//     issue:{day}:{kind}:{subject}:{deviceId}
+//
+// with everything worth showing in the KV metadata, so the whole page is
+// rendered from ONE list() call and never reads the values. Keys expire after
+// 7 days on their own — nothing has to sweep up. Phones report a given
+// problem at most once a day (see IssueReporter in the app), so a school-wide
+// outage costs about one KV write per phone, not one per retry.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** How long a reported problem stays visible on /status. */
+const ISSUE_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+/** Keeps a value safe to paste into a KV key and short enough to stay cheap. */
+function issueSafe(value, maxLength) {
+  return String(value ?? "")
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .slice(0, maxLength);
+}
+
+async function handleReport(request, env) {
+  let body;
+  try { body = await request.json(); } catch {
+    return new Response("Bad JSON", { status: 400 });
+  }
+
+  const { deviceId, kind, subject, detail, appVersion, osVersion } = body;
+  if (!deviceId || !kind) {
+    return new Response("Missing deviceId or kind", { status: 400 });
+  }
+  if (!env.TOKENS) {
+    return new Response("KV binding 'TOKENS' is not configured.", { status: 500 });
+  }
+
+  const day = new Date().toISOString().slice(0, 10);
+  const key = [
+    "issue",
+    day,
+    issueSafe(kind, 40),
+    issueSafe(subject, 40),
+    issueSafe(deviceId, 40),
+  ].join(":");
+
+  // Empty value, everything in metadata: list() returns metadata, so /status
+  // never has to read the records back one at a time. Metadata is capped at
+  // 1 KB, hence the truncation.
+  try {
+    await env.TOKENS.put(key, "", {
+      expirationTtl: ISSUE_TTL_SECONDS,
+      metadata: {
+        k: issueSafe(kind, 40),
+        s: String(subject ?? "").slice(0, 40),
+        d: String(detail ?? "").slice(0, 160),
+        v: String(appVersion ?? "").slice(0, 20),
+        o: String(osVersion ?? "").slice(0, 20),
+        t: new Date().toISOString(),
+      },
+    });
+  } catch (e) {
+    console.error(`[Report] KV write failed: ${e.message}`);
+    return new Response("Could not record report", { status: 500 });
+  }
+
+  console.log(`[Report] ${kind} ${subject ?? ""} from ${deviceId}: ${detail ?? ""}`);
+  return json({ status: "recorded" }, 200);
+}
+
+/**
+ * Every problem reported in the last week, grouped.
+ *
+ * One list() call. That matters: list() is capped at 1,000/day on the free
+ * plan and the cron already spends ~720 reconciling the device registry, so
+ * this stays a single call per page view rather than one per group.
+ *
+ * Without full, only TODAY is listed. A row on this page means "this
+ * happened", not "this is happening", and a three-day-old row sitting next to
+ * a live one reads like a fire that is still burning. The older rows are
+ * still worth keeping — they answer "when did this start?" — so full brings
+ * back the whole week, along with the individual reports behind each row
+ * (device ID, app build, iOS version, message).
+ */
+async function readIssues(env, full) {
+  if (!env.TOKENS) return { note: "KV binding 'TOKENS' is not configured.", groups: [] };
+
+  let listing;
+  try {
+    listing = await env.TOKENS.list({ prefix: "issue:", limit: 1000 });
+  } catch (e) {
+    return { note: `Could not read issue reports: ${e.message}`, groups: [] };
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const groups = new Map();
+
+  for (const entry of listing.keys) {
+    // issue:{day}:{kind}:{subject}:{deviceId}
+    const parts = entry.name.split(":");
+    if (parts.length < 5) continue;
+    const [, day, kind, subject, deviceId] = parts;
+    const meta = entry.metadata ?? {};
+    const groupKey = `${day}|${kind}|${subject}`;
+
+    let group = groups.get(groupKey);
+    if (!group) {
+      group = {
+        day,
+        kind,
+        subject: meta.s || subject || null,
+        deviceCount: 0,
+        firstSeen: meta.t ?? null,
+        lastSeen: meta.t ?? null,
+        appVersions: new Set(),
+        example: meta.d ?? null,
+        reports: [],
+      };
+      groups.set(groupKey, group);
+    }
+
+    group.deviceCount += 1;
+    if (meta.t) {
+      if (!group.firstSeen || meta.t < group.firstSeen) group.firstSeen = meta.t;
+      if (!group.lastSeen  || meta.t > group.lastSeen)  group.lastSeen  = meta.t;
+    }
+    if (meta.v) group.appVersions.add(meta.v);
+    if (!group.example && meta.d) group.example = meta.d;
+    if (full) {
+      group.reports.push({
+        deviceId,
+        appVersion: meta.v ?? null,
+        osVersion: meta.o ?? null,
+        detail: meta.d ?? null,
+        at: meta.t ?? null,
+      });
+    }
+  }
+
+  // Today first, then the biggest problems — which is the order someone
+  // looking at this page actually cares about.
+  const sorted = [...groups.values()].sort((a, b) =>
+    (b.day.localeCompare(a.day)) || (b.deviceCount - a.deviceCount)
+  );
+
+  const todayGroups = sorted.filter(g => g.day === today);
+  const shown = full ? sorted : todayGroups;
+  const hidden = sorted.length - shown.length;
+
+  return {
+    // Named so the page answers "is anything wrong RIGHT NOW" before anyone
+    // has to interpret a list.
+    devicesReportingToday: todayGroups.reduce((n, g) => n + g.deviceCount, 0),
+    groupsToday: todayGroups.length,
+    // Says out loud that there is more to see, so nobody concludes from an
+    // empty page that nothing has ever gone wrong.
+    ...(hidden > 0
+      ? { earlierDays: `${hidden} problem(s) from the past week — add ?full=1 to see them` }
+      : {}),
+    truncated: listing.list_complete === false,
+    groups: shown.map(g => ({
+      day: g.day,
+      kind: g.kind,
+      subject: g.subject,
+      deviceCount: g.deviceCount,
+      firstSeen: g.firstSeen,
+      lastSeen: g.lastSeen,
+      appVersions: [...g.appVersions],
+      example: g.example,
+      ...(full ? { reports: g.reports } : {}),
+    })),
+  };
+}
+
 function json(obj, status) {
   return new Response(JSON.stringify(obj, null, 2), {
     status,
@@ -1197,6 +1320,23 @@ async function generateJWT(keyId, teamId, privateKeyPem) {
 
 /**
  * Reads every device record in ONE KV read.
+ *
+ * WHY ONE BLOB, AND WHY ONLY THE CRON WRITES IT — two separate problems:
+ *
+ * 1. READS. The push cycle used to read token:{deviceId} for every device
+ *    every minute: 1 + 2N reads × 1,440 minutes against a 100,000/day
+ *    free-tier cap put the ceiling at ~34 devices, and KV caps are hard
+ *    failures rather than throttling. One blob makes the cycle 1,440
+ *    reads/day regardless of how many phones there are.
+ *
+ * 2. WRITES RACING. If each registration read-modify-wrote the shared blob,
+ *    records would be lost: KV is eventually consistent, reads are edge-cached
+ *    for up to 60s, and concurrent writes to one key silently overwrite each
+ *    other. With a few hundred handsets registering across a morning that is
+ *    routine data loss. So devices write only their OWN key, and the cron — a
+ *    single process — owns the blob, reconciling every 2 minutes via list()
+ *    (capped at 1,000/day: 720 fits, 1,440 would not). The cost is that a new
+ *    device waits up to two minutes to be picked up.
  *
  * Handles the legacy format transparently: registry:devices used to be an
  * array of deviceId STRINGS, with the records themselves in token:{id}. If
