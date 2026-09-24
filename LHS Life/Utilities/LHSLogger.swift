@@ -32,4 +32,7 @@ enum LHSLogger {
     /// persisted by default, so they're invisible when inspecting a TestFlight
     /// build in Console.app — which is the entire reason this category exists.
     static let liveActivity = Logger(subsystem: "lhslife", category: "liveActivity")
+    /// Calendar UI decisions that are otherwise invisible — e.g. the week
+    /// strip ignoring a page change that layout, not a person, caused.
+    static let calendarUI = Logger(subsystem: "lhslife", category: "calendarUI")
 }

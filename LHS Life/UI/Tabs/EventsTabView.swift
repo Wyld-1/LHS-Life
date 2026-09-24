@@ -871,6 +871,21 @@ struct WeekStrip: View {
     private let cal = Calendar.current
     @State private var weekOffset: Int = 0
 
+    // A paged TabView works out which page it's on from scroll offset ÷
+    // width, so any width change can land it on a neighbouring page — and
+    // the onChange below then treats that as the user swiping to a new week.
+    //
+    // iPadOS causes exactly that on every trip to the background: it lays
+    // the app out again at other sizes (including the other orientation) to
+    // take app-switcher snapshots. The pager came back one page early and
+    // the selected day jumped back a week, every single time.
+    //
+    // So a page change only moves the selected day while the app is in
+    // front and has been for a moment. Anything else is layout, not a
+    // person, and the strip is snapped back to the selected day instead.
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var ignorePageChangesUntil: Date = .distantPast
+
     private func sunday(weekOffset: Int) -> Date? {
         let today = cal.startOfDay(for: Date())
         let wd    = cal.component(.weekday, from: today)
@@ -941,6 +956,14 @@ struct WeekStrip: View {
             .tabViewStyle(.page(indexDisplayMode: .never))
             .frame(height: 64)
             .onChange(of: weekOffset) { oldOffset, newOffset in
+                guard scenePhase == .active, Date() >= ignorePageChangesUntil else {
+                    // Logged so a real iPad can confirm this is what was
+                    // moving the date: filter Console.app on "week strip".
+                    LHSLogger.calendarUI.notice(
+                        "Ignored week strip page change \(oldOffset) → \(newOffset) (not from a swipe)"
+                    )
+                    return
+                }
                 let newDays = days(for: newOffset)
                 let alreadyInWeek = newDays.contains { cal.isDate($0, inSameDayAs: selectedDate) }
                 if !alreadyInWeek {
@@ -967,6 +990,25 @@ struct WeekStrip: View {
                 withAnimation(.lsSnappy) { weekOffset = newOffset }
             }
         }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else {
+                ignorePageChangesUntil = .distantFuture
+                return
+            }
+            // The relayout back to full size can land just after the scene
+            // turns active, so keep ignoring for a second, and re-sync at
+            // both ends of that window.
+            ignorePageChangesUntil = Date().addingTimeInterval(1)
+            resyncToSelectedDay()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.05) { resyncToSelectedDay() }
+        }
+    }
+
+    /// Puts the pager back on the week that holds the selected day, without
+    /// touching the day itself.
+    private func resyncToSelectedDay() {
+        let expected = offsetFor(selectedDate)
+        if weekOffset != expected { weekOffset = expected }
     }
 }
 

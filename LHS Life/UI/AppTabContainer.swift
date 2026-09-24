@@ -11,6 +11,7 @@
 //
 
 import SwiftUI
+import StoreKit   // requestReview
 internal import WebKit
 
 // MARK: - Tab Definition
@@ -89,6 +90,7 @@ struct AppTabContainer: View {
     @Environment(CalendarStore.self) private var store
     @Environment(UserSettings.self) private var settings
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.requestReview) private var requestReview
 
     @State private var selectedTab  = AppTab.events
     @State private var previousTab  = AppTab.events
@@ -181,6 +183,28 @@ struct AppTabContainer: View {
         isLaunching = false
     }
 
+    /// Asks iOS for a rating prompt, if this is a good moment.
+    ///
+    /// ReviewPrompter decides whether the person's history makes it OK to
+    /// ask; this decides whether the screen does. The pause lets the app
+    /// settle and the person get their bearings, and the re-check after it
+    /// catches them opening something in the meantime — a prompt on top of
+    /// Settings or the homework sheet is exactly the interruption Apple's
+    /// guidance warns against.
+    private func considerReviewPrompt() {
+        ReviewPrompter.recordActiveDay()
+        guard ReviewPrompter.isGoodTimeToAsk else { return }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3))
+            guard scenePhase == .active, !isLaunching, selectedTab == .events,
+                  !showSettings, !showHomework, !showContacts, !showCapacityAlert,
+                  ReviewPrompter.isGoodTimeToAsk
+            else { return }
+            ReviewPrompter.markAsked()
+            requestReview()
+        }
+    }
+
     var body: some View {
         Group {
             if isPhone { iPhoneLayout } else { iPadLayout }
@@ -189,7 +213,9 @@ struct AppTabContainer: View {
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background: calendarUI.appDidBackground()
-            case .active:     calendarUI.appDidForeground()
+            case .active:
+                calendarUI.appDidForeground()
+                considerReviewPrompt()
             default:          break
             }
         }
@@ -265,6 +291,10 @@ struct AppTabContainer: View {
             // line above changes nothing, and the onChange above would not
             // fire. This is the unconditional backstop.
             resolveLaunchIfReady()
+            // A cold launch arrives already active, so the scenePhase
+            // onChange above never fires for it. Once launch is settled is
+            // the right moment anyway.
+            considerReviewPrompt()
         }
         .task {
             // Delay-then-show. If loading beats this, isLaunching is already

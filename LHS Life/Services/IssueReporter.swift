@@ -99,6 +99,15 @@ enum IssueReporter {
         }
     }
 
+    /// Whether this device has reported any problem today. ReviewPrompter
+    /// uses it to avoid asking for a rating on a day something broke.
+    static var hasReportedToday: Bool {
+        let dayKey = DateFormatter.isoDay.string(from: Date())
+        return UserDefaults.standard.dictionaryRepresentation().keys.contains {
+            $0.hasPrefix("lhs_issue_") && $0.hasSuffix("_\(dayKey)")
+        }
+    }
+
     /// Drops every "already reported" mark from a day other than `dayKey`.
     private static func pruneMarks(keeping dayKey: String) {
         let defaults = UserDefaults.standard

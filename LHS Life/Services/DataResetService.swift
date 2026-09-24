@@ -56,6 +56,7 @@ enum DataResetService {
             // saw before the reset can be tied to whoever uses this device next.
             PushTokenService.resetDeviceId()
             IssueReporter.resetDedupe()
+            ReviewPrompter.reset()
         }
     }
 }
