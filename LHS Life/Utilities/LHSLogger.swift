@@ -35,4 +35,6 @@ enum LHSLogger {
     /// Calendar UI decisions that are otherwise invisible — e.g. the week
     /// strip ignoring a page change that layout, not a person, caused.
     static let calendarUI = Logger(subsystem: "lhslife", category: "calendarUI")
+    /// Which reminders were queued, and for when.
+    static let notifications = Logger(subsystem: "lhslife", category: "notifications")
 }

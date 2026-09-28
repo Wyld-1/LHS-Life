@@ -11,6 +11,7 @@
 
 import Foundation
 import UserNotifications
+import OSLog
 
 enum NotificationService {
 
@@ -102,6 +103,79 @@ enum NotificationService {
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
         try? await center.add(UNNotificationRequest(identifier: "dress-\(event.id)",
                                                      content: content, trigger: trigger))
+    }
+
+    // MARK: - Late Start
+    //
+    // "Late start tomorrow" is only useful the night before — that's when
+    // alarms get set. The abnormal-day notification fires the morning of, and
+    // only for people with Live Activities off, so it never covered this.
+    //
+    // A late start is any day whose classes begin at least 30 minutes after
+    // the usual 8:00, found from the day's actual bell schedule rather than
+    // its title. That catches the "Late Start/ADVISING/Even Block" days by
+    // their times, catches an unlabelled late start the same way, and ignores
+    // a Senior Presentation day's 8:05 start. Period 0 is left out: it runs
+    // before school on regular days and would make every day look early.
+
+    /// The usual first bell, and how much later a day must start to count.
+    private static let usualStartMinutes = 8 * 60
+    private static let lateStartThresholdMinutes = 30
+
+    static func scheduleLateStartNotifications(settings: UserSettings, store: CalendarStore) async {
+        let existing = await center.pendingNotificationRequests()
+        let ids = existing.filter { $0.identifier.hasPrefix("latestart-") }.map { $0.identifier }
+        center.removePendingNotificationRequests(withIdentifiers: ids)
+
+        guard settings.lateStartNotificationsEnabled, await isAuthorized else { return }
+
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let minutes = settings.lateStartReminderMinutes
+        let nightBefore = minutes >= 12 * 60
+
+        for dayOffset in 0..<15 {
+            guard let date = cal.date(byAdding: .day, value: dayOffset, to: today) else { continue }
+            let weekday = cal.component(.weekday, from: date)
+            guard weekday >= 2, weekday <= 6 else { continue }
+
+            let dayKey = DateFormatter.isoDay.string(from: date)
+            guard let schedule = store.bellSchedule(for: dayKey) else { continue }   // no school
+            if PathwaysService.isPathwaysDay(on: dayKey, events: store.events,
+                                             graduationYear: settings.graduationYear) { continue }
+
+            // First class of the day, Period 0 aside.
+            guard let first = schedule.periods
+                .filter({ ScheduleEngine.periodNumber(from: $0.name) != 0 })
+                .compactMap({ p in p.startDate(on: date).map { (p, $0) } })
+                .min(by: { $0.1 < $1.1 }),
+                  let hour = first.0.startTime.hour, let minute = first.0.startTime.minute,
+                  hour * 60 + minute >= usualStartMinutes + lateStartThresholdMinutes
+            else { continue }
+            let start = first.1
+
+            guard let fireDay = cal.date(byAdding: .day, value: nightBefore ? -1 : 0, to: date) else { continue }
+            var comps = cal.dateComponents([.year, .month, .day], from: fireDay)
+            comps.hour = minutes / 60; comps.minute = minutes % 60; comps.second = 0
+            guard let fireDate = cal.date(from: comps), fireDate > Date() else { continue }
+            // A "morning of" time after classes have already started would
+            // announce the late start once it's over.
+            if !nightBefore && fireDate >= start { continue }
+
+            let content = UNMutableNotificationContent()
+            content.title = nightBefore ? "Late Start Tomorrow" : "Late Start Today"
+            content.body  = "School starts at \(timeString(start))."
+            content.sound = .default
+            // .active, like Professional Dress: it's worth knowing, but not
+            // worth breaking through someone's evening Focus.
+
+            let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+            try? await center.add(UNNotificationRequest(identifier: "latestart-\(dayKey)",
+                                                         content: content, trigger: trigger))
+            LHSLogger.notifications.notice(
+                "Late start \(dayKey, privacy: .public): school starts \(timeString(start), privacy: .public), reminder at \(fireDate, privacy: .public)"
+            )
+        }
     }
 
     // MARK: - Class Orientation Day

@@ -33,25 +33,27 @@ struct SettingsSheetView: View {
     @Environment(CalendarStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
-    /// The picker shows a plain time; the label says which day it lands on,
-    /// so choosing 6:30 AM visibly flips it to the morning of.
-    private var dressReminderLabel: String {
-        settings.professionalDressReminderMinutes >= 12 * 60 ? "Remind Night Before" : "Remind Morning Of"
-    }
-
-    /// Bridges the stored minutes-after-midnight to the Date a DatePicker wants.
-    private var dressReminderTime: Binding<Date> {
-        Binding(
-            get: {
-                let minutes = settings.professionalDressReminderMinutes
-                return Calendar.current.date(
-                    bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: Date()
-                ) ?? Date()
-            },
-            set: { date in
-                let c = Calendar.current.dateComponents([.hour, .minute], from: date)
-                settings.professionalDressReminderMinutes = (c.hour ?? 21) * 60 + (c.minute ?? 0)
-            }
+    /// The time row under a reminder toggle. The picker shows a plain time;
+    /// the label says which day it lands on, so choosing 6:30 AM visibly
+    /// flips it to the morning of. Shared by every "night before / morning
+    /// of" reminder so they can't drift apart.
+    private func reminderTimeRow(_ minutes: Binding<Int>) -> some View {
+        DatePicker(
+            minutes.wrappedValue >= 12 * 60 ? "Remind Night Before" : "Remind Morning Of",
+            selection: Binding(
+                get: {
+                    Calendar.current.date(
+                        bySettingHour: minutes.wrappedValue / 60,
+                        minute: minutes.wrappedValue % 60,
+                        second: 0, of: Date()
+                    ) ?? Date()
+                },
+                set: { date in
+                    let c = Calendar.current.dateComponents([.hour, .minute], from: date)
+                    minutes.wrappedValue = (c.hour ?? 21) * 60 + (c.minute ?? 0)
+                }
+            ),
+            displayedComponents: .hourAndMinute
         )
     }
 
@@ -272,11 +274,16 @@ struct SettingsSheetView: View {
                 }
 
             if settings.professionalDressNotificationsEnabled {
-                DatePicker(
-                    dressReminderLabel,
-                    selection: dressReminderTime,
-                    displayedComponents: .hourAndMinute
-                )
+                reminderTimeRow($settings.professionalDressReminderMinutes)
+            }
+
+            Toggle("Late Start", isOn: $settings.lateStartNotificationsEnabled)
+                .onChange(of: settings.lateStartNotificationsEnabled) { _, _ in
+                    HapticEngine.shared.tap()
+                }
+
+            if settings.lateStartNotificationsEnabled {
+                reminderTimeRow($settings.lateStartReminderMinutes)
             }
 
             Picker("Live Activities", selection: $settings.liveActivityMode) {

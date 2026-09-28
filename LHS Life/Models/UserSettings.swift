@@ -94,6 +94,11 @@ final class UserSettings {
     /// way people say them, with no separate "night before / day of" switch.
     var professionalDressReminderMinutes: Int
     static let defaultDressReminderMinutes = 21 * 60   // 9:00 PM the night before
+    /// Remind before a day that starts late. Same time rule as Professional
+    /// Dress: noon or later is the night before, earlier is the morning of.
+    var lateStartNotificationsEnabled: Bool
+    var lateStartReminderMinutes: Int
+    static let defaultLateStartReminderMinutes = 21 * 60   // 9:00 PM the night before
     var liveActivityMode: LiveActivityMode
     /// Temporary per-day override: Live Activity enabled just for today.
     var liveActivityEnabledToday: Bool
@@ -187,6 +192,8 @@ final class UserSettings {
         
         self.professionalDressNotificationsEnabled = d.object(forKey: Keys.dressNotifs) as? Bool ?? true
         self.professionalDressReminderMinutes = d.object(forKey: Keys.dressTime) as? Int ?? Self.defaultDressReminderMinutes
+        self.lateStartNotificationsEnabled = d.object(forKey: Keys.lateStartNotifs) as? Bool ?? true
+        self.lateStartReminderMinutes = d.object(forKey: Keys.lateStartTime) as? Int ?? Self.defaultLateStartReminderMinutes
         let rawMode = d.integer(forKey: Keys.liveActivityMode)
         self.liveActivityMode = LiveActivityMode(rawValue: rawMode) ?? .off
         self.isASBMember = d.bool(forKey: Keys.asbMember)
@@ -314,6 +321,8 @@ final class UserSettings {
         store.set(lastGraduationYear, forKey: Keys.lastGradYear)
         store.set(professionalDressNotificationsEnabled, forKey: Keys.dressNotifs)
         store.set(professionalDressReminderMinutes, forKey: Keys.dressTime)
+        store.set(lateStartNotificationsEnabled, forKey: Keys.lateStartNotifs)
+        store.set(lateStartReminderMinutes, forKey: Keys.lateStartTime)
         store.set(liveActivityMode.rawValue, forKey: Keys.liveActivityMode)
         store.set(isASBMember, forKey: Keys.asbMember)
         store.set(showMapTab, forKey: Keys.showMapTab)
@@ -358,6 +367,8 @@ final class UserSettings {
         periodConfigs = PeriodConfig.defaults
         professionalDressNotificationsEnabled = true
         professionalDressReminderMinutes = Self.defaultDressReminderMinutes
+        lateStartNotificationsEnabled = true
+        lateStartReminderMinutes = Self.defaultLateStartReminderMinutes
         liveActivityMode = .off
         liveActivityEnabledToday = false
         isASBMember = false
@@ -395,6 +406,8 @@ final class UserSettings {
         static let periodConfigs        = "period_configs"
         static let dressNotifs          = "dress_notifications_enabled"
         static let dressTime            = "dress_reminder_minutes"
+        static let lateStartNotifs      = "late_start_notifications_enabled"
+        static let lateStartTime        = "late_start_reminder_minutes"
         static let liveActivityMode      = "live_activity_mode"
         static let abnormalNotifs        = "abnormal_schedule_notifications"  // legacy, unused
         static let liveActivityToday    = "live_activity_today"
@@ -414,7 +427,8 @@ final class UserSettings {
     // One person should only have to set up their profile once.
     //
     // Synced:     periodConfigs, graduationYear, professionalDressNotificationsEnabled,
-    //             professionalDressReminderMinutes,
+    //             professionalDressReminderMinutes, lateStartNotificationsEnabled,
+    //             lateStartReminderMinutes,
     //             isASBMember, asbWorkDays, apSilencedKey, apBadgeClearedKey,
     //             hasCompletedOnboarding, accessApproved, schoolEmail
     // Not synced: liveActivityMode, liveActivityEnabledToday (per-device preference)
@@ -442,6 +456,8 @@ final class UserSettings {
         icloud.set(Int64(graduationYear), forKey: ICloudKeys.gradYear)
         icloud.set(professionalDressNotificationsEnabled, forKey: ICloudKeys.dressNotifs)
         icloud.set(Int64(professionalDressReminderMinutes), forKey: ICloudKeys.dressTime)
+        icloud.set(lateStartNotificationsEnabled, forKey: ICloudKeys.lateStartNotifs)
+        icloud.set(Int64(lateStartReminderMinutes), forKey: ICloudKeys.lateStartTime)
         icloud.set(isASBMember, forKey: ICloudKeys.asbMember)
         icloud.set(hasCompletedOnboarding, forKey: ICloudKeys.onboarding)
         icloud.set(accessApproved, forKey: ICloudKeys.accessApproved)
@@ -485,6 +501,19 @@ final class UserSettings {
             let remoteTime = Int(icloud.longLong(forKey: ICloudKeys.dressTime))
             if remoteTime != professionalDressReminderMinutes {
                 professionalDressReminderMinutes = remoteTime
+                changed = true
+            }
+        }
+
+        if let remoteLate = icloud.object(forKey: ICloudKeys.lateStartNotifs) as? Bool,
+           remoteLate != lateStartNotificationsEnabled {
+            lateStartNotificationsEnabled = remoteLate
+            changed = true
+        }
+        if icloud.object(forKey: ICloudKeys.lateStartTime) != nil {
+            let remoteTime = Int(icloud.longLong(forKey: ICloudKeys.lateStartTime))
+            if remoteTime != lateStartReminderMinutes {
+                lateStartReminderMinutes = remoteTime
                 changed = true
             }
         }
@@ -548,6 +577,8 @@ final class UserSettings {
         static let gradYear          = "icloud_graduation_year"
         static let dressNotifs       = "icloud_dress_notifications_enabled"
         static let dressTime         = "icloud_dress_reminder_minutes"
+        static let lateStartNotifs   = "icloud_late_start_notifications_enabled"
+        static let lateStartTime     = "icloud_late_start_reminder_minutes"
         static let asbMember         = "icloud_asb_member"
         static let onboarding        = "icloud_onboarding_complete"
         static let accessApproved    = "icloud_access_approved"
