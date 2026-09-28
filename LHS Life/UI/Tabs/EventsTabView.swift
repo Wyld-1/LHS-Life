@@ -551,38 +551,63 @@ private struct DayColumn: View {
             }
         }
 
-        // Second pass: total columns in each event's overlapping group,
-        // also counting column 0 as occupied if a period overlaps this event.
+        // Second pass: how many columns each event shares its space with.
         //
-        // Both col and totalCols are capped at 2 columns. The day column is
-        // roughly 340pt wide on an iPhone; a third column lands around 113pt
-        // and anything beyond it renders off the right edge entirely — which
-        // is what produced the stray yellow sliver hanging past the screen on
-        // Picture Day. Per Lion: overlapping is preferable to invisible, so
-        // extra concurrent events stack into column 1 rather than spilling
-        // into columns that can't be seen.
-        return assignments.map { item in
-            let eventCols = assignments.filter { other in
-                other.event.startDate < item.event.endDate &&
-                other.event.endDate > item.event.startDate
-            }.map(\.col)
-
-            let periodOccupiesCol0 = periodSpans.contains { start, end in
+        // Counted per CLUSTER — every event linked to this one through a chain
+        // of overlaps — not just the events that overlap it directly. Counting
+        // directly gave neighbours in the same column different widths: an
+        // 8–9 AM event overlapping only the classes got half the day, while
+        // the 9 AM–3 PM event below it in the SAME column got a third, so the
+        // column visibly jogged sideways. One count per cluster keeps every
+        // column straight.
+        var clusterOf = Array(0..<assignments.count)
+        func root(_ i: Int) -> Int {
+            var i = i
+            while clusterOf[i] != i { clusterOf[i] = clusterOf[clusterOf[i]]; i = clusterOf[i] }
+            return i
+        }
+        // Events that sit beside the classes are linked too, even if they
+        // never overlap each other: they share the classes' column, so they
+        // must agree on its width or the class blocks change width halfway
+        // down the day.
+        let besideClasses = assignments.map { item in
+            periodSpans.contains { start, end in
                 item.event.startDate < end && item.event.endDate > start
             }
+        }
+        for i in assignments.indices {
+            for j in assignments.indices where j > i {
+                let a = assignments[i].event, b = assignments[j].event
+                let overlap = a.startDate < b.endDate && a.endDate > b.startDate
+                if overlap || (besideClasses[i] && besideClasses[j]) {
+                    clusterOf[root(j)] = root(i)
+                }
+            }
+        }
 
-            let allCols = periodOccupiesCol0
-                ? ([0] + eventCols)
-                : eventCols
-            let rawTotal = (allCols.max() ?? 0) + 1
-            let totalCols = min(rawTotal, Self.maxColumns)
+        // Events beside the classes already start at column 1, so the
+        // classes' column 0 is counted without any special case.
+        var maxColInCluster: [Int: Int] = [:]
+        for (i, item) in assignments.enumerated() {
+            maxColInCluster[root(i)] = max(maxColInCluster[root(i)] ?? 0, item.col)
+        }
+
+        // Capped at maxColumns. Past that, extra events share the last column
+        // rather than being pushed off the right edge where they can't be seen
+        // (the Picture Day sliver). Overlapping is preferable to invisible.
+        return assignments.enumerated().map { i, item in
+            let totalCols = min((maxColInCluster[root(i)] ?? 0) + 1, Self.maxColumns)
             let col = min(item.col, Self.maxColumns - 1)
             return (item.event, col, totalCols)
         }
     }
 
-    /// Hard ceiling on side-by-side event columns. See layoutEvents.
-    private static let maxColumns = 2
+    /// Hard ceiling on side-by-side columns, the classes included. Four
+    /// leaves room for three events beside the classes, which covers every
+    /// busy day in the 2026–27 calendar (Homecoming week peaks at three).
+    /// On an iPhone that's about 83pt a column: tight, so event titles wrap
+    /// onto more lines as their blocks get narrower (see EventBlock).
+    private static let maxColumns = 4
 
     /// Fixed height for the Now row, so its centered line can be positioned
     /// exactly on the current time. Must comfortably fit the "Now" pill.
@@ -592,14 +617,18 @@ private struct DayColumn: View {
         ZStack(alignment: .topLeading) {
             Color.clear.frame(width: width, height: Grid.totalHeight)
 
-            // Period blocks — narrowed when a timed event runs alongside
+            // Period blocks — narrowed to one column when timed events run
+            // alongside, matching however many columns those events use.
             ForEach(visiblePeriods, id: \.period.id) { item in
-                let hasOverlap = layoutEvents.contains { ev in
-                    ev.col > 0 &&
-                    ev.event.startDate < item.end &&
-                    ev.event.endDate > item.start
-                }
-                let effectiveWidth = hasOverlap ? (width / 2) - LS.sm : width
+                let sharedCols = layoutEvents
+                    .filter { ev in
+                        ev.col > 0 &&
+                        ev.event.startDate < item.end &&
+                        ev.event.endDate > item.start
+                    }
+                    .map(\.totalCols)
+                    .max()
+                let effectiveWidth = sharedCols.map { (width - LS.sm) / CGFloat($0) - LS.sm / 2 } ?? width
                 PeriodBlock(
                     period:   item.period,
                     start:    item.start,
@@ -785,20 +814,32 @@ private struct EventBlock: View {
     }
     private var color: Color { event.category.pillColor }
 
+    /// As many lines as the block is tall enough for, up to four. With up to
+    /// four columns a block can be ~80pt wide, and a fixed two-line limit cut
+    /// most titles off after a couple of words even when the block had room
+    /// below for the rest.
+    private var titleLineLimit: Int {
+        blockHeight > 28 ? min(4, max(2, Int(blockHeight / 17))) : 1
+    }
+
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 0) {
+            // Top-aligned: in a tall block (a 9–3 blood drive) a centred title
+            // sat in the middle of the afternoon, on top of whatever shorter
+            // event shared that stretch — and read as belonging to it.
+            HStack(alignment: blockHeight > 28 ? .top : .center, spacing: 0) {
                 Capsule()
                     .fill(color)
                     .frame(width: 4)
+                    .frame(maxHeight: .infinity)
                     .padding(.vertical, 3)
                     .padding(.leading, 4)
                     .padding(.trailing, 4)
                 Text(event.title)
                     .font(.system(size: blockHeight > 28 ? 13 : 11, weight: .bold, design: .rounded))
                     .foregroundStyle(color)
-                    .lineLimit(blockHeight > 28 ? 2 : 1)
-                    .padding(.vertical, 3)
+                    .lineLimit(titleLineLimit)
+                    .padding(.vertical, blockHeight > 28 ? 6 : 3)
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
