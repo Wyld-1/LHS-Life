@@ -32,7 +32,10 @@ import CoreGraphics
 import ImageIO
 import CryptoKit
 
-enum ScheduleImageParser {
+// nonisolated: this project defaults every type to the main actor, and
+// everything below is either network or CPU work that must not run there.
+// See readRows(at:) for what that cost.
+nonisolated enum ScheduleImageParser {
 
     // MARK: - Finding the image
 
@@ -60,8 +63,26 @@ enum ScheduleImageParser {
     /// Results are cached by URL, so a schedule image is read once per device
     /// rather than on every refresh — the picture for a given day never
     /// changes without its URL changing too.
+    @MainActor
     static func periods(at url: URL, eventID: String) async -> [Period]? {
-        if let cached = Cache.load(for: url) { return cached.asPeriods(eventID: eventID) }
+        guard let rows = await readRows(at: url) else { return nil }
+        return rows.asPeriods(eventID: eventID)
+    }
+
+    /// The slow part, kept OFF the main thread.
+    ///
+    /// @concurrent because under this project's settings an async function
+    /// otherwise runs on its caller's actor — and the caller is CalendarStore,
+    /// on the main actor. Vision's text recognition is synchronous, and the
+    /// first time it runs on a device it has to load, and on a Mac COMPILE,
+    /// its model for the Neural Engine. On the App Store build a Mac sat in
+    /// exactly that compile, main thread blocked, beachballing indefinitely
+    /// at launch (sampled: CalendarStore.refresh → recognizeRows →
+    /// _ANEClient compileModel). iPhones mostly got away with it because the
+    /// system already has the model compiled for Live Text.
+    @concurrent
+    private static func readRows(at url: URL) async -> [ParsedRow]? {
+        if let cached = Cache.load(for: url) { return cached }
 
         guard let image = await downloadImage(at: url) else { return nil }
         guard let rows = recognizeRows(in: image), !rows.isEmpty else { return nil }
@@ -70,7 +91,7 @@ enum ScheduleImageParser {
         guard parsed.count >= 3 else { return nil }   // a schedule, not a stray caption
 
         Cache.save(parsed, for: url)
-        return parsed.asPeriods(eventID: eventID)
+        return parsed
     }
 
     /// The reading from a previous run, straight from disk — no network, no
@@ -82,6 +103,7 @@ enum ScheduleImageParser {
     /// That gap is not cosmetic. The Live Activity is started as soon as the
     /// app becomes active, and it keeps whatever schedule it was started with
     /// for the rest of the day.
+    @MainActor
     static func cachedPeriods(at url: URL, eventID: String) -> [Period]? {
         Cache.load(for: url)?.asPeriods(eventID: eventID)
     }
@@ -129,6 +151,9 @@ enum ScheduleImageParser {
     /// same row — and then ordered left to right, which turns the three
     /// columns back into (name, start, end).
     private static func recognizeRows(in image: CGImage) -> [[String]]? {
+        // Debug builds only. Vision on the main thread froze Macs at launch;
+        // this makes any regression crash loudly in development instead.
+        assert(!Thread.isMainThread, "Schedule OCR must never run on the main thread")
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = false   // times and "3rd Period", not prose
@@ -285,6 +310,7 @@ enum ScheduleImageParser {
 // MARK: - Rows → Periods
 
 private extension Array where Element == ScheduleImageParser.ParsedRow {
+    @MainActor
     func asPeriods(eventID: String) -> [Period] {
         enumerated().map { index, row in
             Period(
