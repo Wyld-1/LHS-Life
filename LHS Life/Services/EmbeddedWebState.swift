@@ -190,16 +190,10 @@ final class EmbeddedWebState: NSObject {
     /// or going down for everyone.
     @MainActor
     func reportIfSiteIsBroken(_ error: Error) {
-        let code = (error as NSError).code
-        let studentSideCodes: Set<Int> = [
-            NSURLErrorNotConnectedToInternet,
-            NSURLErrorNetworkConnectionLost,
-            NSURLErrorTimedOut,
-            NSURLErrorDataNotAllowed,       // cellular data off for the app
-            NSURLErrorInternationalRoamingOff,
-            NSURLErrorCancelled,            // a tap away mid-load
-        ]
-        guard (error as NSError).domain == NSURLErrorDomain, !studentSideCodes.contains(code) else { return }
+        guard (error as NSError).domain == NSURLErrorDomain,
+              !IssueReporter.isCancellation(error),      // a tap away mid-load
+              !IssueReporter.isConnectionProblem(error)
+        else { return }
         IssueReporter.report(.webLoad, detail: "\(siteName): \(error.localizedDescription)", subject: siteName)
     }
 

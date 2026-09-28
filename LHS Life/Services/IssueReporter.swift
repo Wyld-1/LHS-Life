@@ -99,6 +99,34 @@ enum IssueReporter {
         }
     }
 
+    // MARK: - Is it the school's problem?
+
+    /// A request that was cancelled, not one that failed — the view that
+    /// started it went away, or a newer refresh replaced it.
+    static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        let ns = error as NSError
+        return ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled
+    }
+
+    /// The device's own connection failing: no signal, a dropped connection,
+    /// a timeout. One of these from one phone is a student on bad wifi, not
+    /// a broken server — but a hundred of them at once could be the server,
+    /// so callers retry first and report what's left under the subject
+    /// "network", apart from "server" failures that are always the school's.
+    static func isConnectionProblem(_ error: Error) -> Bool {
+        let ns = error as NSError
+        guard ns.domain == NSURLErrorDomain else { return false }
+        return [
+            NSURLErrorNotConnectedToInternet,
+            NSURLErrorNetworkConnectionLost,
+            NSURLErrorTimedOut,
+            NSURLErrorDataNotAllowed,           // cellular data off for the app
+            NSURLErrorInternationalRoamingOff,
+            NSURLErrorCallIsActive,
+        ].contains(ns.code)
+    }
+
     /// Whether this device has reported any problem today. ReviewPrompter
     /// uses it to avoid asking for a rating on a day something broke.
     static var hasReportedToday: Bool {

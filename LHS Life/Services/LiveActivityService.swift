@@ -13,6 +13,7 @@ import Foundation
 import ActivityKit
 import UserNotifications
 import OSLog
+import UIKit
 
 @MainActor
 @Observable
@@ -121,6 +122,11 @@ final class LiveActivityService {
 
     // MARK: - Start if needed
 
+    /// Whether ActivityKit will accept a start request right now.
+    private var isAppInForeground: Bool {
+        UIApplication.shared.applicationState == .active
+    }
+
     func startIfNeeded(schedule: BellSchedule?, settings: UserSettings) {
         reconnect()
         if let running = currentActivity {
@@ -132,6 +138,15 @@ final class LiveActivityService {
             // bells for the rest of the day, and so does the server, which
             // was told the old times when it registered.
             if !isDebugSession, let schedule, scheduleHasChanged(since: running, to: schedule, settings: settings) {
+                // Checked BEFORE ending the old card, not just before starting
+                // the new one. Ending works from the background; starting
+                // doesn't. Replacing from the background would take the card
+                // off the Lock Screen and fail to put one back. The next
+                // foreground runs this again.
+                guard isAppInForeground else {
+                    LHSLogger.liveActivity.notice("Schedule changed, but app is in the background — replacing on next foreground")
+                    return
+                }
                 LHSLogger.liveActivity.notice(
                     "Schedule changed since this Live Activity started — replacing \(running.id, privacy: .public)"
                 )
@@ -174,6 +189,18 @@ final class LiveActivityService {
         if let firstBell = periods.first?.startDate, firstBell.timeIntervalSinceNow > 3600 {
             LHSLogger.liveActivity.notice("bail: first bell too far away (\(Int(firstBell.timeIntervalSinceNow / 60))min)")
             lastStartFailure = "School hasn't started yet today"
+            return
+        }
+
+        // ActivityKit only starts a Live Activity for an app that's in front;
+        // from the background it throws ActivityAuthorizationError.visibility.
+        // That happened in production: this runs after the calendar finishes
+        // loading, a few seconds after launch — long enough for a student to
+        // have already left, or for iOS to have launched the app in the
+        // background. Not a failure to show anyone: the scenePhase .active
+        // handler calls this again the next time the app comes forward.
+        guard isAppInForeground else {
+            LHSLogger.liveActivity.notice("bail: app not in foreground — will start on next foreground")
             return
         }
 

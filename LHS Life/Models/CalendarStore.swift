@@ -215,7 +215,7 @@ final class CalendarStore {
         isLoading = true
         error = nil
         do {
-            let fetched = try await iCalService.fetchEvents()
+            let fetched = try await fetchEventsRetryingOnce()
             cache.saveEvents(fetched)
             applyEvents(fetched)
             // Before notifications, because a day whose times come from a
@@ -225,11 +225,40 @@ final class CalendarStore {
             LHSLogger.ical.notice("Calendar refreshed — \(fetched.count) events")
             await scheduleNotifications(for: fetched)
         } catch {
+            if IssueReporter.isCancellation(error) {
+                // Not a failure: whatever asked for this refresh went away.
+                LHSLogger.ical.notice("Calendar refresh cancelled")
+                isLoading = false
+                return
+            }
             self.error = AppError(underlying: error)
             LHSLogger.ical.error("Calendar refresh failed — \(String(describing: error), privacy: .public)")
-            IssueReporter.report(.calendarFetch, detail: String(describing: error))
+            // Grouped separately on /status: "network" is the device's own
+            // connection, even after a retry; "server" is CalendarWiz or the
+            // feed itself, and always worth a look.
+            IssueReporter.report(
+                .calendarFetch,
+                detail: String(describing: error),
+                subject: IssueReporter.isConnectionProblem(error) ? "network" : "server"
+            )
         }
         isLoading = false
+    }
+
+    /// One retry for a dropped or timed-out connection, three seconds later.
+    ///
+    /// The first reports from production were all of this kind: a connection
+    /// lost mid-download, a timeout — phones changing networks in a hallway.
+    /// A retry clears nearly all of them without the student noticing, and
+    /// anything that survives it is more likely to be real.
+    private func fetchEventsRetryingOnce() async throws -> [SchoolEvent] {
+        do {
+            return try await iCalService.fetchEvents()
+        } catch let error where IssueReporter.isConnectionProblem(error) {
+            LHSLogger.ical.notice("Calendar fetch hit a connection problem — retrying once")
+            try await Task.sleep(for: .seconds(3))
+            return try await iCalService.fetchEvents()
+        }
     }
 
     /// Re-runs every notification schedule against the last fetched calendar.
