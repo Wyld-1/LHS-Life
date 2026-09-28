@@ -321,7 +321,8 @@ final class BellScheduleParser {
             .filter { !$0.isEmpty }
 
         guard let headerIndex = lines.firstIndex(where: { $0.lowercased() == "period" }) else {
-            return nil
+            // Not the stacked table — try one row per line instead.
+            return parseInline(lines: lines, event: event)
         }
 
         let metaLines = Array(lines[..<headerIndex])
@@ -370,6 +371,105 @@ final class BellScheduleParser {
         )
     }
 
+    // MARK: - One Row Per Line
+
+    /// The other layout CalendarWiz schedules arrive in: every row on one
+    /// line, times first, dotted leader, then the name —
+    ///
+    ///     8:00 &mdash; 8:40.................... First Period
+    ///     11:50 &mdash; 12:25......................... Lunch
+    ///
+    /// First seen on the Oct 2, 2026 Homecoming Rally schedule, which the
+    /// stacked-table parser above found nothing in, so the day showed no bells
+    /// at all. The dash arrives as a literal HTML entity in the plain-text
+    /// DESCRIPTION, so entities are decoded here before matching. The name can
+    /// also come first ("First Period ..... 8:00 - 8:40"); both orders work.
+    ///
+    /// Lines with a single time ("7:55 ..... First Bell") are skipped on
+    /// purpose — a bell is a moment, not a block. Fewer than three rows is not
+    /// treated as a schedule, so a description that merely mentions a time
+    /// range ("Dance 7:00 - 10:00") isn't mistaken for one.
+    private func parseInline(lines: [String], event: SchoolEvent) -> BellSchedule? {
+        let time = #"(\d{1,2}:\d{2}\s*(?:[AaPp]\.?[Mm]\.?)?)"#
+        let dash = #"\s*(?:-|–|—|to)\s*"#
+        let leader = #"[\s.·…_]*"#
+        let timesFirst = try? NSRegularExpression(pattern: "^" + time + dash + time + leader + #"(.+?)\s*$"#)
+        let nameFirst  = try? NSRegularExpression(pattern: #"^(.+?)"# + leader + time + dash + time + #"\s*$"#)
+
+        var periods: [Period] = []
+        for rawLine in lines {
+            let line = Self.decodeEntities(rawLine)
+            let range = NSRange(line.startIndex..., in: line)
+
+            var name: String?, startStr: String?, endStr: String?
+            if let m = timesFirst?.firstMatch(in: line, range: range), m.numberOfRanges == 4 {
+                startStr = Self.group(m, 1, in: line)
+                endStr   = Self.group(m, 2, in: line)
+                name     = Self.group(m, 3, in: line)
+            } else if let m = nameFirst?.firstMatch(in: line, range: range), m.numberOfRanges == 4 {
+                name     = Self.group(m, 1, in: line)
+                startStr = Self.group(m, 2, in: line)
+                endStr   = Self.group(m, 3, in: line)
+            }
+
+            guard let name = name?.trimmingCharacters(in: CharacterSet(charactersIn: " .·…_-")),
+                  !name.isEmpty,
+                  let startStr, let endStr,
+                  let start = parseTime(startStr.replacingOccurrences(of: ".", with: "")),
+                  let end   = parseTime(endStr.replacingOccurrences(of: ".", with: ""))
+            else { continue }
+
+            periods.append(Period(
+                id: "\(event.id)-\(periods.count)",
+                name: normalizeName(Self.periodName(fromOrdinal: name)),
+                startTime: start,
+                endTime: end
+            ))
+        }
+
+        guard periods.count >= 3 else { return nil }
+
+        return BellSchedule(
+            id: event.id,
+            date: event.startDate,
+            scheduleType: inferScheduleType(from: lines + [event.title]),
+            periods: periods,
+            sourceEventID: event.id
+        )
+    }
+
+    /// "First Period" / "1st Period" / "Period 1" → "Period 1", so the block
+    /// picks up the student's own class name and colour. ScheduleEngine only
+    /// recognises the "Period N" form. Anything else is returned unchanged.
+    private static func periodName(fromOrdinal raw: String) -> String {
+        let words = ["zero": 0, "first": 1, "second": 2, "third": 3, "fourth": 4,
+                     "fifth": 5, "sixth": 6, "seventh": 7, "eighth": 8]
+        let lower = raw.lowercased().trimmingCharacters(in: .whitespaces)
+
+        if lower.hasSuffix(" period") {
+            let lead = String(lower.dropLast(" period".count)).trimmingCharacters(in: .whitespaces)
+            if let n = words[lead] { return "Period \(n)" }
+            let digits = lead.prefix(while: \.isNumber)
+            if !digits.isEmpty, let n = Int(digits) { return "Period \(n)" }
+        }
+        if lower.hasPrefix("period "), let n = Int(lower.dropFirst("period ".count)) {
+            return "Period \(n)"
+        }
+        return raw
+    }
+
+    private static func decodeEntities(_ s: String) -> String {
+        s.replacingOccurrences(of: "&mdash;", with: "—")
+         .replacingOccurrences(of: "&ndash;", with: "–")
+         .replacingOccurrences(of: "&nbsp;", with: " ")
+         .replacingOccurrences(of: "&amp;", with: "&")
+         .trimmingCharacters(in: .whitespaces)
+    }
+
+    private static func group(_ m: NSTextCheckingResult, _ i: Int, in s: String) -> String? {
+        Range(m.range(at: i), in: s).map { String(s[$0]) }
+    }
+
     // MARK: - Time Parsing
 
     private func parseTime(_ raw: String) -> DateComponents? {
@@ -413,7 +513,7 @@ final class BellScheduleParser {
         if hasEven && hasBlock && hasLiturgy { return .evenBlockLiturgy }
         if hasOdd  && hasBlock               { return .oddBlock }
         if hasEven && hasBlock               { return .evenBlock }
-        if combined.contains("assembly")     { return .assembly }
+        if combined.contains("assembly") || combined.contains("rally") { return .assembly }
         if combined.contains("regular") && hasLiturgy { return .regularLiturgy }
         if combined.contains("regular")      { return .regular }
         if hasLiturgy                        { return .regularLiturgy }
