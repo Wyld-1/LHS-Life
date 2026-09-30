@@ -31,6 +31,8 @@ import Vision
 import CoreGraphics
 import ImageIO
 import CryptoKit
+import CoreML
+import UIKit
 
 // nonisolated: this project defaults every type to the main actor, and
 // everything below is either network or CPU work that must not run there.
@@ -65,6 +67,21 @@ nonisolated enum ScheduleImageParser {
     /// changes without its URL changing too.
     @MainActor
     static func periods(at url: URL, eventID: String) async -> [Period]? {
+        // Background time for the whole read. If the app is hidden or
+        // backgrounded partway through, the system suspends it — and a
+        // process suspended mid-way through file work it holds locks on is
+        // killed outright (0xDEAD10CC). That happened on a Mac on 1.1.1:
+        // killed seven minutes after launch, Neural Engine threads still up.
+        // Asking for time lets the read finish and let go first.
+        var task = UIBackgroundTaskIdentifier.invalid
+        task = UIApplication.shared.beginBackgroundTask(withName: "Read schedule image") {
+            UIApplication.shared.endBackgroundTask(task)
+            task = .invalid
+        }
+        defer {
+            if task != .invalid { UIApplication.shared.endBackgroundTask(task) }
+        }
+
         guard let rows = await readRows(at: url) else { return nil }
         return rows.asPeriods(eventID: eventID)
     }
@@ -158,6 +175,17 @@ nonisolated enum ScheduleImageParser {
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = false   // times and "3rd Period", not prose
         request.recognitionLanguages = ["en-US"]
+        // CPU, not the Neural Engine. On a Mac, the Neural Engine path first
+        // COMPILES Vision's text model — minutes of work, writing a compiled
+        // cache — which both froze the app at launch in 1.1 and is the likely
+        // lock it was killed holding in 1.1.1. For one small picture, read
+        // once per device and cached, the CPU takes about a second with the
+        // same accuracy, and none of that machinery ever starts.
+        if let cpu = MLComputeDevice.allComputeDevices.first(where: {
+            if case .cpu = $0 { return true } else { return false }
+        }) {
+            try? request.setComputeDevice(cpu, for: .main)
+        }
 
         let handler = VNImageRequestHandler(cgImage: image, options: [:])
         do {

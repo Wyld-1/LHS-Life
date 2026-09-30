@@ -14,7 +14,7 @@ LHS Life is a student-built companion app for La Salle High School in Yakima, WA
 
 ## What syncs through your iCloud
 
-If you're signed in to iCloud, LHS Life uses Apple's iCloud key-value storage to sync your setup between your own devices (like an iPhone and an iPad). Synced items include your school email, graduation year, period names and colors, Pro Dress and ASB settings, and whether you've signed in. This data lives in **your** private iCloud account. The LHS Life developers can't see it.
+If you're signed in to iCloud, LHS Life uses Apple's iCloud key-value storage to sync your setup between your own devices (like an iPhone and an iPad). Synced items include your school email, graduation year, period names and colors, and whether you've signed in. Alert settings (Pro Dress, Late Start, ASB and Live Activities) stay on each device, so you choose separately where you get reminders. This data lives in **your** private iCloud account. The LHS Life developers can't see it.
 
 ## What's sent to the LHS Life server (only with Live Activities on)
 

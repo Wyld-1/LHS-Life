@@ -418,6 +418,12 @@ struct SettingsSheetView: View {
                 LiveActivityService.shared.startDummy()
             }
 
+            // Mid-class at a staged 10:27 AM, no server registration. See
+            // startScreenshotDemo for the matching simulator clock override.
+            Button("Start Screenshot Demo Live Activity") {
+                LiveActivityService.shared.startScreenshotDemo()
+            }
+
             Button("Force Start Live Activity (Real)") {
                 let dayKey = DateFormatter.isoDay.string(from: Date())
                 LiveActivityService.shared.startIfNeeded(

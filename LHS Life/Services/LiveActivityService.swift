@@ -321,6 +321,76 @@ final class LiveActivityService {
         }
     }
 
+    #if DEBUG
+    // MARK: - Screenshot demo (debug only)
+    //
+    // A believable mid-class card for App Store and marketing screenshots:
+    // a full Regular day with real class names, 27 minutes into Chemistry.
+    //
+    // The card's time LABELS are staged at `stagedNow` (10:27 AM) so they
+    // agree with a simulator whose clock is overridden to match:
+    //     xcrun simctl status_bar <device> override --time 2026-09-29T10:27:00-07:00
+    // while the real dates keep the same distances from the real now, so
+    // the progress bar sits at the right point in the class.
+    //
+    // pushType nil: this never registers with the worker. The other debug
+    // start does, which puts a simulator on the production device list.
+    func startScreenshotDemo(stagedHour: Int = 10, stagedMinute: Int = 27) {
+        let realNow = Date()
+        let cal = Calendar.current
+        guard let stagedNow = cal.date(bySettingHour: stagedHour, minute: stagedMinute, second: 0, of: realNow)
+        else { return }
+        let offset = realNow.timeIntervalSince(stagedNow)
+        let fmt = DateFormatter(); fmt.dateFormat = "h:mm a"
+
+        func slot(_ number: Int?, _ name: String, _ hex: String,
+                  _ sh: Int, _ sm: Int, _ eh: Int, _ em: Int) -> ScheduleActivityAttributes.ScheduledPeriod {
+            let start = cal.date(bySettingHour: sh, minute: sm, second: 0, of: stagedNow)!
+            let end   = cal.date(bySettingHour: eh, minute: em, second: 0, of: stagedNow)!
+            return .init(periodNumber: number, displayName: name, colorHex: hex,
+                         startDate: start.addingTimeInterval(offset),
+                         endDate: end.addingTimeInterval(offset),
+                         endTimeString: fmt.string(from: end))
+        }
+        let periods = [
+            slot(1,   "English",        "#FF6B6B",  8, 0,  8, 50),
+            slot(2,   "Spanish II",     "#FB923C",  8, 55, 9, 45),
+            slot(nil, "Break",          "#94A3B8",  9, 45, 9, 55),
+            slot(3,   "Chemistry",      "#F5B800", 10, 0, 10, 50),
+            slot(4,   "US History",     "#34C78A", 10, 55, 11, 45),
+            slot(nil, "Lunch",          "#94A3B8", 11, 45, 12, 15),
+            slot(5,   "Graphic Design", "#38BDF8", 12, 20, 13, 10),
+            slot(6,   "Pre-Calculus",   "#3A6FD8", 13, 15, 14, 5),
+            slot(7,   "Theology",       "#A78BFA", 14, 10, 15, 0),
+        ]
+        guard let current = periods.first(where: { realNow >= $0.startDate && realNow < $0.endDate }) else { return }
+        let state = ScheduleActivityAttributes.ContentState(
+            slotStartMinutes: cal.component(.hour, from: current.startDate) * 60
+                            + cal.component(.minute, from: current.startDate),
+            isEnded: false
+        )
+
+        Task { @MainActor in
+            await end()
+            do {
+                currentActivity = try Activity.request(
+                    attributes: ScheduleActivityAttributes(
+                        schoolName: "LaSalle",
+                        scheduleTypeName: "Regular Schedule",
+                        schedule: periods
+                    ),
+                    content: .init(state: state, staleDate: periods.last?.endDate),
+                    pushType: nil
+                )
+                isDebugSession = true
+                LHSLogger.liveActivity.notice("Screenshot demo started")
+            } catch {
+                LHSLogger.liveActivity.error("Screenshot demo failed: \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+    #endif
+
     // MARK: - End if school over
 
     func endIfSchoolOver(state: ScheduleEngine.ScheduleState) {

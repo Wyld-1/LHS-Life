@@ -51,6 +51,13 @@ struct LaSalle_ScheduleApp: App {
                 .environment(store)
                 .environment(settings)
                 .task {
+                    #if DEBUG
+                    // xcrun simctl launch <device> com.lasalleyakima.lhslife -screenshotDemo
+                    // Starts the mid-class demo card for marketing screenshots.
+                    if ProcessInfo.processInfo.arguments.contains("-screenshotDemo") {
+                        LiveActivityService.shared.startScreenshotDemo()
+                    }
+                    #endif
                     guard settings.accessApproved else { return }
                     // Covers anyone who signed in before the prompt moved to
                     // sign-in and never answered it. A no-op otherwise.

@@ -426,17 +426,30 @@ final class UserSettings {
     // Syncs user identity and preferences across iPhone and iPad on the same Apple ID.
     // One person should only have to set up their profile once.
     //
-    // Synced:     periodConfigs, graduationYear, professionalDressNotificationsEnabled,
-    //             professionalDressReminderMinutes, lateStartNotificationsEnabled,
-    //             lateStartReminderMinutes,
-    //             isASBMember, asbWorkDays, apSilencedKey, apBadgeClearedKey,
+    // Synced:     periodConfigs, graduationYear, apSilencedKey, apBadgeClearedKey,
     //             hasCompletedOnboarding, accessApproved, schoolEmail
-    // Not synced: liveActivityMode, liveActivityEnabledToday (per-device preference)
+    // Not synced: every alert setting — professionalDressNotificationsEnabled,
+    //             professionalDressReminderMinutes, lateStartNotificationsEnabled,
+    //             lateStartReminderMinutes, isASBMember, asbWorkDays — plus
+    //             liveActivityMode and liveActivityEnabledToday.
+    //
+    // WHY ALERTS ARE PER-DEVICE: who you are and what your classes are should
+    // follow you to every device. Where you want to be REMINDED shouldn't —
+    // alerts belong on the phone in your pocket, not also on the Mac and the
+    // iPad. With these synced, turning ASB reminders on for the phone turned
+    // them on everywhere, and every device buzzed at 7:55.
     
 #if !WIDGET_EXTENSION
     @ObservationIgnored private var iCloudObserver: AnyCancellable?
     
     func startICloudSync() {
+        // The alert settings used to sync; clear what earlier builds left in
+        // iCloud so nothing stale lingers there. Builds from before this
+        // change may write them back until they update — harmless, since
+        // nothing reads them any more.
+        let icloud = NSUbiquitousKeyValueStore.default
+        for key in RetiredICloudKeys.all { icloud.removeObject(forKey: key) }
+
         // Pull remote changes on launch
         mergeFromICloud()
         NSUbiquitousKeyValueStore.default.synchronize()
@@ -454,11 +467,6 @@ final class UserSettings {
     private func pushToICloud() {
         let icloud = NSUbiquitousKeyValueStore.default
         icloud.set(Int64(graduationYear), forKey: ICloudKeys.gradYear)
-        icloud.set(professionalDressNotificationsEnabled, forKey: ICloudKeys.dressNotifs)
-        icloud.set(Int64(professionalDressReminderMinutes), forKey: ICloudKeys.dressTime)
-        icloud.set(lateStartNotificationsEnabled, forKey: ICloudKeys.lateStartNotifs)
-        icloud.set(Int64(lateStartReminderMinutes), forKey: ICloudKeys.lateStartTime)
-        icloud.set(isASBMember, forKey: ICloudKeys.asbMember)
         icloud.set(hasCompletedOnboarding, forKey: ICloudKeys.onboarding)
         icloud.set(accessApproved, forKey: ICloudKeys.accessApproved)
         icloud.set(schoolEmail, forKey: ICloudKeys.schoolEmail)
@@ -466,9 +474,6 @@ final class UserSettings {
         icloud.set(apBadgeClearedKey, forKey: ICloudKeys.apBadgeClearedKey)
         if let data = try? JSONEncoder().encode(periodConfigs) {
             icloud.set(data, forKey: ICloudKeys.periodConfigs)
-        }
-        if let data = try? JSONEncoder().encode(asbWorkDays) {
-            icloud.set(data, forKey: ICloudKeys.asbWorkDays)
         }
         icloud.synchronize()
     }
@@ -489,39 +494,6 @@ final class UserSettings {
                 graduationYear = remoteYear
                 changed = true
             }
-        }
-        
-        let remoteDress = icloud.object(forKey: ICloudKeys.dressNotifs) as? Bool
-        if let remoteDress, remoteDress != professionalDressNotificationsEnabled {
-            professionalDressNotificationsEnabled = remoteDress
-            changed = true
-        }
-        
-        if icloud.object(forKey: ICloudKeys.dressTime) != nil {
-            let remoteTime = Int(icloud.longLong(forKey: ICloudKeys.dressTime))
-            if remoteTime != professionalDressReminderMinutes {
-                professionalDressReminderMinutes = remoteTime
-                changed = true
-            }
-        }
-
-        if let remoteLate = icloud.object(forKey: ICloudKeys.lateStartNotifs) as? Bool,
-           remoteLate != lateStartNotificationsEnabled {
-            lateStartNotificationsEnabled = remoteLate
-            changed = true
-        }
-        if icloud.object(forKey: ICloudKeys.lateStartTime) != nil {
-            let remoteTime = Int(icloud.longLong(forKey: ICloudKeys.lateStartTime))
-            if remoteTime != lateStartReminderMinutes {
-                lateStartReminderMinutes = remoteTime
-                changed = true
-            }
-        }
-
-        let remoteASB = icloud.object(forKey: ICloudKeys.asbMember) as? Bool
-        if let remoteASB, remoteASB != isASBMember {
-            isASBMember = remoteASB
-            changed = true
         }
         
         let remoteOnboarding = icloud.object(forKey: ICloudKeys.onboarding) as? Bool
@@ -561,13 +533,6 @@ final class UserSettings {
             changed = true
         }
         
-        if let data = icloud.data(forKey: ICloudKeys.asbWorkDays),
-           let remote = try? JSONDecoder().decode([ASBDayMode].self, from: data),
-           remote.count == 5, remote != asbWorkDays {
-            asbWorkDays = remote
-            changed = true
-        }
-        
         // Persist merged state to App Group so widget reflects remote changes
         if changed { save() }
     }
@@ -575,17 +540,24 @@ final class UserSettings {
     
     private enum ICloudKeys {
         static let gradYear          = "icloud_graduation_year"
-        static let dressNotifs       = "icloud_dress_notifications_enabled"
-        static let dressTime         = "icloud_dress_reminder_minutes"
-        static let lateStartNotifs   = "icloud_late_start_notifications_enabled"
-        static let lateStartTime     = "icloud_late_start_reminder_minutes"
-        static let asbMember         = "icloud_asb_member"
         static let onboarding        = "icloud_onboarding_complete"
         static let accessApproved    = "icloud_access_approved"
         static let schoolEmail       = "icloud_school_email"
         static let apSilencedKey     = "icloud_ap_silenced_key"
         static let apBadgeClearedKey = "icloud_ap_badge_cleared_key"
         static let periodConfigs     = "icloud_period_configs"
-        static let asbWorkDays       = "icloud_asb_work_days"
+    }
+
+    /// Keys earlier builds synced and this one deliberately doesn't: the alert
+    /// settings. Kept only so startICloudSync can delete them from iCloud.
+    private enum RetiredICloudKeys {
+        static let all = [
+            "icloud_dress_notifications_enabled",
+            "icloud_dress_reminder_minutes",
+            "icloud_late_start_notifications_enabled",
+            "icloud_late_start_reminder_minutes",
+            "icloud_asb_member",
+            "icloud_asb_work_days",
+        ]
     }
 }
