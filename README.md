@@ -1,9 +1,3 @@
-<p align="center">
-  <img src="App%20Store%20Content/iPhone/screenshot-1.png" width="31%" alt="Hey La Salle, one app for it all — the Events calendar" />
-  <img src="App%20Store%20Content/iPhone/screenshot-2.png" width="31%" alt="Bells, lunch, grades, assignments and more — Schoology inside the app" />
-  <img src="App%20Store%20Content/iPhone/screenshot-3.png" width="31%" alt="Never miss a bell — the Live Activity on the Lock Screen" />
-</p>
-
 <h1 align="center">LHS Life</h1>
 
 <p align="center">
@@ -15,6 +9,12 @@
   <a href="https://apps.apple.com/app/id6812553629"><img src="https://img.shields.io/badge/App_Store-Download-0D96F6?logo=appstore&logoColor=white" alt="Download on the App Store" /></a>
   <img src="https://img.shields.io/badge/iPhone_·_iPad_·_Mac-iOS_17+-1512A8" alt="iPhone, iPad and Mac, iOS 17 or later" />
   <img src="https://img.shields.io/badge/Swift-SwiftUI-F05138?logo=swift&logoColor=white" alt="Swift and SwiftUI" />
+</p>
+
+<p align="center">
+  <img src="App%20Store%20Content/iPhone/screenshot-1.png" width="31%" alt="Hey La Salle, one app for it all — the Events calendar" />
+  <img src="App%20Store%20Content/iPhone/screenshot-2.png" width="31%" alt="Bells, lunch, grades, assignments and more — Schoology inside the app" />
+  <img src="App%20Store%20Content/iPhone/screenshot-3.png" width="31%" alt="Never miss a bell — the Live Activity on the Lock Screen" />
 </p>
 
 ---
@@ -74,7 +74,7 @@ flowchart LR
 A Live Activity can't wake itself up at 8:50 to say "next period". So when you turn Live Activities on, the app tells a small **Cloudflare Worker** two things: your bell times for the day and an anonymous push token. A cron job runs every minute through the school day and, at each bell, sends an update through Apple's push service; at the last bell it dismisses the card.
 
 - **Anonymous by design.** The Worker never learns who you are — just a random device ID, the bell times, the app build and the iOS version.
-- **Capacity.** On Cloudflare's free plan the Worker serves about 40 phones and tells anyone beyond that, politely, that it's full. On the paid plan, two variables lift the limit to the whole school (see [Running the server](#running-the-server)).
+- **Capacity.** On Cloudflare's free plan the Worker serves about 40 phones and tells anyone beyond that, politely, that it's full. On the paid plan, one variable lifts the limit to the whole school (see [Running the server](#running-the-server)).
 - **A status page.** When something breaks in a way the school can fix — the calendar is unreachable, a schedule picture can't be read, a school site won't load — the app reports it once a day, and the Worker's `/status` page shows each problem with a count of affected devices.
 
 ---
@@ -95,7 +95,6 @@ A Live Activity can't wake itself up at 8:50 to say "next period". So when you t
 
 1. **Xcode 26 or later.** Open `LHS Life.xcodeproj` and run the **LHS Life** scheme. The app targets iOS 17; Live Activities need iOS 18.
 2. **Signing.** The app, widget extension and the `group.lasalleyakima.lhslife` App Group are set up under the school's Apple Developer team.
-3. **Secrets stay out of git.** The Apple push key (`AuthKey_*.p8`) is ignored by `.gitignore` and lives only in the Worker's Cloudflare variables. Never commit it.
 
 **Handy debug tools** (debug builds only):
 
@@ -112,12 +111,12 @@ The Worker is a single file. Paste `APNS Worker.json` into a Cloudflare Worker, 
 | Variable | What it is |
 |---|---|
 | `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID` | From Apple Developer |
-| `APNS_PRIVATE_KEY` | The full contents of the `.p8` push key |
+| `APNS_PRIVATE_KEY` | The Apple push-notification key, pasted in full |
 | `CLIENT_SECRET` | Must match `AppConstants.workerSecret` in the app; also the password for the pages below |
-| `MAX_DEVICES` | *Optional.* How many phones to accept (default 40) |
-| `SUBREQUEST_BUDGET` | *Optional.* Requests one bell may spend (default 45, the free plan's ceiling) |
+| `SUBREQUEST_BUDGET` | *Optional.* Requests one bell may spend — default 45, the free plan's ceiling, which serves 40 phones |
+| `MAX_DEVICES` | *Optional.* Holds the phone limit below what the budget allows |
 
-**Moving to the Workers Paid plan?** Set `SUBREQUEST_BUDGET` to about `900` and `MAX_DEVICES` to the number of phones you want to serve. Both are needed: the budget lets each bell reach every phone, and `MAX_DEVICES` lets more phones sign up.
+**Moving to the Workers Paid plan?** Set `SUBREQUEST_BUDGET` to about `900`. That's it — the phone limit is worked out from the budget, so it rises to about 895 on its own.
 
 Then open these in a browser (any username, `CLIENT_SECRET` as the password):
 

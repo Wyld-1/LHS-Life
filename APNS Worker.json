@@ -20,7 +20,7 @@
  *                         device limit and slots left. When slots run out the
  *                         app tells students the server is full and points
  *                         them at CAPACITY_CONTACT; raising the limit means
- *                         the Workers Paid plan.
+ *                         the Workers Paid plan plus SUBREQUEST_BUDGET (below).
  *   /status?full=1   Shows the past week of problems with the phones behind
  *             each, and every phone's actual bell times ("08:00", "08:55"…) —
  *             the view that answers "should a push have gone out at 8:00?"
@@ -49,9 +49,10 @@
  * Variables: APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID, APNS_PRIVATE_KEY (the
  * .p8 file's full contents) from Apple Developer; CLIENT_SECRET, matching
  * AppConstants.workerSecret in the iOS app and doubling as the password
- * above; TOKENS, the KV binding; MAX_DEVICES, how many phones to accept
- * (default 40 — on the Free plan a bell pushing to more than ~45 dies partway
- * through; raise it on the Paid plan, where the cap is 10,000).
+ * above; TOKENS, the KV binding. Optional: SUBREQUEST_BUDGET, the requests
+ * one bell may spend (default 45, the Free plan's ceiling, which serves 40
+ * phones) — on the Paid plan set it to ~900 and the phone limit rises to
+ * match by itself; MAX_DEVICES, to hold the phone limit down deliberately.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -174,21 +175,28 @@ const CAPACITY_CONTACT = "phudson@lasalleyakima.org";
 
 /**
  * What the Worker has learned about its own capacity, stored in KV under
- * capacity:observed as { proven, wall, wallAt }.
+ * capacity:observed as { proven, wall, wallAt, wallBudget }.
  *
- *   proven — the most pushes a bell has ever completed without complaint.
- *            Evidence the budget is AT LEAST this high.
- *   wall   — how many got through on a run that died with "Too many
- *            subrequests". That is the real ceiling, measured rather than
- *            assumed, and it is what /register enforces from then on.
+ *   proven     — the most pushes a bell has ever completed without complaint.
+ *                Shown on /status; evidence the budget is AT LEAST this high.
+ *   wall       — how many got through on a run that had to stop early to stay
+ *                inside its subrequest budget. The real ceiling, measured
+ *                rather than assumed.
+ *   wallBudget — the SUBREQUEST_BUDGET that wall was measured under. A wall
+ *                only counts while the budget is unchanged: one recorded on the
+ *                Free plan says nothing about the Paid plan, and trusting it
+ *                would hold the limit at ~40 forever after an upgrade.
  *
- * This exists so nobody has to know that the Free plan allows 50 subrequests
- * per invocation, or remember to retune MAX_DEVICES after moving to Paid. The
- * platform tells us; we write it down. An explicit MAX_DEVICES still wins,
- * for when a human wants to hold the number down deliberately.
+ * HOW THE LIMIT IS CHOSEN (effectiveLimit):
+ *   1. MAX_DEVICES, if set — a human holding the number down deliberately.
+ *   2. Otherwise, worked out from SUBREQUEST_BUDGET: every phone costs about
+ *      one subrequest per bell, plus a small fixed overhead per run. On the
+ *      Free plan's default of 45 that is 40 phones; set SUBREQUEST_BUDGET to
+ *      900 on the Paid plan and it is ~895. That one variable is all an
+ *      upgrade needs.
+ *   3. Capped by a wall measured under the current budget, if there is one.
  */
 const CAPACITY_KEY = "capacity:observed";
-const DEFAULT_MAX_DEVICES = 40;
 
 /**
  * Subrequests one invocation will spend before it stops pushing. The Free
@@ -199,10 +207,26 @@ const DEFAULT_MAX_DEVICES = 40;
  */
 const DEFAULT_SUBREQUEST_BUDGET = 45;
 const CAPACITY_WRITE_RESERVE = 3;
+/**
+ * Subrequests a run spends before its first push: reading the device list
+ * (or, every other minute, listing the registry) and the capacity record.
+ * Hydrating newly registered devices can cost more on a busy morning; if it
+ * does, that run stops short and records a wall, which caps the limit below.
+ */
+const RUN_OVERHEAD = 2;
+
+function subrequestBudget(env) {
+  return Number(env.SUBREQUEST_BUDGET ?? DEFAULT_SUBREQUEST_BUDGET);
+}
+
+/** How many phones one bell can reach on this budget: one push each. */
+function budgetLimit(env) {
+  return Math.max(1, subrequestBudget(env) - CAPACITY_WRITE_RESERVE - RUN_OVERHEAD);
+}
 
 async function readCapacity(env) {
   const raw = await env.TOKENS.get(CAPACITY_KEY, "json");
-  return raw ?? { proven: 0, wall: null, wallAt: null };
+  return raw ?? { proven: 0, wall: null, wallAt: null, wallBudget: null };
 }
 
 /** The number /register enforces, and where it came from. */
@@ -210,15 +234,18 @@ async function effectiveLimit(env) {
   if (env.MAX_DEVICES) {
     return { limit: Number(env.MAX_DEVICES), source: "MAX_DEVICES" };
   }
+  const budget = subrequestBudget(env);
+  const fromBudget = budgetLimit(env);
+  const source = env.SUBREQUEST_BUDGET ? `SUBREQUEST_BUDGET (${budget})` : `default budget (${budget})`;
+
+  // A wall only applies to the budget it was measured under. Walls recorded
+  // before wallBudget existed were all measured on the default budget.
   const observed = await readCapacity(env);
-  if (observed.wall) {
-    return { limit: observed.wall, source: "measured at the wall" };
+  const wallBudget = observed.wallBudget ?? DEFAULT_SUBREQUEST_BUDGET;
+  if (observed.wall && wallBudget === budget && observed.wall < fromBudget) {
+    return { limit: observed.wall, source: `measured at the wall (budget ${budget})` };
   }
-  // Never hit the wall: trust what has actually worked, floor at the default.
-  return {
-    limit: Math.max(DEFAULT_MAX_DEVICES, observed.proven),
-    source: observed.proven > DEFAULT_MAX_DEVICES ? "proven in service" : "default",
-  };
+  return { limit: fromBudget, source };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -948,7 +975,7 @@ async function runPushCycle(rawEnv) {
   // size is modest: a wave that overruns the limit fails unpredictably within
   // that wave, and smaller waves keep the damage legible in the logs.
   const CHUNK_SIZE = 25;
-  const budget = Number(env.SUBREQUEST_BUDGET ?? DEFAULT_SUBREQUEST_BUDGET);
+  const budget = subrequestBudget(env);
   let pushed = 0;
   let stoppedShort = false;
 
@@ -1002,21 +1029,24 @@ function countingKV(tokens, tally) {
   };
 }
 
-/** Remember the ceiling this run had to stop at. */
+/** Remember the ceiling this run had to stop at, and the budget it was under. */
 async function recordCapacityWall(env, pushed) {
   const observed = await readCapacity(env);
-  // Keep the LOWEST ceiling ever seen: that is the number that actually fits.
-  const wall = observed.wall ? Math.min(observed.wall, pushed) : pushed;
+  const budget = subrequestBudget(env);
+  const sameBudget = (observed.wallBudget ?? DEFAULT_SUBREQUEST_BUDGET) === budget;
+  // Under the same budget keep the LOWEST ceiling seen — that is what actually
+  // fits. Under a new budget the old wall is meaningless, so start over.
+  const wall = observed.wall && sameBudget ? Math.min(observed.wall, pushed) : pushed;
   await env.TOKENS.put(CAPACITY_KEY, JSON.stringify({
-    proven: observed.proven, wall, wallAt: new Date().toISOString(),
+    proven: observed.proven, wall, wallAt: new Date().toISOString(), wallBudget: budget,
   }));
 }
 
 /**
  * Remember a bell that went out in full. Only written when the number grows,
  * so this costs one KV write on the day the school adds its biggest cohort
- * and nothing on any other day. This is what lets the limit rise on its own
- * after a move to the Paid plan — no retuning, no redeploy.
+ * and nothing on any other day. Reported on /status as evidence of what has
+ * actually worked; the limit itself comes from the budget (effectiveLimit).
  */
 async function recordCapacityProven(env, pushed) {
   if (pushed === 0) return;
