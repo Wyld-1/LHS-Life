@@ -210,6 +210,12 @@ struct AppTabContainer: View {
             if isPhone { iPhoneLayout } else { iPadLayout }
         }
         .overlay { EasterEggOverlay() }
+        #if DEBUG
+        // Under -demoClock the system clock can't follow the fake one — the
+        // simulator's status-bar override is frozen and misreads the year —
+        // so the status bar is hidden rather than shown disagreeing.
+        .statusBarHidden(DebugClock.shared.offset != 0)
+        #endif
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background: calendarUI.appDidBackground()
@@ -237,6 +243,15 @@ struct AppTabContainer: View {
             }
             navCoordinator.pendingTab = nil
         }
+        #if DEBUG
+        .task {
+            // Under -demoClock, open on the fake day rather than the real one.
+            if DebugClock.shared.offset != 0 {
+                calendarUI.selectedDate = Calendar.current.startOfDay(for: DebugClock.shared.now)
+                calendarUI.scrollIntent = .now
+            }
+        }
+        #endif
         .task {
             // Fire-and-forget. These three load concurrently in the
             // background and nothing waits on them — the app is interactive

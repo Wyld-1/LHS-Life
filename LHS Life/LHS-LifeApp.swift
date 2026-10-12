@@ -23,6 +23,11 @@ struct LaSalle_ScheduleApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
+        #if DEBUG
+        // Before anything renders, so every view starts on the fake clock.
+        DebugClock.shared.applyLaunchArgument()
+        #endif
+
         // BGProcessingTask handler MUST be registered before first scene connects
         BellTransitionService.register()
 

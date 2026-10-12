@@ -550,6 +550,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "LHS-Life-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "LHS Life";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
 				INFOPLIST_KEY_NSCalendarsWriteOnlyAccessUsageDescription = "LHS Life adds school events to your calendar when you tap Save to Calendar.";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "LHS Life saves your homework assignments to a Reminders list when you add them.";
@@ -595,6 +596,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "LHS-Life-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "LHS Life";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
 				INFOPLIST_KEY_NSCalendarsWriteOnlyAccessUsageDescription = "LHS Life adds school events to your calendar when you tap Save to Calendar.";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "LHS Life saves your homework assignments to a Reminders list when you add them.";

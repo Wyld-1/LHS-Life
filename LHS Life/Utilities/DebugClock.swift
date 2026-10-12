@@ -29,7 +29,27 @@ final class DebugClock {
     private init() {}
 
     var overrideDate: Date? = nil
-    var now: Date { overrideDate ?? Date() }
+    /// A running fake clock: "now" is the real time shifted by this much, so
+    /// it keeps ticking — for screen recordings where the header has to count
+    /// down for real. Set from the -demoClock launch argument. 0 = real time.
+    var offset: TimeInterval = 0
+    var now: Date { overrideDate ?? Date().addingTimeInterval(offset) }
+
+    #if DEBUG
+    /// Reads `-demoClock "yyyy-MM-dd HH:mm"` from the launch arguments (they
+    /// land in UserDefaults' argument domain) and starts the clock there.
+    /// Returns true if it did.
+    @discardableResult
+    func applyLaunchArgument() -> Bool {
+        guard let raw = UserDefaults.standard.string(forKey: "demoClock") else { return false }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        guard let target = f.date(from: raw) else { return false }
+        offset = target.timeIntervalSinceNow
+        return true
+    }
+    #endif
 
     var forcedPrimaryText: String? = nil
     var forcedSecondaryText: String? = nil

@@ -1060,7 +1060,9 @@ private struct DayChip: View {
     let isSelected: Bool
 
     private let cal = Calendar.current
-    private var isToday: Bool { cal.isDateInToday(date) }
+    // DebugClock, not isDateInToday: identical in normal use, and it keeps
+    // the "today" ring on the right day under a -demoClock recording.
+    private var isToday: Bool { cal.isDate(date, inSameDayAs: DebugClock.shared.now) }
     private var isWeekend: Bool {
         let wd = cal.component(.weekday, from: date)
         return wd == 1 || wd == 7

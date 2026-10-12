@@ -30,11 +30,16 @@ enum ScheduleEngine {
         let config: PeriodConfig?      // nil for breaks/lunch (no config slot)
         let startDate: Date
         let endDate: Date
+        /// The moment the state was computed for. Time left and progress are
+        /// measured from here rather than from Date(): the same second in
+        /// normal use, and correct for any other moment asked about — which
+        /// a fake screen-recording clock depends on.
+        var referenceDate: Date = Date()
 
-        var timeRemaining: TimeInterval { endDate.timeIntervalSince(Date()) }
+        var timeRemaining: TimeInterval { endDate.timeIntervalSince(referenceDate) }
         var duration: TimeInterval      { endDate.timeIntervalSince(startDate) }
         var progress: Double {          // 0.0 → 1.0
-            let elapsed = Date().timeIntervalSince(startDate)
+            let elapsed = referenceDate.timeIntervalSince(startDate)
             return max(0, min(1, elapsed / duration))
         }
         var displayName: String { config?.displayName ?? period.name }
@@ -78,7 +83,7 @@ enum ScheduleEngine {
         }
 
         if date < firstSlot.start {
-            let next = makeActiveSlot(from: firstSlot, settings: settings, schedule: schedule)
+            let next = makeActiveSlot(from: firstSlot, settings: settings, schedule: schedule, at: date)
             return ScheduleState(date: date, currentSlot: nil, nextSlot: next, dayState: .beforeSchool)
         }
 
@@ -89,9 +94,9 @@ enum ScheduleEngine {
         // Find current slot
         for (i, slot) in slots.enumerated() {
             if date >= slot.start && date <= slot.end {
-                let current = makeActiveSlot(from: slot, settings: settings, schedule: schedule)
+                let current = makeActiveSlot(from: slot, settings: settings, schedule: schedule, at: date)
                 let next = i + 1 < slots.count
-                    ? makeActiveSlot(from: slots[i + 1], settings: settings, schedule: schedule)
+                    ? makeActiveSlot(from: slots[i + 1], settings: settings, schedule: schedule, at: date)
                     : nil
                 return ScheduleState(date: date, currentSlot: current, nextSlot: next, dayState: .inSession)
             }
@@ -102,7 +107,7 @@ enum ScheduleEngine {
             let thisEnd  = slots[i].end
             let nextStart = slots[i + 1].start
             if date > thisEnd && date < nextStart {
-                let next = makeActiveSlot(from: slots[i + 1], settings: settings, schedule: schedule)
+                let next = makeActiveSlot(from: slots[i + 1], settings: settings, schedule: schedule, at: date)
                 return ScheduleState(date: date, currentSlot: nil, nextSlot: next, dayState: .betweenPeriods)
             }
         }
@@ -121,11 +126,11 @@ enum ScheduleEngine {
             return "\(mins) min left in \(slot.displayName)"
         case .betweenPeriods:
             guard let next = state.nextSlot else { return "" }
-            let mins = Int(ceil(next.startDate.timeIntervalSince(Date()) / 60))
+            let mins = Int(ceil(next.startDate.timeIntervalSince(state.date) / 60))
             return "\(next.displayName) in \(mins) min"
         case .beforeSchool:
             guard let next = state.nextSlot else { return "No school today" }
-            let mins = Int(ceil(next.startDate.timeIntervalSince(Date()) / 60))
+            let mins = Int(ceil(next.startDate.timeIntervalSince(state.date) / 60))
             return mins > 60
                 ? "School starts at \(timeString(next.startDate))"
                 : "School starts in \(mins) min"
@@ -175,7 +180,7 @@ enum ScheduleEngine {
         guard let slot = orderedSlots(from: schedule, settings: settings)
             .last(where: { $0.end <= date })
         else { return nil }
-        return makeActiveSlot(from: slot, settings: settings, schedule: schedule)
+        return makeActiveSlot(from: slot, settings: settings, schedule: schedule, at: date)
     }
 
     // MARK: - Private Helpers
@@ -224,11 +229,13 @@ enum ScheduleEngine {
     private static func makeActiveSlot(
         from slot: (period: Period, start: Date, end: Date),
         settings: UserSettings,
-        schedule: BellSchedule
+        schedule: BellSchedule,
+        at date: Date
     ) -> ActiveSlot {
         let periodNum = periodNumber(from: slot.period.name)
         let config    = periodNum.flatMap { settings.config(for: $0) }
-        return ActiveSlot(period: slot.period, config: config, startDate: slot.start, endDate: slot.end)
+        return ActiveSlot(period: slot.period, config: config, startDate: slot.start, endDate: slot.end,
+                          referenceDate: date)
     }
 
     static func timeString(_ date: Date) -> String {
