@@ -65,6 +65,11 @@ struct iPadSidebar: View {
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
+                // Only appears on a day the school's server was full.
+                CapacityBanner()
+                    .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 0, trailing: 0))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             }
 
             Section {

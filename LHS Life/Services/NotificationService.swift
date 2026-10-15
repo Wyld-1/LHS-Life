@@ -433,6 +433,9 @@ enum NotificationService {
         center.removePendingNotificationRequests(withIdentifiers: ids)
 
         guard settings.liveActivityMode != .off, await isAuthorized else { return }
+        // The server turned this device away; a nudge to start Live
+        // Activities would only end in the same refusal.
+        guard !CapacityStatus.isRefused else { return }
 
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())

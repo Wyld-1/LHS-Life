@@ -159,14 +159,7 @@ struct AppTabContainer: View {
     /// student can actually act on, and the ask ("please upgrade the server")
     /// makes no sense without saying what is full and what still works.
     private var capacityMessage: String {
-        let contact = liveActivity.capacityBlock?.contact ?? "the school office"
-        return """
-        Live Activities couldn't be started because the school's server is at capacity.
-
-        Everything else works normally. This only affects the live bell schedule on your Lock Screen.
-
-        If you'd like Live Activities, email \(contact) and ask for a server upgrade.
-        """
+        CapacityMessage.body(limit: liveActivity.capacityBlock?.limit)
     }
 
     /// Drops the launch screen once the gate is satisfied. Safe to call as
@@ -207,6 +200,8 @@ struct AppTabContainer: View {
 
     var body: some View {
         Group {
+            // The "server full" banner is placed by each layout: under the
+            // nav bar on iPhone (PhoneToolbar), in the sidebar on iPad.
             if isPhone { iPhoneLayout } else { iPadLayout }
         }
         .overlay { EasterEggOverlay() }
@@ -265,18 +260,17 @@ struct AppTabContainer: View {
         // The school's worker refused this device because it is full.
         .onChange(of: liveActivity.capacityBlock) { _, block in
             guard block != nil else { return }
-            // Once a day at most. The student cannot fix this themselves —
-            // it is someone else's budget decision — so repeating it every
-            // launch would be nagging them about it.
-            let today = DateFormatter.isoDay.string(from: Date())
-            let key = "lhs_capacity_notice_day"
-            guard UserDefaults.standard.string(forKey: key) != today else { return }
-            UserDefaults.standard.set(today, forKey: key)
+            // The alert only ever appears ONCE. The student can't fix this
+            // themselves — it's someone else's budget decision — so after the
+            // first time, CapacityBanner says it quietly on each day it
+            // happens, without interrupting anything.
+            let key = "lhs_capacity_alert_shown"
+            guard !UserDefaults.standard.bool(forKey: key) else { return }
+            UserDefaults.standard.set(true, forKey: key)
             showCapacityAlert = true
         }
         .alert("Live Activities Are Full", isPresented: $showCapacityAlert) {
-            if let contact = liveActivity.capacityBlock?.contact,
-               let url = URL(string: "mailto:\(contact)?subject=LHS%20Life%20server%20upgrade&body=Hello%2C%0A%0AI%20would%20like%20to%20use%20Live%20Activities%20in%20LHS%20Life%2C%20but%20the%20app%20says%20the%20school%27s%20server%20is%20full.%20Could%20the%20server%20be%20upgraded%3F%0A%0AThank%20you%21") {
+            if let url = CapacityMessage.emailURL(to: liveActivity.capacityBlock?.contact) {
                 Link("Ask for an Upgrade", destination: url)
             }
             Button("OK", role: .cancel) { }

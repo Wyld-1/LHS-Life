@@ -141,7 +141,7 @@ enum PushTokenService {
         /// The school's server is full — see the worker's capacity gate. The
         /// device is NOT registered and no pushes will arrive, so a Live
         /// Activity started now would freeze on its first period.
-        case overCapacity(contact: String)
+        case overCapacity(contact: String, limit: Int?)
         case failed
     }
 
@@ -217,11 +217,15 @@ enum PushTokenService {
                     .overCapacity,
                     detail: "registered \(payload.registered ?? -1) of \(payload.limit ?? -1)"
                 )
-                return .overCapacity(contact: payload.contact ?? "the school office")
+                CapacityStatus.isRefused = true
+                return .overCapacity(contact: payload.contact ?? "the school office", limit: payload.limit)
             }
 
             if status == 200 {
                 UserDefaults.standard.set(signature, forKey: signatureKey)
+                // Accepted — so any earlier "server full" no longer applies.
+                // This is what makes a raised cap reach the app with no update.
+                CapacityStatus.isRefused = false
                 // deviceId is logged so a worker log line can be matched to
                 // a specific handset — essential when two devices (Xcode and
                 // TestFlight) are registered at the same time and you need to
@@ -304,5 +308,19 @@ enum PushTokenService {
             guard !replaced else { return }
             await unregister()
         }
+    }
+}
+
+// MARK: - Capacity status
+
+/// Whether the school's server turned this device away the last time it
+/// tried to register, and nothing has been accepted since. Persisted, because
+/// the morning "Tap to start Live Activities" reminder is scheduled days ahead
+/// and must not nudge a student toward a server that will refuse them.
+enum CapacityStatus {
+    private static let key = "lhs_capacity_refused"
+    static var isRefused: Bool {
+        get { UserDefaults.standard.bool(forKey: key) }
+        set { UserDefaults.standard.set(newValue, forKey: key) }
     }
 }

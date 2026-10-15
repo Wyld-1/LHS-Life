@@ -56,6 +56,9 @@ final class LiveActivityService {
 
     struct CapacityBlock: Equatable {
         let contact: String
+        /// How many devices the server accepts, from its own reply — so the
+        /// message stays right after the cap is raised.
+        let limit: Int?
     }
 
     /// Observes the running activity so we can tell, from the DEVICE side,
@@ -247,8 +250,13 @@ final class LiveActivityService {
             if let initialToken = activity.pushToken {
                 Task { @MainActor in
                     let result = await PushTokenService.register(token: initialToken, periods: periods)
-                    if case .overCapacity(let contact) = result {
-                        await handleOverCapacity(contact: contact)
+                    switch result {
+                    case .overCapacity(let contact, let limit):
+                        await handleOverCapacity(contact: contact, limit: limit)
+                    case .registered:
+                        capacityBlock = nil   // a raised cap clears the banner
+                    case .failed:
+                        break
                     }
                 }
             }
@@ -415,13 +423,19 @@ final class LiveActivityService {
     /// all day insisting it is still first period. Better to take it down and
     /// say why than to leave a lie on the student's phone.
     @MainActor
-    private func handleOverCapacity(contact: String) async {
+    private func handleOverCapacity(contact: String, limit: Int?) async {
         LHSLogger.liveActivity.error(
             "Server at capacity — ending activity, nothing would update it (contact: \(contact, privacy: .public))"
         )
         await end()
         lastStartFailure = "The school's Live Activity server is full"
-        capacityBlock = CapacityBlock(contact: contact)
+        capacityBlock = CapacityBlock(contact: contact, limit: limit)
+        // No more "Tap to start Live Activities" nudges while refused: they
+        // would only lead to this same refusal.
+        let pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: pending.map(\.identifier).filter { $0.hasPrefix("lareminder-") }
+        )
     }
 
     #if DEBUG
@@ -429,7 +443,7 @@ final class LiveActivityService {
     /// the "end the doomed activity" behaviour can be checked without
     /// actually filling the server.
     func simulateOverCapacity() {
-        Task { await handleOverCapacity(contact: "phudson@lasalleyakima.org") }
+        Task { await handleOverCapacity(contact: "phudson@lasalleyakima.org", limit: 40) }
     }
     #endif
 
