@@ -183,6 +183,17 @@ final class LiveActivityService {
             lastStartFailure = "No bell schedule for today"
             return
         }
+        // Never start on a day endIfSchoolOver would end. If the two ever
+        // disagree, the card is started and ended in a loop — which is what a
+        // misread "holiday" did on Oct 15: a card that kept vanishing.
+        switch CalendarStore.shared.todayState(at: Date()).dayState {
+        case .afterSchool, .holiday, .pathwaysDay:
+            LHSLogger.liveActivity.notice("bail: no school left today for this student")
+            lastStartFailure = "No school today"
+            return
+        default:
+            break
+        }
         let periods = buildSchedule(from: schedule, settings: settings)
         guard !periods.isEmpty else {
             LHSLogger.liveActivity.error("bail: periods empty after buildSchedule")

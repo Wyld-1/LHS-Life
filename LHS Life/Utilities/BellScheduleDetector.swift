@@ -112,11 +112,13 @@ enum BellScheduleDetector {
 
     // MARK: - Holiday
     //
-    // Not a real CalendarWiz category either — title-detected as a stopgap
-    // until we confirm how (or if) LaSalle's feed actually tags these.
+    // Words that mark a day off — only meaningful on a Schedules-category
+    // event (see SchoolEvent.isHoliday). Not "christmas" or "thanksgiving":
+    // they name the season, not the day off, and matched "Christmas Wreaths"
+    // fundraisers and the "Thanksgiving Lunch Special Schedule" school day.
+    // The real breaks all say "Break", "Holiday" or "No School" anyway.
     private static let holidayKeywords = [
-        "holiday", "no school", "christmas", "thanksgiving",
-        "winter break", "spring break", "summer break"
+        "holiday", "no school", "break"
     ]
 
     static func isHoliday(title: String) -> Bool {

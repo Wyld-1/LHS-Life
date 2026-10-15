@@ -38,12 +38,16 @@ struct SchoolEvent: Identifiable, Hashable, Codable {
         BellScheduleDetector.isProfessionalDress(title: title)
     }
 
-    /// Holiday also isn't its own CalendarWiz category in LaSalle's real
-    /// taxonomy (no "Holiday" appeared anywhere in the 14 real categories) —
-    /// title-detected the same way professional dress is, until we know how
-    /// LaSalle actually tags these, if at all.
+    /// A day off: a Schedules-category event whose title says so ("No School
+    /// - Thanksgiving Holiday", "Christmas Break", "Labor Day - School
+    /// Holiday"). Every real day off in the 2026–27 feed is posted that way.
+    ///
+    /// The category matters. This once matched holiday WORDS in any title,
+    /// so "Christmas Wreaths - 1st Collection" (a fundraiser) made Oct 15 a
+    /// "holiday": the header said "No school today" over Period 6, and the
+    /// Live Activity was ended every second and restarted every second.
     var isHoliday: Bool {
-        BellScheduleDetector.isHoliday(title: title)
+        category == .schedules && BellScheduleDetector.isHoliday(title: title)
     }
 
     /// Calendar-day identifier (yyyy-MM-dd) for grouping.
