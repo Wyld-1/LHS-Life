@@ -183,6 +183,18 @@ enum ScheduleEngine {
         return makeActiveSlot(from: slot, settings: settings, schedule: schedule, at: date)
     }
 
+    /// When this student's day starts and ends — the first and last slot they
+    /// actually have, so Period 0 only counts if it's turned on. Nil if
+    /// nothing on the schedule applies to them.
+    static func dayBounds(
+        schedule: BellSchedule,
+        settings: UserSettings
+    ) -> (start: Date, end: Date)? {
+        let slots = orderedSlots(from: schedule, settings: settings)
+        guard let first = slots.first, let last = slots.last else { return nil }
+        return (first.start, last.end)
+    }
+
     // MARK: - Private Helpers
 
     /// Visible periods resolved to concrete start/end Dates and sorted.

@@ -360,6 +360,21 @@ final class CalendarStore {
     }
     func bellSchedule(for dayKey: String) -> BellSchedule? { bellSchedules[dayKey] }
 
+    /// This student's school day on `date`: when it starts and ends, and what
+    /// kind of schedule it is. Nil on days without school for them —
+    /// weekends, holidays, breaks and their own Pathways days. The Shortcuts
+    /// actions read this, so an automation and the app always agree.
+    func schoolDay(on date: Date) -> (start: Date, end: Date, scheduleName: String)? {
+        let dayKey = DateFormatter.isoDay.string(from: date)
+        if events.contains(where: { $0.dayKey == dayKey && $0.isHoliday }) { return nil }
+        if PathwaysService.isPathwaysDay(on: dayKey, events: events,
+                                         graduationYear: settings.graduationYear) { return nil }
+        guard let schedule = bellSchedules[dayKey],
+              let bounds = ScheduleEngine.dayBounds(schedule: schedule, settings: settings)
+        else { return nil }
+        return (bounds.start, bounds.end, schedule.scheduleType.scheduleLabel)
+    }
+
     func summary(for dayKey: String) -> DaySummary {
         let schedule = bellSchedules[dayKey]
         let dayEvents = events(on: dayKey)
