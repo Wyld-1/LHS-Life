@@ -353,7 +353,13 @@ private func transitionDates(from schedule: [ScheduleActivityAttributes.Schedule
     //
     // Prepending an entry well before the first bell gives the timeline a
     // window that actually covers the pre-school period.
-    return [firstBell.addingTimeInterval(-12 * 3600)] + starts
+    //
+    // The day's last END is added too. Without it, a card started during the
+    // last class had no date ahead of it at all — every start was already in
+    // the past — and the renderer fell back to the pre-school placeholder
+    // above: "Today · school starts 1:30 PM" in the middle of 1:30's class.
+    let ends = schedule.last.map { [$0.endDate] } ?? []
+    return [firstBell.addingTimeInterval(-12 * 3600)] + starts + ends
 }
 
 // MARK: - Lock Screen
