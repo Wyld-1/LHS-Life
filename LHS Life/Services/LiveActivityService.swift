@@ -500,8 +500,7 @@ final class LiveActivityService {
     ) -> [ScheduleActivityAttributes.ScheduledPeriod] {
         let mapped = schedule.periods.compactMap { period -> ScheduleActivityAttributes.ScheduledPeriod? in
             guard let start = period.startDate(on: schedule.date),
-                  let end   = period.endDate(on: schedule.date),
-                  end > Date()
+                  let end   = period.endDate(on: schedule.date)
             else { return nil }
 
             // Handle "Period 5 Final" — extract the number from the base name,
@@ -556,7 +555,13 @@ final class LiveActivityService {
                 ))
             }
         }
-        return withPassing
+        // Past slots are dropped only NOW, after passing periods are filled
+        // in. Dropping them first lost the passing period you're standing in:
+        // a card started at 8:50, between Period 1 (ending 8:50) and Period 2
+        // (8:55), had no Period 1 to measure a gap from, so it showed
+        // "Today · Regular Schedule" as if school hadn't started yet.
+        let now = Date()
+        return withPassing.filter { $0.endDate > now }
     }
 
     private func extractPeriodNumber(from name: String) -> Int? {

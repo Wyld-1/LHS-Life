@@ -46,16 +46,28 @@ struct LaSalle_WidgetsLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.trailing) {
                     TimelineView(.explicit(transitions)) { tl in
                         let slot = resolveSlot(at: tl.date, schedule: schedule, state: state, scheduleTypeName: scheduleTypeName)
-                        let timeStr = (slot?.isPreSchool == true || slot?.isPassing == true) ? slot?.startTimeString : slot?.endTimeString
-                        if let timeStr {
+                        if let slot, slot.isPreSchool {
+                            // Before school: when it starts, not a countdown
+                            // that could be hours long.
                             HStack(spacing: 4) {
-                                Image(systemName: slot?.isPreSchool == true ? "clock" : "bell.fill")
+                                Image(systemName: "clock")
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(.white.opacity(0.7))
-                                Text(timeStr)
+                                Text(slot.startTimeString)
                                     .font(.system(size: 14, weight: .semibold, design: .rounded))
                                     .foregroundStyle(.white)
                             }.padding(.trailing, 4)
+                        } else if let slot {
+                            // One line, level with the period name. The bell's
+                            // time sits on the row below, beside "Next:" — a
+                            // two-line stack here made this region taller than
+                            // the leading one, opening a gap under "Passing"
+                            // and pushing the progress bar off the bottom.
+                            BellCountdown(from: slot.isPassing ? (slot.passingStartDate ?? slot.startDate) : slot.startDate,
+                                          to: slot.isPassing ? slot.startDate : slot.endDate, maxWidth: 120)
+                                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .padding(.trailing, 4)
                         }
                     }
                 }
@@ -72,12 +84,15 @@ struct LaSalle_WidgetsLiveActivity: Widget {
                                 // the pre-school case, so the Dynamic Island said
                                 // "Next: Passing" while the Lock Screen said
                                 // "Regular Schedule" for the same instant.
-                                if slot.isPassing, let until = slot.nextEndTimeString {
+                                if slot.isPassing, let next = slot.nextDisplayName {
                                     HStack {
-                                        Text("Until \(until)")
+                                        Text("Next: \(next)")
                                             .font(.system(size: 12, weight: .medium, design: .rounded))
                                             .foregroundStyle(.white.opacity(0.6)).lineLimit(1)
                                         Spacer()
+                                        Text("until \(slot.startTimeString)")
+                                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                                            .foregroundStyle(.white.opacity(0.6)).lineLimit(1)
                                     }
                                 } else if slot.isPreSchool {
                                     HStack {
@@ -92,6 +107,9 @@ struct LaSalle_WidgetsLiveActivity: Widget {
                                             .font(.system(size: 12, weight: .medium, design: .rounded))
                                             .foregroundStyle(.white.opacity(0.6)).lineLimit(1)
                                         Spacer()
+                                        Text("until \(slot.endTimeString)")
+                                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                                            .foregroundStyle(.white.opacity(0.6)).lineLimit(1)
                                     }
                                 }
                                 if slot.isPreSchool {
@@ -141,11 +159,22 @@ struct LaSalle_WidgetsLiveActivity: Widget {
             } compactTrailing: {
                 TimelineView(.explicit(transitions)) { tl in
                     let slot = resolveSlot(at: tl.date, schedule: schedule, state: state, scheduleTypeName: scheduleTypeName)
-                    let timeStr = (slot?.isPreSchool == true || slot?.isPassing == true) ? slot?.startTimeString : slot?.endTimeString
-                    if let timeStr {
-                        Text(timeStr)
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white).padding(.trailing, 2)
+                    if let slot {
+                        // A gray bell and the next bell's time — "🔔 8:55".
+                        // No AM/PM: during the school day it's never in doubt,
+                        // and the pill stays narrow enough to leave the status
+                        // icons alone. Before school, it's the first bell.
+                        let bell = (slot.isPreSchool || slot.isPassing) ? slot.startDate : slot.endDate
+                        HStack(spacing: 3) {
+                            Image(systemName: "bell.fill")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.55))
+                            Text(shortBellTime(bell))
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .monospacedDigit()
+                        }
+                        .padding(.trailing, 2)
                     }
                 }
 
@@ -228,6 +257,10 @@ private func resolveSlot(
     let isPassing   = !isPreSchool && activeSlot == nil && upcomingSlot != nil
                       && (schedule.last(where: { $0.endDate <= date }) != nil)
 
+    // The push first. A Live Activity's TimelineView does NOT re-render at
+    // each bell on its own — tested: a card cut off from pushes still said
+    // "Break" at 9:56, its 9:55 entry never drawn — so the pushed slot is the
+    // freshest truth the card has, and the clock only fills in around it.
     let current = pushedSlot ?? activeSlot ?? upcomingSlot
     guard let current else { return nil }
 
@@ -384,14 +417,28 @@ private struct LockScreenContent: View {
                     }
                 }
                 Spacer()
-                // Right: next bell time
+                // Right: a live countdown to the next bell, with the bell time
+                // under it. Before school: when school starts.
                 VStack(alignment: .trailing, spacing: 1) {
-                    Text((slot.isPreSchool || slot.isPassing) ? slot.startTimeString : slot.endTimeString)
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white)
-                    Text(slot.isPreSchool ? "school starts" : "next bell")
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.55))
+                    if slot.isPreSchool {
+                        Text(slot.startTimeString)
+                            .font(.system(size: 16, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white)
+                        Text("school starts")
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.55))
+                    } else {
+                        // During passing time the next bell is the next class
+                        // starting; otherwise it's this one ending.
+                        let bell = slot.isPassing ? slot.startDate : slot.endDate
+                        BellCountdown(from: slot.isPassing ? (slot.passingStartDate ?? slot.startDate) : slot.startDate,
+                                      to: bell)
+                            .font(.system(size: 16, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white)
+                        Text("until \(slot.isPassing ? slot.startTimeString : slot.endTimeString)")
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
                 }
             }
 
@@ -408,6 +455,50 @@ private struct LockScreenContent: View {
         .padding(16)
         .activityBackgroundTint(Color(hex: "#0D1220"))
         .activitySystemActionForegroundColor(.white)
+    }
+}
+
+/// "8:55" — a bell time without AM/PM, for the compact Dynamic Island.
+private func shortBellTime(_ date: Date) -> String {
+    let f = DateFormatter()
+    f.dateFormat = "h:mm"
+    return f.string(from: date)
+}
+
+// MARK: - Bell Countdown
+//
+// "23 minutes" to the next bell, ticking down by itself.
+//
+// Costs no pushes and no update budget: the system renders this format live,
+// the same way it animates LiveProgressBar.
+//
+// A TIMER over [from, bell), not an offset to the bell. An offset keeps going
+// after the bell and, with its sign hidden, counts back UP — a card that went
+// stale at 8:55 read "53 minutes until 8:55 AM" at 9:48. A timer stops at the
+// end of its range.
+//
+// The format floors to the whole minute; the app header rounds up ("23 min
+// left" with 22:53 to go). Ending the range 59 seconds past the bell makes the
+// two agree at every second, and reads "1 minute" in the final seconds rather
+// than "0 minutes".
+
+private struct BellCountdown: View {
+    let from: Date
+    let to: Date
+    var maxWidth: CGFloat = 140
+
+    var body: some View {
+        Text(.currentDate, format: .timer(
+            countingDownIn: min(from, to)..<to.addingTimeInterval(59),
+            showsHours: false,
+            maxPrecision: .seconds(60)
+        ))
+        .monospacedDigit()
+        // A live-updating Text reserves room for its widest possible value
+        // and fills the space it's given, so without this it sits left of
+        // its column rather than flush right like the time it replaced.
+        .multilineTextAlignment(.trailing)
+        .frame(maxWidth: maxWidth, alignment: .trailing)
     }
 }
 
