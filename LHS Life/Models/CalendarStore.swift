@@ -96,10 +96,17 @@ final class CalendarUIState {
     /// Static so both PhoneToolbar (which only has the label string from its
     /// config) and iPadRootView can share one mapping — they previously had
     /// byte-identical private copies.
+    ///
+    /// The icon shows where the button goes. Month and Year are a matched
+    /// pair of small rounded squares: square.grid.month is a calendar month's
+    /// ragged grid, and square.grid.4x3.fill is twelve squares — one per
+    /// month. square.grid.month is iOS 27+, so earlier systems keep the 2x2.
     static func zoomSystemIcon(for label: String?) -> String {
         switch label {
-        case "Month": return "square.grid.2x2.fill"
-        case "Year":  return "square.grid.3x3.fill"
+        case "Month":
+            if #available(iOS 27.0, *) { return "square.grid.month" }
+            return "square.grid.2x2.fill"
+        case "Year":  return "square.grid.4x3.fill"
         case "Day":   return "calendar.day.timeline.leading"
         default:      return "calendar"
         }

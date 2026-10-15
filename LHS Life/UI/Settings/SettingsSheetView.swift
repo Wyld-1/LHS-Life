@@ -33,30 +33,6 @@ struct SettingsSheetView: View {
     @Environment(CalendarStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
-    /// The time row under a reminder toggle. The picker shows a plain time;
-    /// the label says which day it lands on, so choosing 6:30 AM visibly
-    /// flips it to the morning of. Shared by every "night before / morning
-    /// of" reminder so they can't drift apart.
-    private func reminderTimeRow(_ minutes: Binding<Int>) -> some View {
-        DatePicker(
-            minutes.wrappedValue >= 12 * 60 ? "Remind Night Before" : "Remind Morning Of",
-            selection: Binding(
-                get: {
-                    Calendar.current.date(
-                        bySettingHour: minutes.wrappedValue / 60,
-                        minute: minutes.wrappedValue % 60,
-                        second: 0, of: Date()
-                    ) ?? Date()
-                },
-                set: { date in
-                    let c = Calendar.current.dateComponents([.hour, .minute], from: date)
-                    minutes.wrappedValue = (c.hour ?? 21) * 60 + (c.minute ?? 0)
-                }
-            ),
-            displayedComponents: .hourAndMinute
-        )
-    }
-
     @State private var apModeEnabled = false
     @State private var showGradYearAlert = false
     @State private var gradYearInput = ""
@@ -267,55 +243,103 @@ struct SettingsSheetView: View {
     // MARK: - Alerts
 
     private var alertsSection: some View {
-        Section {
-            Toggle("Professional Dress", isOn: $settings.professionalDressNotificationsEnabled)
-                .onChange(of: settings.professionalDressNotificationsEnabled) { _, _ in
-                    HapticEngine.shared.tap()
+        Group {
+            Section {
+                Picker("Live Activities", selection: $settings.liveActivityMode) {
+                    ForEach(LiveActivityMode.allCases, id: \.rawValue) { mode in
+                        Text(mode.label).tag(mode)
+                    }
                 }
-
-            if settings.professionalDressNotificationsEnabled {
-                reminderTimeRow($settings.professionalDressReminderMinutes)
+                .pickerStyle(.menu)
+                .onChange(of: settings.liveActivityMode) { _, _ in HapticEngine.shared.tick() }
+            } header: {
+                Text("Lock Screen")
+            } footer: {
+                Text("Live Activities pin today's bell schedule to your Lock Screen and Dynamic Island, counting down to each bell.")
             }
 
-            Toggle("Late Start", isOn: $settings.lateStartNotificationsEnabled)
-                .onChange(of: settings.lateStartNotificationsEnabled) { _, _ in
-                    HapticEngine.shared.tap()
-                }
-
-            if settings.lateStartNotificationsEnabled {
-                reminderTimeRow($settings.lateStartReminderMinutes)
+            // One row per reminder, each showing its status at a glance. The
+            // toggle and time live one tap away: inline, three toggles each
+            // trailed by a time row read as one undifferentiated list, and the
+            // "Remind Morning Of" labels repeated without saying what for.
+            Section {
+                reminderRow(
+                    "Professional Dress",
+                    symbol: "briefcase.fill", tint: .lsDestructive,
+                    isOn: $settings.professionalDressNotificationsEnabled,
+                    minutes: $settings.professionalDressReminderMinutes,
+                    about: "A reminder before all Professional Dress days."
+                )
+                reminderRow(
+                    "Late Start",
+                    // The class color picker's purple, so the app has one purple.
+                    symbol: "alarm.fill", tint: .lsGold,
+                    isOn: $settings.lateStartNotificationsEnabled,
+                    minutes: $settings.lateStartReminderMinutes,
+                    about: "A reminder before all late start days, with the time of your first class."
+                )
+                reminderRow(
+                    "Home Games",
+                    symbol: "sportscourt.fill", tint: .lsBlue,
+                    isOn: $settings.homeGameNotificationsEnabled,
+                    minutes: $settings.homeGameReminderMinutes,
+                    about: "A reminder before all home games, with the student section theme when one is posted."
+                )
+            } header: {
+                Text("Reminders")
             }
-
-            Picker("Live Activities", selection: $settings.liveActivityMode) {
-                ForEach(LiveActivityMode.allCases, id: \.rawValue) { mode in
-                    Text(mode.label).tag(mode)
-                }
-            }
-            .pickerStyle(.menu)
-            .onChange(of: settings.liveActivityMode) { _, _ in HapticEngine.shared.tick() }
 
             // ASB is student leadership only — hidden entirely for staff and
             // parents rather than shown-and-disabled, since there's no path by
             // which a non-student would want it.
             if settings.isStudent {
-                Toggle("ASB Member", isOn: $settings.isASBMember)
-                    .onChange(of: settings.isASBMember) { _, _ in HapticEngine.shared.tap() }
+                Section {
+                    Toggle("ASB Member", isOn: $settings.isASBMember)
+                        .onChange(of: settings.isASBMember) { _, _ in HapticEngine.shared.tap() }
 
-                if settings.isASBMember {
-                    // Inline, tappable, one tap per state — deliberately not a
-                    // sub-screen. Five weekdays with three states each is a
-                    // grid, and a grid wants to be seen all at once; burying it
-                    // behind a disclosure turns "glance and adjust" into
-                    // "navigate, adjust, go back."
-                    ASBWorkingDaysRow(settings: settings)
-                        .listRowInsets(EdgeInsets(top: LS.sm, leading: LS.md,
-                                                  bottom: LS.sm, trailing: LS.md))
+                    if settings.isASBMember {
+                        // Inline, tappable, one tap per state — deliberately not a
+                        // sub-screen. Five weekdays with three states each is a
+                        // grid, and a grid wants to be seen all at once; burying it
+                        // behind a disclosure turns "glance and adjust" into
+                        // "navigate, adjust, go back."
+                        ASBWorkingDaysRow(settings: settings)
+                            .listRowInsets(EdgeInsets(top: LS.sm, leading: LS.md,
+                                                      bottom: LS.sm, trailing: LS.md))
+                    }
+                } header: {
+                    Text("ASB")
+                } footer: {
+                    if settings.isASBMember {
+                        Text("Reminders for Student Store and morning announcements on the days you work.")
+                    }
                 }
             }
-        } header: {
-            Text("Alerts")
-        } footer: {
-            Text("Pick an evening time to be reminded the night before, or a morning time for the day of. Live Activities pin the live bell schedule to your Lock Screen.")
+        }
+    }
+
+    /// A reminder's row: name and icon, with its current setting on the
+    /// right ("9:00 PM, night before", or "Off"). Opens ReminderDetailView.
+    private func reminderRow(
+        _ title: String, symbol: String, tint: Color,
+        isOn: Binding<Bool>, minutes: Binding<Int>, about: String
+    ) -> some View {
+        NavigationLink {
+            ReminderDetailView(title: title, isOn: isOn, minutes: minutes, about: about)
+        } label: {
+            LabeledContent {
+                Text(isOn.wrappedValue ? ReminderTime.summary(minutes.wrappedValue) : "Off")
+            } label: {
+                Label {
+                    Text(title)
+                } icon: {
+                    Image(systemName: symbol)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 28, height: 28)
+                        .background(tint, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                }
+            }
         }
     }
 
@@ -654,5 +678,62 @@ struct ColorPickerPrewarm: View {
     var body: some View {
         TextField("", text: .constant("")).focused($dummyFocus)
         Color.clear.popover(isPresented: $dummy) { Color.clear.frame(width: 1, height: 1) }
+    }
+}
+
+// MARK: - Reminder detail
+
+/// One reminder's settings: on/off, when, and what it's for.
+private struct ReminderDetailView: View {
+    let title: String
+    @Binding var isOn: Bool
+    @Binding var minutes: Int
+    let about: String
+
+    var body: some View {
+        List {
+            Section {
+                Toggle("Remind Me", isOn: $isOn)
+                    .onChange(of: isOn) { _, _ in HapticEngine.shared.tap() }
+            } footer: {
+                Text(about)
+            }
+
+            if isOn {
+                Section {
+                    DatePicker("Time", selection: timeBinding, displayedComponents: .hourAndMinute)
+                    LabeledContent("Arrives", value: minutes >= 12 * 60 ? "The night before" : "That morning")
+                } footer: {
+                    Text("Pick an evening time to be reminded the night before, or a morning time for that morning.")
+                }
+            }
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .animation(.lsSnappy, value: isOn)
+    }
+
+    /// Bridges stored minutes-after-midnight to the Date a DatePicker wants.
+    private var timeBinding: Binding<Date> {
+        Binding(
+            get: {
+                Calendar.current.date(bySettingHour: minutes / 60, minute: minutes % 60,
+                                      second: 0, of: Date()) ?? Date()
+            },
+            set: { date in
+                let c = Calendar.current.dateComponents([.hour, .minute], from: date)
+                minutes = (c.hour ?? 21) * 60 + (c.minute ?? 0)
+            }
+        )
+    }
+}
+
+/// "9:00 PM, night before" / "7:30 AM, morning of".
+private enum ReminderTime {
+    static func summary(_ minutes: Int) -> String {
+        let date = Calendar.current.date(bySettingHour: minutes / 60, minute: minutes % 60,
+                                         second: 0, of: Date()) ?? Date()
+        let time = date.formatted(date: .omitted, time: .shortened)
+        return minutes >= 12 * 60 ? "\(time), night before" : "\(time), morning of"
     }
 }
