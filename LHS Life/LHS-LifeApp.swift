@@ -43,6 +43,9 @@ struct LaSalle_ScheduleApp: App {
 
         // Start iCloud settings sync — pulls remote prefs before first render
         UserSettings.shared.startICloudSync()
+        // After the iCloud pull, so a value synced from another device
+        // can't land on top of the switch and undo it.
+        UserSettings.shared.applyFeatureDefaultsOnce()
 
         Task { @MainActor in HapticEngine.shared.prepare() }
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared

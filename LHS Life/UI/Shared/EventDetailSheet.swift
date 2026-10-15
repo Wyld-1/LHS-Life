@@ -84,6 +84,11 @@ enum EventDetailItem: Identifiable {
     var timeRangeText: String {
         switch self {
         case .schoolEvent(let e):
+            // An all-day entry whose title carries the time ("…at Marquette
+            // 7 PM") is really a timed event posted without one.
+            if let time = e.timeFromTitle {
+                return ScheduleEngine.timeString(time)
+            }
             if e.isAllDay {
                 let cal = Calendar.current
                 // iCal all-day DTEND is exclusive (the day AFTER the last day),

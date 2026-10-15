@@ -99,7 +99,13 @@ final class UserSettings {
     var lateStartNotificationsEnabled: Bool
     var lateStartReminderMinutes: Int
     static let defaultLateStartReminderMinutes = 21 * 60   // 9:00 PM the night before
+    /// Remind about home games. On by default, like the other reminders —
+    /// see applyFeatureDefaultsOnce. Same time rule as the others.
+    var homeGameNotificationsEnabled: Bool
+    var homeGameReminderMinutes: Int
+    static let defaultHomeGameReminderMinutes = 7 * 60 + 30   // 7:30 AM the day of
     var liveActivityMode: LiveActivityMode
+    static let defaultLiveActivityMode: LiveActivityMode = .everyDay
     /// Temporary per-day override: Live Activity enabled just for today.
     var liveActivityEnabledToday: Bool
     @ObservationIgnored private var liveActivityTodayKey: String = ""
@@ -194,8 +200,12 @@ final class UserSettings {
         self.professionalDressReminderMinutes = d.object(forKey: Keys.dressTime) as? Int ?? Self.defaultDressReminderMinutes
         self.lateStartNotificationsEnabled = d.object(forKey: Keys.lateStartNotifs) as? Bool ?? true
         self.lateStartReminderMinutes = d.object(forKey: Keys.lateStartTime) as? Int ?? Self.defaultLateStartReminderMinutes
-        let rawMode = d.integer(forKey: Keys.liveActivityMode)
-        self.liveActivityMode = LiveActivityMode(rawValue: rawMode) ?? .off
+        self.homeGameNotificationsEnabled = d.object(forKey: Keys.homeGameNotifs) as? Bool ?? true
+        self.homeGameReminderMinutes = d.object(forKey: Keys.homeGameTime) as? Int ?? Self.defaultHomeGameReminderMinutes
+        // Every Day for a fresh install. An existing install keeps whatever it
+        // has stored — including Off, which can't be told apart from a choice.
+        self.liveActivityMode = (d.object(forKey: Keys.liveActivityMode) as? Int)
+            .flatMap(LiveActivityMode.init(rawValue:)) ?? Self.defaultLiveActivityMode
         self.isASBMember = d.bool(forKey: Keys.asbMember)
         
         // Decode ASBDayMode array
@@ -262,6 +272,38 @@ final class UserSettings {
         return graduationYear == seniorGradYear
     }
 
+    // MARK: - Feature defaults, applied once
+
+    /// Bumped whenever an update should turn features on for EXISTING
+    /// installs. Fresh installs already get the defaults from init.
+    private static let currentFeatureDefaultsVersion = 1
+
+    /// Turns the app's main features on, once, for people updating from an
+    /// earlier version — so an update brings the same out-of-the-box
+    /// experience a new install gets.
+    ///
+    /// The thinking (October 2026): the app is new, almost nobody changes a
+    /// default, and every student shown Live Activities has wanted them. The
+    /// way out stays easy — iOS itself asks whether to keep allowing Live
+    /// Activities the first times they appear, and every toggle is in
+    /// Settings.
+    ///
+    /// Version 1:
+    ///   Live Activities  Off → Every Day. "Abnormal Days" is left alone:
+    ///                    the old default was Off, so that was a choice.
+    ///   Home Games, Professional Dress, Late Start → on.
+    ///
+    /// Runs once per version, so turning something off afterwards sticks.
+    func applyFeatureDefaultsOnce() {
+        guard store.integer(forKey: Keys.featureDefaultsVersion) < Self.currentFeatureDefaultsVersion else { return }
+        if liveActivityMode == .off { liveActivityMode = .everyDay }
+        homeGameNotificationsEnabled = true
+        professionalDressNotificationsEnabled = true
+        lateStartNotificationsEnabled = true
+        store.set(Self.currentFeatureDefaultsVersion, forKey: Keys.featureDefaultsVersion)
+        save()
+    }
+
     /// True if Live Activities should run right now.
     /// Pass the current schedule type so .abnormalOnly can activate automatically.
     func liveActivityEffectivelyEnabled(scheduleType: ScheduleType?) -> Bool {
@@ -323,6 +365,8 @@ final class UserSettings {
         store.set(professionalDressReminderMinutes, forKey: Keys.dressTime)
         store.set(lateStartNotificationsEnabled, forKey: Keys.lateStartNotifs)
         store.set(lateStartReminderMinutes, forKey: Keys.lateStartTime)
+        store.set(homeGameNotificationsEnabled, forKey: Keys.homeGameNotifs)
+        store.set(homeGameReminderMinutes, forKey: Keys.homeGameTime)
         store.set(liveActivityMode.rawValue, forKey: Keys.liveActivityMode)
         store.set(isASBMember, forKey: Keys.asbMember)
         store.set(showMapTab, forKey: Keys.showMapTab)
@@ -369,7 +413,9 @@ final class UserSettings {
         professionalDressReminderMinutes = Self.defaultDressReminderMinutes
         lateStartNotificationsEnabled = true
         lateStartReminderMinutes = Self.defaultLateStartReminderMinutes
-        liveActivityMode = .off
+        homeGameNotificationsEnabled = true
+        homeGameReminderMinutes = Self.defaultHomeGameReminderMinutes
+        liveActivityMode = Self.defaultLiveActivityMode
         liveActivityEnabledToday = false
         isASBMember = false
         asbWorkDays = Array(repeating: .off, count: 5)
@@ -408,6 +454,9 @@ final class UserSettings {
         static let dressTime            = "dress_reminder_minutes"
         static let lateStartNotifs      = "late_start_notifications_enabled"
         static let lateStartTime        = "late_start_reminder_minutes"
+        static let homeGameNotifs       = "home_game_notifications_enabled"
+        static let homeGameTime         = "home_game_reminder_minutes"
+        static let featureDefaultsVersion = "feature_defaults_version"
         static let liveActivityMode      = "live_activity_mode"
         static let abnormalNotifs        = "abnormal_schedule_notifications"  // legacy, unused
         static let liveActivityToday    = "live_activity_today"
@@ -430,7 +479,8 @@ final class UserSettings {
     //             hasCompletedOnboarding, accessApproved, schoolEmail
     // Not synced: every alert setting — professionalDressNotificationsEnabled,
     //             professionalDressReminderMinutes, lateStartNotificationsEnabled,
-    //             lateStartReminderMinutes, isASBMember, asbWorkDays — plus
+    //             lateStartReminderMinutes, homeGameNotificationsEnabled,
+    //             homeGameReminderMinutes, isASBMember, asbWorkDays — plus
     //             liveActivityMode and liveActivityEnabledToday.
     //
     // WHY ALERTS ARE PER-DEVICE: who you are and what your classes are should

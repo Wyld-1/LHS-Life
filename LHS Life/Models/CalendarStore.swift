@@ -279,6 +279,7 @@ final class CalendarStore {
         // meant switching it OFF left the already-queued reminders to fire.
         await NotificationService.scheduleProfessionalDressNotifications(for: fetched, settings: settings)
         await NotificationService.scheduleLateStartNotifications(settings: settings, store: self)
+        await NotificationService.scheduleHomeGameNotifications(settings: settings, store: self)
         await NotificationService.scheduleASBNotifications(settings: settings, store: self)
         await NotificationService.scheduleAbnormalScheduleNotifications(settings: settings, store: self)
         await NotificationService.scheduleLiveActivityReminderNotifications(settings: settings, store: self)

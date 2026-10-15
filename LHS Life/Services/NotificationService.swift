@@ -178,6 +178,67 @@ enum NotificationService {
         }
     }
 
+    // MARK: - Home Games
+    //
+    // One reminder per home game in the next two weeks, at the student's
+    // chosen time (night before or that morning). If the same day has a
+    // dress-up theme for that sport — "Football Dress up theme: Wiggin Out"
+    // — it rides along in the body, since that's posted as a separate event
+    // and is easy to miss.
+    //
+    // Two weeks, not the whole season: iOS keeps at most 64 pending
+    // notifications for an app, shared with every other reminder here.
+
+    static func scheduleHomeGameNotifications(settings: UserSettings, store: CalendarStore) async {
+        let existing = await center.pendingNotificationRequests()
+        let ids = existing.filter { $0.identifier.hasPrefix("homegame-") }.map { $0.identifier }
+        center.removePendingNotificationRequests(withIdentifiers: ids)
+
+        guard settings.homeGameNotificationsEnabled, await isAuthorized else { return }
+
+        let cal = Calendar.current
+        let horizon = cal.date(byAdding: .day, value: 15, to: cal.startOfDay(for: Date())) ?? Date()
+        let minutes = settings.homeGameReminderMinutes
+        let nightBefore = minutes >= 12 * 60
+
+        for game in store.events where game.isHomeGame && game.startDate < horizon {
+            guard let fireDay = cal.date(byAdding: .day, value: nightBefore ? -1 : 0, to: game.startDate)
+            else { continue }
+            var comps = cal.dateComponents([.year, .month, .day], from: fireDay)
+            comps.hour = minutes / 60; comps.minute = minutes % 60; comps.second = 0
+            guard let fireDate = cal.date(from: comps), fireDate > Date() else { continue }
+            // A "morning of" time after the game has started is no reminder.
+            let gameTime = game.timeFromTitle ?? (game.isAllDay ? nil : game.startDate)
+            if let gameTime, fireDate >= gameTime { continue }
+
+            let theme = game.sport.flatMap { sport in
+                store.events(on: game.dayKey).first {
+                    $0.id != game.id
+                        && $0.title.lowercased().contains("theme")
+                        && $0.title.lowercased().contains(sport)
+                }
+            }
+
+            let content = UNMutableNotificationContent()
+            content.title = nightBefore ? "Home Game Tomorrow" : "Home Game Today"
+            content.body  = theme.map { "\(game.title)\nTheme: \(Self.themeName(from: $0.title))" } ?? game.title
+            content.sound = .default
+
+            let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+            try? await center.add(UNNotificationRequest(identifier: "homegame-\(game.id)",
+                                                         content: content, trigger: trigger))
+            LHSLogger.notifications.notice(
+                "Home game \(game.dayKey, privacy: .public): \(game.title, privacy: .public)\(theme == nil ? "" : " + theme", privacy: .public), reminder at \(fireDate, privacy: .public)"
+            )
+        }
+    }
+
+    /// "Football Dress up theme: \"Wiggin Out\"/Pink out" → "\"Wiggin Out\"/Pink out".
+    private static func themeName(from title: String) -> String {
+        guard let colon = title.firstIndex(of: ":") else { return title }
+        return title[title.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+    }
+
     // MARK: - Class Orientation Day
     //
     // Fires one week before, front-loaded with the actual grade-specific

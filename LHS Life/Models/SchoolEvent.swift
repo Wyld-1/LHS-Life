@@ -50,6 +50,57 @@ struct SchoolEvent: Identifiable, Hashable, Codable {
     var dayKey: String {
         DateFormatter.isoDay.string(from: startDate)
     }
+
+    /// A La Salle athletics event played at home.
+    ///
+    /// CalendarWiz has no home/away field, but the titles are consistent:
+    /// home games say where they are — "Volleyball with Highland at La Salle",
+    /// "Football with Goldendale at Marquette 7 PM" — and away games name the
+    /// other school's town ("Football at Granger 7 PM"). Camps and parent
+    /// meetings held at La Salle are athletics events too, but not games.
+    var isHomeGame: Bool {
+        guard category == .athletics else { return false }
+        let t = title.lowercased()
+        let atHome = t.contains("at la salle") || t.contains("at marquette")
+            || t.contains("hosting") || t.contains("hosted on campus")
+        let notAGame = ["camp", "meeting", "clinic", "tryout"].contains { t.contains($0) }
+        return atHome && !notAGame
+    }
+
+    /// The sport a game is for, used to find its dress-up theme. Nil if the
+    /// title doesn't name one.
+    var sport: String? {
+        let t = title.lowercased()
+        return ["football", "volleyball", "soccer", "basketball", "cross country"].first { t.contains($0) }
+    }
+
+    /// The start time written in the TITLE of an all-day event, on its day.
+    ///
+    /// CalendarWiz's athletics entries are posted as all-day events with the
+    /// time only in the title — "Football with Goldendale at Marquette 7 PM",
+    /// "Cross Country at Warden 3:45 pm" — so the event itself says nothing
+    /// about when, and the app used to show "All day" for a 7 PM kickoff.
+    /// Needs an AM/PM marker, so a number like "3000 Lightning Way" never
+    /// counts; with several times ("Girls at 2:45 PM, Boys at 4:15 PM") the
+    /// first one wins. Nil for timed events and multi-day ones.
+    var timeFromTitle: Date? {
+        guard isAllDay else { return nil }
+        let cal = Calendar.current
+        let lastDay = cal.date(byAdding: .day, value: -1, to: endDate) ?? endDate
+        guard cal.isDate(startDate, inSameDayAs: lastDay) || endDate <= startDate else { return nil }
+
+        let pattern = #"(?i)\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s*m\b\.?"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let m = regex.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)),
+              let hRange = Range(m.range(at: 1), in: title),
+              var hour = Int(title[hRange]), (1...12).contains(hour)
+        else { return nil }
+        let minute = Range(m.range(at: 2), in: title).flatMap { Int(title[$0]) } ?? 0
+        let isPM = Range(m.range(at: 3), in: title).map { title[$0].lowercased() == "p" } ?? false
+        if isPM, hour < 12 { hour += 12 }
+        if !isPM, hour == 12 { hour = 0 }
+        return cal.date(bySettingHour: hour, minute: minute, second: 0, of: startDate)
+    }
 }
 
 // MARK: - EventCategory

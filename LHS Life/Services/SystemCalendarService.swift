@@ -73,6 +73,15 @@ final class SystemCalendarService {
             event.startDate = item.startDate
             event.endDate    = item.endDate
 
+            // An all-day entry with its time in the title ("…7 PM") is saved
+            // as a timed event, so Calendar can actually alert before it.
+            // The feed gives no end time; two hours covers a game or a show.
+            if case .schoolEvent(let e) = item, let time = e.timeFromTitle {
+                event.isAllDay  = false
+                event.startDate = time
+                event.endDate   = time.addingTimeInterval(2 * 60 * 60)
+            }
+
             try ekStore.save(event, span: .thisEvent)
             return .success
         } catch {
