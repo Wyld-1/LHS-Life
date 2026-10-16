@@ -23,6 +23,9 @@ final class LiveActivityService {
     private init() {}
 
     private var currentActivity: Activity<ScheduleActivityAttributes>?
+    /// Sleeps until the running card's last bell, then ends it if the day is
+    /// over. See scheduleEndCheck(at:).
+    private var endCheckTask: Task<Void, Never>?
     private(set) var isDebugSession = false
 
     // MARK: - Reconnect (call on app launch/foreground)
@@ -119,6 +122,9 @@ final class LiveActivityService {
             PushTokenService.observeTokenUpdates(for: a, periods: a.attributes.schedule)
             if let token = a.pushToken {
                 Task { await PushTokenService.register(token: token, periods: a.attributes.schedule) }
+            }
+            if let lastBell = a.attributes.schedule.last?.endDate {
+                scheduleEndCheck(at: lastBell)
             }
         }
     }
@@ -275,6 +281,7 @@ final class LiveActivityService {
 
             let upcoming = periods.filter { $0.startDate > Date() }
             BellTransitionService.scheduleTransitions(for: upcoming)
+            scheduleEndCheck(at: lastBell)
         } catch {
             // The likeliest TestFlight-only failure: pushType: .token requires
             // the push entitlement, and an App Store provisioning profile
@@ -411,6 +418,35 @@ final class LiveActivityService {
     #endif
 
     // MARK: - End if school over
+
+    /// Ends the card when the student's day is over: at their last bell if
+    /// the app is open then, or on the next foreground (checkSchoolOver).
+    ///
+    /// This used to ride on the header's once-a-second timer, which asked
+    /// "is school over?" thousands of times a day. One wrong answer — an
+    /// event misread as a holiday — then ended the card every second while
+    /// the start logic put it back: the Oct 15 restart loop. Two checks a day
+    /// can't loop. The server dismisses the card at the last bell anyway; this
+    /// is the device-side backstop for when the app is open to see it.
+    ///
+    /// Task.sleep runs on the continuous clock, which keeps counting while the
+    /// app is suspended, so a phone reopened after the last bell runs the
+    /// check straight away.
+    private func scheduleEndCheck(at lastBell: Date) {
+        endCheckTask?.cancel()
+        endCheckTask = Task { @MainActor [weak self] in
+            let delay = lastBell.timeIntervalSinceNow
+            if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
+            guard !Task.isCancelled else { return }
+            self?.checkSchoolOver()
+        }
+    }
+
+    /// The "is school over?" check against right now. Called on every
+    /// foreground and by scheduleEndCheck.
+    func checkSchoolOver() {
+        endIfSchoolOver(state: CalendarStore.shared.todayState(at: DebugClock.shared.now))
+    }
 
     func endIfSchoolOver(state: ScheduleEngine.ScheduleState) {
         guard !isDebugSession else { return }   // leave debug sessions alone

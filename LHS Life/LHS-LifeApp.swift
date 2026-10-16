@@ -92,6 +92,7 @@ struct LaSalle_ScheduleApp: App {
                 // is actually a screen to show it on.
                 .onChange(of: scenePhase) { _, phase in
                     guard phase == .active else { return }
+                    LiveActivityService.shared.checkSchoolOver()
                     startLiveActivity()
                     resolvePendingConfirmation()
                     guard settings.accessApproved else { return }

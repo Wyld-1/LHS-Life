@@ -45,6 +45,7 @@ struct ScheduleHeaderPill: View {
 
     @State private var now: Date = Date()
     @State private var timer: Timer? = nil
+    @Environment(\.scenePhase) private var scenePhase
 
     // MARK: Easter egg — trigger only
     //
@@ -163,6 +164,11 @@ struct ScheduleHeaderPill: View {
         )
         .ifTrue(!suppressGlass) { $0.modifier(CapsuleGlassModifier()) }
         .onAppear  { now = DebugClock.shared.now; startTimer() }
+        // Back from the background: catch up now rather than at the next
+        // minute tick, which could leave a stale "3 min left" for up to 59 s.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { now = DebugClock.shared.now }
+        }
         .onDisappear { stopTimer() }
     }
 
@@ -200,13 +206,42 @@ struct ScheduleHeaderPill: View {
 
     // MARK: - Clock timer
 
+    /// Updates once a minute, exactly ON the minute.
+    ///
+    /// The text only changes by the minute ("22 min left"), and bells always
+    /// land on a whole minute, so a tick at :00 flips the header the moment
+    /// the bell rings. It used to tick every second, redrawing the header 60
+    /// times for each change anyone could see; the progress bar's per-second
+    /// movement was a tenth of a point. Now it steps about 1/50th of the bar
+    /// a minute, with the bar's own animation smoothing each step.
+    ///
+    /// The Live Activity's "is school over?" check used to ride along on this
+    /// timer too. It now runs at the last bell and on foreground instead —
+    /// see LiveActivityService.scheduleEndCheck(at:).
     private func startTimer() {
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-            Task { @MainActor in
-                self.now = DebugClock.shared.now
-                LiveActivityService.shared.endIfSchoolOver(state: self.store.todayState(at: self.now))
-            }
+        timer?.invalidate()
+        var interval: TimeInterval = 60
+        #if DEBUG
+        // A -demoClock offset is rarely a whole number of minutes, so real
+        // minute boundaries aren't the fake clock's. Screen recordings want
+        // the old smooth countdown anyway.
+        if DebugClock.shared.offset != 0 { interval = 1 }
+        #endif
+        let current = DebugClock.shared.now
+        let nextMinute = Calendar.current.nextDate(
+            after: current, matching: DateComponents(second: 0), matchingPolicy: .nextTime
+        ) ?? current.addingTimeInterval(60)
+        let firstFire = interval == 60
+            ? Date().addingTimeInterval(nextMinute.timeIntervalSince(current))
+            : Date().addingTimeInterval(1)
+        let t = Timer(fire: firstFire, interval: interval, repeats: true) { _ in
+            Task { @MainActor in self.now = DebugClock.shared.now }
         }
+        // A little slack lets iOS batch the wake-up with others; the minute
+        // text can't change in the 1 s it might wait.
+        t.tolerance = interval == 60 ? 1 : 0.1
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     private func stopTimer() {
