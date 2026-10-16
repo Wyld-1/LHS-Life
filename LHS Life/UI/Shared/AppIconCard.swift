@@ -102,11 +102,16 @@ struct AppIconIntroCard: View {
             .buttonStyle(.plain)
         }
         .padding(LS.lg)
-        .frame(maxWidth: 420)
-        .background(Color.lsSurface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .shadow(color: .black.opacity(0.25), radius: 24, y: 8)
-        .padding(.horizontal, LS.md)
-        .padding(.bottom, LS.md)
+        .frame(maxWidth: 480)
+        // A tray attached to the bottom edge, like a sheet: the background
+        // runs under the home indicator, the buttons stay above it. A card
+        // floating above the safe area left a strip of app showing beneath.
+        .background {
+            UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28, style: .continuous)
+                .fill(Color.lsSurface)
+                .ignoresSafeArea(edges: .bottom)
+                .shadow(color: .black.opacity(0.25), radius: 24, y: -4)
+        }
     }
 }
 
