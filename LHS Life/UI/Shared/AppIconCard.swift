@@ -19,10 +19,10 @@ struct AppIconPicker: View {
 
     var body: some View {
         HStack(spacing: LS.lg) {
+            tile(.classic, name: "Classic", asset: AppIconService.classicPreviewAsset)
             if let season = AppIconService.season {
                 tile(.seasonal, name: season.name, asset: season.previewAsset)
             }
-            tile(.classic, name: "Classic", asset: AppIconService.classicPreviewAsset)
         }
         .frame(maxWidth: .infinity)
     }
@@ -38,7 +38,7 @@ struct AppIconPicker: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: 64, height: 64)
-                    .padding(4)
+                    .padding(LS.xs)
                     .overlay {
                         RoundedRectangle(cornerRadius: 19, style: .continuous)
                             .strokeBorder(isSelected ? Color.lsBlue : .clear, lineWidth: 3)

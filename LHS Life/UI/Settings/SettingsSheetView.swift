@@ -512,15 +512,18 @@ struct SettingsSheetView: View {
             Button("Privacy Policy") {
                 showPrivacyPolicy = true
             }
+            // Always here, unlike the system rating prompt, which iOS shows
+            // at most three times a year and only when ReviewPrompter asks.
+            Link("Rate LHS Life", destination: AppConstants.writeReviewURL)
         } footer: {
-            Text("LHS Life \(Self.versionString)· La Salle High School · Yakima")
+            Text("LHS Life \(Self.versionString) · La Salle High School · Yakima")
         }
     }
 
+    /// The marketing version only. The build number meant nothing to a
+    /// student ("1.2.0 (1)"); it's in TestFlight and Xcode for whoever needs it.
     private static var versionString: String {
-        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
-        return "\(short) (\(build))"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
     }
 }
 
@@ -594,27 +597,26 @@ private struct ASBWorkingDaysRow: View {
                 .font(.lsCaption)
                 .foregroundStyle(.secondary)
 
-            HStack(spacing: LS.sm) {
-                ForEach(0..<5, id: \.self) { i in
-                    let mode = settings.asbWorkDays[i]
-                    Button {
-                        HapticEngine.shared.tick()
-                        settings.asbWorkDays[i] = mode.next
-                    } label: {
-                        Text(Self.weekdayNames[i])
-                            .font(.lsCaption)
-                            .foregroundStyle(mode == .off ? Color.lsSecondary : .white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, LS.sm)
-                            .background(
-                                mode == .off
-                                    ? Color.lsSurfaceRaised
-                                    : Color(hex: mode.color)
-                            )
-                            .clipShape(Capsule())
+            WorkDayGlassContainer {
+                HStack(spacing: LS.sm) {
+                    ForEach(0..<5, id: \.self) { i in
+                        let mode = settings.asbWorkDays[i]
+                        Button {
+                            HapticEngine.shared.tick()
+                            settings.asbWorkDays[i] = mode.next
+                        } label: {
+                            Text(Self.weekdayNames[i])
+                                .font(.lsCaption)
+                                .foregroundStyle(mode == .off ? Color.lsSecondary : .white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, LS.sm)
+                                .modifier(WorkDayCapsuleStyle(
+                                    tint: mode == .off ? nil : Color(hex: mode.color)
+                                ))
+                        }
+                        .buttonStyle(.plain)
+                        .animation(.lsSnappy, value: mode)
                     }
-                    .buttonStyle(.plain)
-                    .animation(.lsSnappy, value: mode)
                 }
             }
 
@@ -632,6 +634,41 @@ private struct ASBWorkingDaysRow: View {
             }
         }
         .padding(.vertical, LS.xs)
+    }
+}
+
+/// One glass container around all five capsules, so they render as a single
+/// piece of glass: pressed (interactive glass swells) they reach into their
+/// neighbors and flow together instead of overlapping as separate panes.
+/// The spacing is the HStack's, so the capsules merge only when they grow.
+private struct WorkDayGlassContainer<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        if #available(iOS 26, *) {
+            GlassEffectContainer(spacing: LS.sm) { content }
+        } else {
+            content
+        }
+    }
+}
+
+/// Glass on iOS 26 and later, tinted with the day's mode color; Off is plain
+/// glass. Earlier systems keep the flat filled capsule.
+private struct WorkDayCapsuleStyle: ViewModifier {
+    let tint: Color?
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *) {
+            content.glassEffect(
+                (tint.map { Glass.regular.tint($0) } ?? .regular).interactive(),
+                in: Capsule()
+            )
+        } else {
+            content
+                .background(tint ?? Color.lsSurfaceRaised)
+                .clipShape(Capsule())
+        }
     }
 }
 

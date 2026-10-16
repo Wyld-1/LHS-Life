@@ -36,6 +36,14 @@ enum AppConstants {
     /// registration and the problem reports.
     static let workerURL = "https://lhslife-liveactivityworker.liam-lefohn.workers.dev"
 
+    // MARK: - App Store
+
+    /// The app's numeric Apple ID (App Store Connect → App Information).
+    static let appStoreID = "6812553629"
+
+    /// Opens the App Store straight to the "Write a Review" sheet.
+    static let writeReviewURL = URL(string: "https://apps.apple.com/app/id\(appStoreID)?action=write-review")!
+
     // MARK: - Privacy Policy
     // Shown in the app by PrivacyPolicyView, rendered from
     // Resources/PRIVACY.md — no URL, so nothing to break when the repo moves.
