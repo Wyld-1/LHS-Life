@@ -37,4 +37,6 @@ enum LHSLogger {
     static let calendarUI = Logger(subsystem: "lhslife", category: "calendarUI")
     /// Which reminders were queued, and for when.
     static let notifications = Logger(subsystem: "lhslife", category: "notifications")
+    /// Seasonal app icon switches.
+    static let appIcon = Logger(subsystem: "lhslife", category: "appIcon")
 }

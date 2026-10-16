@@ -54,6 +54,7 @@ struct SettingsSheetView: View {
                 apExamSection
                 myInfoSection
                 classesSection
+                appIconSection
                 alertsSection
                 mapSection
                 #if DEBUG
@@ -237,6 +238,23 @@ struct SettingsSheetView: View {
             }
         } header: {
             Text("My Classes")
+        }
+    }
+
+    // MARK: - App Icon
+
+    @State private var iconService = AppIconService.shared
+
+    @ViewBuilder
+    private var appIconSection: some View {
+        if iconService.canChoose {
+            Section("App Icon") {
+                AppIconPicker(selection: Binding(
+                    get: { iconService.current },
+                    set: { choice in Task { await iconService.choose(choice) } }
+                ))
+                .padding(.vertical, LS.sm)
+            }
         }
     }
 

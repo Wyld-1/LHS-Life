@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		231F30652FB04A0F00F58221 /* LHS Life Icon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 231F30642FB04A0F00F58221 /* LHS Life Icon.icon */; };
+		231F30672FB04A0F00F58221 /* LHS Life Halloween.icon in Resources */ = {isa = PBXBuildFile; fileRef = 231F30662FB04A0F00F58221 /* LHS Life Halloween.icon */; };
 		23E396072FA57AE300574B85 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 23E396062FA57AE200574B85 /* WidgetKit.framework */; };
 		23E396092FA57AE300574B85 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 23E396082FA57AE300574B85 /* SwiftUI.framework */; };
 		23E3961A2FA57AE500574B85 /* LHS WidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 23E396042FA57AE200574B85 /* LHS WidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -53,6 +54,7 @@
 
 /* Begin PBXFileReference section */
 		231F30642FB04A0F00F58221 /* LHS Life Icon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = "LHS Life Icon.icon"; sourceTree = "<group>"; };
+		231F30662FB04A0F00F58221 /* LHS Life Halloween.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = "LHS Life Halloween.icon"; sourceTree = "<group>"; };
 		2335D8672FBE7E470054E1EC /* APNS Worker.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "APNS Worker.json"; sourceTree = "<group>"; };
 		23E395A12FA5399800574B85 /* LHS Life.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "LHS Life.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		23E395AE2FA5399A00574B85 /* LHS LifeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "LHS LifeTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -162,6 +164,7 @@
 				23E396052FA57AE200574B85 /* Frameworks */,
 				23E395A22FA5399800574B85 /* Products */,
 				231F30642FB04A0F00F58221 /* LHS Life Icon.icon */,
+				231F30662FB04A0F00F58221 /* LHS Life Halloween.icon */,
 				2335D8672FBE7E470054E1EC /* APNS Worker.json */,
 			);
 			sourceTree = "<group>";
@@ -337,6 +340,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				231F30652FB04A0F00F58221 /* LHS Life Icon.icon in Resources */,
+				231F30672FB04A0F00F58221 /* LHS Life Halloween.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -539,7 +543,8 @@
 		23E395C32FA5399A00574B85 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = "LHS Life Icon";
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "\"LHS Life Icon\"";
+				ASSETCATALOG_COMPILER_APPICON_NAME = "LHS Life Halloween";
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = "LHS Life/LHS Life.entitlements";
@@ -565,7 +570,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1.1;
+				MARKETING_VERSION = 1.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lasalleyakima.lhslife;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -585,7 +590,8 @@
 		23E395C42FA5399A00574B85 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = "LHS Life Icon";
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "\"LHS Life Icon\"";
+				ASSETCATALOG_COMPILER_APPICON_NAME = "LHS Life Halloween";
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = "LHS Life/LHS Life.entitlements";
@@ -611,7 +617,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1.1;
+				MARKETING_VERSION = 1.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lasalleyakima.lhslife;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -732,7 +738,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.1.1;
+				MARKETING_VERSION = 1.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lasalleyakima.lhslife.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -765,7 +771,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.1.1;
+				MARKETING_VERSION = 1.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lasalleyakima.lhslife.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;

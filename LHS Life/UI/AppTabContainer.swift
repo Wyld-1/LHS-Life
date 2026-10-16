@@ -112,6 +112,8 @@ struct AppTabContainer: View {
     /// slow launch is more noticeable than a brief flash.
     @State private var launchScreenDue = false
     @State private var showCapacityAlert = false
+    /// The once-a-season "pick your icon" card (AppIconIntroCard).
+    @State private var showIconIntro = false
     /// Observed so the capacity refusal below can reach the UI; the
     /// service is @Observable and a singleton, so this is a reference to
     /// the same instance LiveActivityService.shared hands everyone else.
@@ -190,11 +192,25 @@ struct AppTabContainer: View {
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(3))
             guard scenePhase == .active, !isLaunching, selectedTab == .events,
-                  !showSettings, !showHomework, !showContacts, !showCapacityAlert,
+                  !showSettings, !showHomework, !showContacts, !showCapacityAlert, !showIconIntro,
                   ReviewPrompter.isGoodTimeToAsk
             else { return }
             ReviewPrompter.markAsked()
             requestReview()
+        }
+    }
+
+    /// Slides up the seasonal icon card, once per season, after launch has
+    /// settled and nothing else is on screen.
+    private func considerIconIntro() {
+        guard AppIconService.shared.shouldIntroduce, !showIconIntro else { return }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1))
+            guard scenePhase == .active, !isLaunching,
+                  !showSettings, !showHomework, !showContacts, !showCapacityAlert,
+                  AppIconService.shared.shouldIntroduce
+            else { return }
+            showIconIntro = true
         }
     }
 
@@ -205,6 +221,7 @@ struct AppTabContainer: View {
             if isPhone { iPhoneLayout } else { iPadLayout }
         }
         .overlay { EasterEggOverlay() }
+        .modifier(AppIconIntroOverlay(isPresented: $showIconIntro))
         #if DEBUG
         // Under -demoClock the system clock can't follow the fake one — the
         // simulator's status-bar override is frozen and misreads the year —
@@ -216,6 +233,7 @@ struct AppTabContainer: View {
             case .background: calendarUI.appDidBackground()
             case .active:
                 calendarUI.appDidForeground()
+                considerIconIntro()
                 considerReviewPrompt()
             default:          break
             }
@@ -303,6 +321,7 @@ struct AppTabContainer: View {
             // A cold launch arrives already active, so the scenePhase
             // onChange above never fires for it. Once launch is settled is
             // the right moment anyway.
+            considerIconIntro()
             considerReviewPrompt()
         }
         .task {
