@@ -124,6 +124,12 @@ enum IssueReporter {
             NSURLErrorDataNotAllowed,           // cellular data off for the app
             NSURLErrorInternationalRoamingOff,
             NSURLErrorCallIsActive,
+            // Couldn't look up the address. From one phone that's no internet
+            // or a wifi sign-in page, not the school's server — these were
+            // landing under "server" at 9 PM. If a school address really
+            // stopped resolving, "network" would show it as many devices.
+            NSURLErrorCannotFindHost,
+            NSURLErrorDNSLookupFailed,
         ].contains(ns.code)
     }
 
