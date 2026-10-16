@@ -53,7 +53,7 @@ final class BellScheduleParserTests: XCTestCase {
 
     func test_referenceDescription_parsesAllPeriods() {
         let event = makeEvent(description: referenceDescription)
-        let schedule = parser.parse(from: event)
+        let schedule = parser.parse(from: event).first
         XCTAssertNotNil(schedule)
         XCTAssertEqual(schedule?.periods.count, 5)
         XCTAssertEqual(schedule?.periods[0].name, "Period 0")
@@ -67,7 +67,7 @@ final class BellScheduleParserTests: XCTestCase {
 
     func test_startTimes_parsedCorrectly() {
         let event = makeEvent(description: referenceDescription)
-        guard let schedule = parser.parse(from: event) else { return XCTFail("nil schedule") }
+        guard let schedule = parser.parse(from: event).first else { return XCTFail("nil schedule") }
         let p1    = schedule.periods.first { $0.name == "Period 1" }
         let brk   = schedule.periods.first { $0.name == "Break" }
         let lunch = schedule.periods.first { $0.name == "Lunch" }
@@ -80,7 +80,7 @@ final class BellScheduleParserTests: XCTestCase {
 
     func test_endTimes_parsedCorrectly() {
         let event = makeEvent(description: referenceDescription)
-        guard let schedule = parser.parse(from: event) else { return XCTFail("nil schedule") }
+        guard let schedule = parser.parse(from: event).first else { return XCTFail("nil schedule") }
         let p1    = schedule.periods.first { $0.name == "Period 1" }
         let lunch = schedule.periods.first { $0.name == "Lunch" }
         XCTAssertEqual(p1?.endTime.hour, 8);     XCTAssertEqual(p1?.endTime.minute, 50)
@@ -91,7 +91,7 @@ final class BellScheduleParserTests: XCTestCase {
 
     func test_duration_computedCorrectly() {
         let event = makeEvent(description: referenceDescription)
-        guard let schedule = parser.parse(from: event) else { return XCTFail("nil schedule") }
+        guard let schedule = parser.parse(from: event).first else { return XCTFail("nil schedule") }
         let p1    = schedule.periods.first { $0.name == "Period 1" }
         let lunch = schedule.periods.first { $0.name == "Lunch" }
         XCTAssertEqual(p1?.durationMinutes, 50)
@@ -102,7 +102,7 @@ final class BellScheduleParserTests: XCTestCase {
 
     func test_scheduleType_regular() {
         let event = makeEvent(description: referenceDescription, title: "Regular Schedule")
-        XCTAssertEqual(parser.parse(from: event)?.scheduleType, .regular)
+        XCTAssertEqual(parser.parse(from: event).first?.scheduleType, .regular)
     }
 
     // MARK: 4.6 Schedule type inferred as lateStart
@@ -110,15 +110,16 @@ final class BellScheduleParserTests: XCTestCase {
     func test_scheduleType_lateStart() {
         let desc = "Late Start Schedule\nPeriod\nBegin\nEnd\nTotal\n1\n9:30\n10:20\n50"
         let event = makeEvent(description: desc, title: "Late Start Schedule")
-        XCTAssertEqual(parser.parse(from: event)?.scheduleType, .lateStart)
+        XCTAssertEqual(parser.parse(from: event).first?.scheduleType, .lateStart)
     }
 
     // MARK: 4.7 Schedule type inferred as block
 
     func test_scheduleType_block() {
-        let desc = "Block Schedule\nPeriod\nBegin\nEnd\nTotal\n1\n8:00\n9:30\n90"
-        let event = makeEvent(description: desc, title: "Block Schedule")
-        XCTAssertEqual(parser.parse(from: event)?.scheduleType, .block)
+        // Block days are always odd or even; .block split into the two.
+        let desc = "Odd Block Schedule\nPeriod\nBegin\nEnd\nTotal\n1\n8:00\n9:30\n90"
+        let event = makeEvent(description: desc, title: "Odd Block Schedule")
+        XCTAssertEqual(parser.parse(from: event).first?.scheduleType, .oddBlock)
     }
 
     // MARK: 4.8 Schedule type inferred as earlyRelease
@@ -126,7 +127,7 @@ final class BellScheduleParserTests: XCTestCase {
     func test_scheduleType_earlyRelease() {
         let desc = "Early Release\nPeriod\nBegin\nEnd\nTotal\n1\n8:00\n8:35\n35"
         let event = makeEvent(description: desc, title: "Early Release")
-        XCTAssertEqual(parser.parse(from: event)?.scheduleType, .earlyRelease)
+        XCTAssertEqual(parser.parse(from: event).first?.scheduleType, .earlyRelease)
     }
 
     // MARK: 4.9 PM times without meridiem suffix (hour < 6 → +12)
@@ -134,7 +135,7 @@ final class BellScheduleParserTests: XCTestCase {
     func test_pmTimesWithoutSuffix_inferredCorrectly() {
         let desc = "Regular Schedule\nPeriod\nBegin\nEnd\nTotal\n6\n1:15\n2:05\n50"
         let event = makeEvent(description: desc)
-        guard let schedule = parser.parse(from: event) else { return XCTFail("nil schedule") }
+        guard let schedule = parser.parse(from: event).first else { return XCTFail("nil schedule") }
         let p6 = schedule.periods.first { $0.name == "Period 6" }
         XCTAssertEqual(p6?.startTime.hour, 13)
         XCTAssertEqual(p6?.startTime.minute, 15)
@@ -145,7 +146,7 @@ final class BellScheduleParserTests: XCTestCase {
     func test_amSuffix_parsedCorrectly() {
         let desc = "Regular Schedule\nPeriod\nBegin\nEnd\nTotal\n0\n7:55AM\n8:45AM\n50"
         let event = makeEvent(description: desc)
-        guard let schedule = parser.parse(from: event) else { return XCTFail("nil schedule") }
+        guard let schedule = parser.parse(from: event).first else { return XCTFail("nil schedule") }
         let p0 = schedule.periods.first { $0.name == "Period 0" }
         XCTAssertEqual(p0?.startTime.hour, 7)
         XCTAssertEqual(p0?.startTime.minute, 55)
@@ -155,21 +156,21 @@ final class BellScheduleParserTests: XCTestCase {
 
     func test_noPeriodHeader_returnsNil() {
         let event = makeEvent(description: "Just some random text without the header.")
-        XCTAssertNil(parser.parse(from: event))
+        XCTAssertNil(parser.parse(from: event).first)
     }
 
     // MARK: 4.12 Returns nil when description is nil
 
     func test_nilDescription_returnsNil() {
         let event = makeEvent(description: nil)
-        XCTAssertNil(parser.parse(from: event))
+        XCTAssertNil(parser.parse(from: event).first)
     }
 
     // MARK: 4.13 Returns nil when description is empty
 
     func test_emptyDescription_returnsNil() {
         let event = makeEvent(description: "")
-        XCTAssertNil(parser.parse(from: event))
+        XCTAssertNil(parser.parse(from: event).first)
     }
 
     // MARK: 4.14 Period names normalized
@@ -200,7 +201,7 @@ final class BellScheduleParserTests: XCTestCase {
             30
             """
         let event = makeEvent(description: desc)
-        guard let schedule = parser.parse(from: event) else { return XCTFail("nil schedule") }
+        guard let schedule = parser.parse(from: event).first else { return XCTFail("nil schedule") }
         let names = schedule.periods.map(\.name)
         XCTAssertTrue(names.contains("Period 0"))
         XCTAssertTrue(names.contains("Break"))

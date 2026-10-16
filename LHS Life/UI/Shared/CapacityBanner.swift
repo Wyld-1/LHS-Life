@@ -117,7 +117,7 @@ struct CapacityDetailsSheet: View {
                     .padding(.vertical, 10)
             }
         }
-        .padding(24)
+        .padding(LS.lg)
     }
 }
 
