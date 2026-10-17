@@ -41,7 +41,7 @@ final class AppIconService {
         let id: String
         let name: String
         let alternateName: String?
-        /// A rendered copy of the icon in Assets.xcassets — the real icon
+        /// A rendered copy of the icon in IconPreviews.xcassets — the real icon
         /// can't be loaded as an image at runtime. Kept current by
         /// Scripts/render-icon-previews.sh.
         let previewAsset: String

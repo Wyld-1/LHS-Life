@@ -205,6 +205,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 23E395C22FA5399A00574B85 /* Build configuration list for PBXNativeTarget "LHS Life" */;
 			buildPhases = (
+				231F306E2FB04A0F00F58221 /* Render Icon Previews */,
 				23E3959D2FA5399800574B85 /* Sources */,
 				23E3959E2FA5399800574B85 /* Frameworks */,
 				23E3959F2FA5399800574B85 /* Resources */,
@@ -378,6 +379,40 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		231F306E2FB04A0F00F58221 /* Render Icon Previews */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Scripts/render-icon-previews.sh",
+				"$(SRCROOT)/LHS Life Icon.icon",
+				"$(SRCROOT)/LHS Life Halloween.icon",
+				"$(SRCROOT)/LHS Life Thanksgiving.icon",
+				"$(SRCROOT)/LHS Life Christmas.icon",
+				"$(SRCROOT)/LHS Life Easter.icon",
+			);
+			name = "Render Icon Previews";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(SRCROOT)/LHS Life/IconPreviews.xcassets/IconPreviewClassic.imageset/IconPreviewClassic.png",
+				"$(SRCROOT)/LHS Life/IconPreviews.xcassets/IconPreviewHalloween.imageset/IconPreviewHalloween.png",
+				"$(SRCROOT)/LHS Life/IconPreviews.xcassets/IconPreviewThanksgiving.imageset/IconPreviewThanksgiving.png",
+				"$(SRCROOT)/LHS Life/IconPreviews.xcassets/IconPreviewChristmas.imageset/IconPreviewChristmas.png",
+				"$(SRCROOT)/LHS Life/IconPreviews.xcassets/IconPreviewEaster.imageset/IconPreviewEaster.png",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"$SRCROOT/Scripts/render-icon-previews.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		23E3959D2FA5399800574B85 /* Sources */ = {
@@ -555,6 +590,9 @@
 		23E395C32FA5399A00574B85 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				// Render Icon Previews reads inside the .icon folders, whose contents
+				// change with every Icon Composer save and can't be listed as inputs.
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "\"LHS Life Halloween\" \"LHS Life Thanksgiving\" \"LHS Life Christmas\" \"LHS Life Easter\"";
 				ASSETCATALOG_COMPILER_APPICON_NAME = "LHS Life Icon";
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -602,6 +640,9 @@
 		23E395C42FA5399A00574B85 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				// Render Icon Previews reads inside the .icon folders, whose contents
+				// change with every Icon Composer save and can't be listed as inputs.
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "\"LHS Life Halloween\" \"LHS Life Thanksgiving\" \"LHS Life Christmas\" \"LHS Life Easter\"";
 				ASSETCATALOG_COMPILER_APPICON_NAME = "LHS Life Icon";
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
