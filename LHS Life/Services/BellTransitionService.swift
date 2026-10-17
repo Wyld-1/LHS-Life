@@ -125,7 +125,7 @@ enum BellTransitionService {
     private static func pushToActivity(
         contentState: ScheduleActivityAttributes.ContentState
     ) async {
-        let activities = Activity<ScheduleActivityAttributes>.activities
+        let activities = ScheduleActivityAttributes.realActivities
         guard let activity = activities.first else {
             print("[BellTransition] No active Live Activity to update")
             return

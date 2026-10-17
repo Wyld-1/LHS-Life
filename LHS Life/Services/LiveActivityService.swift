@@ -98,7 +98,8 @@ final class LiveActivityService {
         // adopting one of those made startIfNeeded bail with "already running"
         // while nothing was actually running — the reason a Live Activity
         // ended from the debug menu could not be restarted without a relaunch.
-        currentActivity = Activity<ScheduleActivityAttributes>.activities.first {
+        adoptPreview()
+        currentActivity = ScheduleActivityAttributes.realActivities.first {
             $0.activityState == .active || $0.activityState == .stale
         }
         if let a = currentActivity {
@@ -242,6 +243,11 @@ final class LiveActivityService {
             scheduleTypeName: schedule.scheduleType.scheduleLabel,
             schedule: periods
         )
+
+        // The real thing replaces the preview; two cards would be confusing.
+        if previewActivity != nil {
+            Task { await endPreview() }
+        }
 
         do {
             let activity = try Activity.request(
@@ -453,7 +459,7 @@ final class LiveActivityService {
         switch state.dayState {
         case .afterSchool, .holiday, .pathwaysDay:
             guard currentActivity != nil ||
-                  !Activity<ScheduleActivityAttributes>.activities.isEmpty
+                  !ScheduleActivityAttributes.realActivities.isEmpty
             else { return }
             Task { await end() }
         default:
@@ -497,13 +503,115 @@ final class LiveActivityService {
     func end() async {
         isDebugSession = false
         CachedSchedule.clear()
-        // End all activities in case of duplicates from BGTask timing issues
-        for activity in Activity<ScheduleActivityAttributes>.activities {
+        // End all activities in case of duplicates from BGTask timing issues.
+        // Not the preview: it has its own End button, and "school's over"
+        // has nothing to do with it.
+        for activity in ScheduleActivityAttributes.realActivities {
             await activity.end(.init(state: .init(isEnded: true), staleDate: nil),
                                dismissalPolicy: .immediate)
         }
         currentActivity = nil
         print("[LiveActivity] Ended all activities")
+    }
+
+    // MARK: - Preview
+
+    /// The PREVIEW card — what a Live Activity looks like, for students who
+    /// don't know the term. Started from Settings → Lock Screen, the
+    /// "couldn't start" sheet, or the first server-full alert.
+    ///
+    /// Entirely local: no push token, no server, no schedule. The widget draws
+    /// it frozen from `attributes.preview` (see LHS_WidgetsLiveActivity), so
+    /// it works at 9 PM on a Saturday and on a device the server turned away.
+    /// It ends from the app's End Preview button, a swipe on the Lock Screen,
+    /// or a real Live Activity starting.
+    private var previewActivity: Activity<ScheduleActivityAttributes>?
+    private(set) var isPreviewRunning = false
+    /// Why the last preview didn't start, phrased for the student.
+    private(set) var previewFailure: String?
+
+    func startPreview() {
+        previewFailure = nil
+        adoptPreview()
+        guard previewActivity == nil else { return }
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else {
+            previewFailure = "Turn on Live Activities for LHS Life in the Settings app."
+            return
+        }
+        // Never two: clear any preview that isn't this service's (one from
+        // an earlier launch still starting up) before putting up a new one.
+        for stray in Activity<ScheduleActivityAttributes>.activities where stray.attributes.preview != nil {
+            Task { await stray.end(nil, dismissalPolicy: .immediate) }
+        }
+        // A believable moment mid-class: 28 minutes into a 50-minute period.
+        let minutesLeft = 22, length = 50
+        let bell = Date().addingTimeInterval(TimeInterval(minutesLeft * 60))
+        let fmt = DateFormatter()
+        fmt.dateFormat = "h:mm a"
+        let preview = ScheduleActivityAttributes.Preview(
+            className: "Chemistry",
+            colorHex: "#F5B800",
+            nextClassName: "US History",
+            minutesLeft: minutesLeft,
+            bellTime: fmt.string(from: bell),
+            progress: Double(length - minutesLeft) / Double(length)
+        )
+        do {
+            let activity = try Activity.request(
+                attributes: ScheduleActivityAttributes(
+                    schoolName: "LaSalle",
+                    scheduleTypeName: "Regular Schedule",
+                    schedule: [],
+                    preview: preview
+                ),
+                content: .init(state: .init(), staleDate: nil),
+                pushType: nil
+            )
+            previewActivity = activity
+            isPreviewRunning = true
+            observePreview(activity)
+            LHSLogger.liveActivity.notice("Preview started — id: \(activity.id, privacy: .public)")
+        } catch {
+            previewFailure = "Couldn't start the preview. Try again."
+            LHSLogger.liveActivity.error("Preview failed: \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    func endPreview() async {
+        for activity in Activity<ScheduleActivityAttributes>.activities where activity.attributes.preview != nil {
+            await activity.end(nil, dismissalPolicy: .immediate)
+        }
+        previewActivity = nil
+        isPreviewRunning = false
+    }
+
+    /// Picks up a preview still on screen from an earlier launch, so the
+    /// button reads End Preview instead of starting a second one.
+    func adoptPreview() {
+        guard previewActivity == nil,
+              let activity = Activity<ScheduleActivityAttributes>.activities.first(where: {
+                  // Anything not finished: on iOS 26 a just-requested card is
+                  // .pending, not .active, for a moment.
+                  $0.attributes.preview != nil
+                      && $0.activityState != .ended && $0.activityState != .dismissed
+              })
+        else { return }
+        previewActivity = activity
+        isPreviewRunning = true
+        observePreview(activity)
+    }
+
+    /// A swipe on the Lock Screen ends it without the app hearing about it
+    /// any other way.
+    private func observePreview(_ activity: Activity<ScheduleActivityAttributes>) {
+        Task { @MainActor [weak self] in
+            for await state in activity.activityStateUpdates where state == .dismissed || state == .ended {
+                guard let self, self.previewActivity?.id == activity.id else { return }
+                self.previewActivity = nil
+                self.isPreviewRunning = false
+                return
+            }
+        }
     }
 
     // MARK: - Content state builder
@@ -629,5 +737,13 @@ final class LiveActivityService {
         let parts = name.split(separator: " ")
         guard parts.count >= 2, parts[0].lowercased() == "period" else { return nil }
         return Int(parts[1])
+    }
+}
+
+extension ScheduleActivityAttributes {
+    /// Every Live Activity except the preview — the ones the server and the
+    /// school day are about.
+    static var realActivities: [Activity<ScheduleActivityAttributes>] {
+        Activity<ScheduleActivityAttributes>.activities.filter { $0.attributes.preview == nil }
     }
 }

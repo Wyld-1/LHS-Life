@@ -291,6 +291,9 @@ struct AppTabContainer: View {
             if let url = CapacityMessage.emailURL(to: liveActivity.capacityBlock?.contact) {
                 Link("Ask for an Upgrade", destination: url)
             }
+            if LiveActivityPreviewButton.isAvailable {
+                Button("Preview") { liveActivity.startPreview() }
+            }
             Button("OK", role: .cancel) { }
         } message: {
             Text(capacityMessage)

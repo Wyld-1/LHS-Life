@@ -12,8 +12,15 @@ import SwiftUI
 struct LaSalle_WidgetsLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: ScheduleActivityAttributes.self) { context in
-            LockScreenView(attributes: context.attributes, state: context.state)
+            if let preview = context.attributes.preview {
+                PreviewLockScreen(preview: preview)
+            } else {
+                LockScreenView(attributes: context.attributes, state: context.state)
+            }
         } dynamicIsland: { context in
+            if let preview = context.attributes.preview {
+                return previewDynamicIsland(preview)
+            }
             let transitions      = transitionDates(from: context.attributes.schedule)
             let schedule         = context.attributes.schedule
             let state            = context.state
@@ -197,6 +204,153 @@ struct LaSalle_WidgetsLiveActivity: Widget {
             .keylineTint(Color(hex: resolveSlot(at: Date(), schedule: schedule, state: state, scheduleTypeName: scheduleTypeName)?.colorHex ?? "#3A6FD8"))
         }
     }
+}
+
+// MARK: - Preview
+//
+// The card Settings puts up to show what a Live Activity is. Same layout as
+// the real one, drawn from fixed values: plain Text instead of the live
+// countdown, ProgressView(value:) instead of the timer bar, so nothing moves.
+// A PREVIEW badge on every surface, so nobody mistakes it for their schedule.
+
+private struct PreviewBadge: View {
+    var body: some View {
+        Text("PREVIEW")
+            .font(.system(size: 9, weight: .heavy, design: .rounded))
+            .tracking(0.8)
+            .foregroundStyle(.white.opacity(0.85))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(.white.opacity(0.16), in: Capsule())
+    }
+}
+
+private struct StaticProgressBar: View {
+    let progress: Double
+    let color: Color
+
+    var body: some View {
+        ProgressView(value: progress)
+            .progressViewStyle(.linear)
+            .tint(color)
+            .scaleEffect(x: 1, y: 1.5, anchor: .center)
+    }
+}
+
+private struct PreviewLockScreen: View {
+    let preview: ScheduleActivityAttributes.Preview
+
+    var body: some View {
+        let color = Color(hex: preview.colorHex)
+        VStack(spacing: 10) {
+            HStack(alignment: .center) {
+                HStack(spacing: 8) {
+                    Image("lhs-lightning")
+                        .resizable()
+                        .renderingMode(.template)
+                        .foregroundStyle(color)
+                        .frame(width: 18, height: 18)
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack(spacing: 6) {
+                            Text(preview.className)
+                                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                            PreviewBadge()
+                        }
+                        Text("Next: \(preview.nextClassName)")
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.55))
+                            .lineLimit(1)
+                    }
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("\(preview.minutesLeft) minutes")
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text("until \(preview.bellTime)")
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+            }
+            StaticProgressBar(progress: preview.progress, color: color)
+        }
+        .padding(16)
+        .activityBackgroundTint(Color(hex: "#0D1220"))
+        .activitySystemActionForegroundColor(.white)
+    }
+}
+
+private func previewDynamicIsland(_ preview: ScheduleActivityAttributes.Preview) -> DynamicIsland {
+    let color = Color(hex: preview.colorHex)
+    let arc = ZStack {
+        ProgressView(value: preview.progress)
+            .progressViewStyle(.circular)
+            .tint(color)
+            .frame(width: 18, height: 18)
+        Image("lhs-lightning")
+            .resizable()
+            .renderingMode(.template)
+            .foregroundStyle(color)
+            .frame(width: 8, height: 8)
+    }
+    .padding(2)
+
+    return DynamicIsland {
+        DynamicIslandExpandedRegion(.leading) {
+            HStack(spacing: 6) {
+                Image("lhs-lightning")
+                    .resizable()
+                    .renderingMode(.template)
+                    .foregroundStyle(color)
+                    .frame(width: 14, height: 14)
+                Text(preview.className)
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white).lineLimit(1)
+            }
+            .padding(.leading, 4)
+        }
+        DynamicIslandExpandedRegion(.trailing) {
+            Text("\(preview.minutesLeft) minutes")
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white)
+                .padding(.trailing, 4)
+        }
+        DynamicIslandExpandedRegion(.bottom) {
+            VStack(spacing: 6) {
+                // The badge takes the bell time's place, at the same row
+                // height: anything taller here pushes the progress bar off
+                // the bottom of the island, as on the real card.
+                HStack {
+                    Text("Next: \(preview.nextClassName)")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.6)).lineLimit(1)
+                    Spacer()
+                    PreviewBadge()
+                        .fixedSize()
+                }
+                .frame(height: 14)
+                StaticProgressBar(progress: preview.progress, color: color)
+                    // Inset like the real card's before-school bar: the
+                    // island's corners curve in this low, and a full-width
+                    // bar has its ends sliced off by them.
+                    .padding(.horizontal, 10)
+            }
+            .padding(.horizontal, 4)
+        }
+    } compactLeading: {
+        arc
+    } compactTrailing: {
+        Text("PREVIEW")
+            .font(.system(size: 10, weight: .heavy, design: .rounded))
+            .tracking(0.6)
+            .foregroundStyle(.white.opacity(0.75))
+            .padding(.trailing, 2)
+    } minimal: {
+        arc
+    }
+    .keylineTint(color)
 }
 
 // MARK: - Slot resolver

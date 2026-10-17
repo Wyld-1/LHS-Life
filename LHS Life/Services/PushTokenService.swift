@@ -302,7 +302,7 @@ enum PushTokenService {
             // unregister landing after that registration would delete the new
             // card's record, silently stopping every push for the rest of the
             // day. The replacement is still the device's live registration.
-            let replaced = Activity<ScheduleActivityAttributes>.activities.contains {
+            let replaced = ScheduleActivityAttributes.realActivities.contains {
                 $0.id != activity.id && ($0.activityState == .active || $0.activityState == .stale)
             }
             guard !replaced else { return }

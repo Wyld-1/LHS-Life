@@ -245,17 +245,33 @@ struct SettingsSheetView: View {
 
     @State private var iconService = AppIconService.shared
 
+    /// Only around holidays — or while a holiday icon is still on the Home
+    /// Screen, so Classic is always one tap away. See AppIconService.
     @ViewBuilder
     private var appIconSection: some View {
-        if iconService.canChoose {
-            Section("App Icon") {
-                AppIconPicker(selection: Binding(
+        if iconService.showsSection {
+            Section {
+                AppIconPicker(options: iconService.options, selection: Binding(
                     get: { iconService.current },
                     set: { choice in Task { await iconService.choose(choice) } }
                 ))
                 .padding(.vertical, LS.sm)
+            } header: {
+                Text("App Icon")
+            } footer: {
+                Text(appIconFooter)
             }
         }
+    }
+
+    private var appIconFooter: String {
+        if let (holiday, window) = AppIconService.activeHoliday() {
+            // The window's end is exclusive; the last day is the day before.
+            let lastDay = window.end.addingTimeInterval(-1)
+            let date = lastDay.formatted(.dateTime.month(.wide).day())
+            return "Available through \(date)."
+        }
+        return "More icons for the next holiday."
     }
 
     // MARK: - Alerts
@@ -270,10 +286,16 @@ struct SettingsSheetView: View {
                 }
                 .pickerStyle(.menu)
                 .onChange(of: settings.liveActivityMode) { _, _ in HapticEngine.shared.tick() }
+                LiveActivityPreviewButton()
             } header: {
                 Text("Lock Screen")
             } footer: {
-                Text("Live Activities pin today's bell schedule to your Lock Screen and Dynamic Island, counting down to each bell.")
+                // A preview that couldn't start says why; otherwise, what
+                // Live Activities are. iPad has no Dynamic Island.
+                Text(LiveActivityService.shared.previewFailure
+                     ?? (UIDevice.current.userInterfaceIdiom == .pad
+                         ? "Pin your live bell schedule to your Lock Screen."
+                         : "Pin your live bell schedule to your Lock Screen and Dynamic Island."))
             }
 
             // One row per reminder, each showing its status at a glance. The
@@ -285,23 +307,20 @@ struct SettingsSheetView: View {
                     "Professional Dress",
                     symbol: "briefcase.fill", tint: .lsDestructive,
                     isOn: $settings.professionalDressNotificationsEnabled,
-                    minutes: $settings.professionalDressReminderMinutes,
-                    about: "A reminder before all Professional Dress days."
+                    minutes: $settings.professionalDressReminderMinutes
                 )
                 reminderRow(
                     "Late Start",
                     // The class color picker's purple, so the app has one purple.
                     symbol: "alarm.fill", tint: .lsGold,
                     isOn: $settings.lateStartNotificationsEnabled,
-                    minutes: $settings.lateStartReminderMinutes,
-                    about: "A reminder before all late start days, with the time of your first class."
+                    minutes: $settings.lateStartReminderMinutes
                 )
                 reminderRow(
                     "Home Games",
                     symbol: "sportscourt.fill", tint: .lsBlue,
                     isOn: $settings.homeGameNotificationsEnabled,
-                    minutes: $settings.homeGameReminderMinutes,
-                    about: "A reminder before all home games, with the student section theme when one is posted."
+                    minutes: $settings.homeGameReminderMinutes
                 )
             } header: {
                 Text("Reminders")
@@ -336,26 +355,23 @@ struct SettingsSheetView: View {
         }
     }
 
-    /// A reminder's row: name and icon, with its current setting on the
-    /// right ("9:00 PM, night before", or "Off"). Opens ReminderDetailView.
+    /// A reminder's row: name and icon, with its time on the right ("9:00 PM",
+    /// or "Off"). Just the time: "9:00 PM, night before" wrapped to a second
+    /// line on some rows and not others. Opens ReminderDetailView.
     private func reminderRow(
         _ title: String, symbol: String, tint: Color,
-        isOn: Binding<Bool>, minutes: Binding<Int>, about: String
+        isOn: Binding<Bool>, minutes: Binding<Int>
     ) -> some View {
         NavigationLink {
-            ReminderDetailView(title: title, isOn: isOn, minutes: minutes, about: about)
+            ReminderDetailView(title: title, isOn: isOn, minutes: minutes)
         } label: {
             LabeledContent {
-                Text(isOn.wrappedValue ? ReminderTime.summary(minutes.wrappedValue) : "Off")
+                Text(isOn.wrappedValue ? ReminderTime.time(minutes.wrappedValue) : "Off")
             } label: {
                 Label {
                     Text(title)
                 } icon: {
-                    Image(systemName: symbol)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 28, height: 28)
-                        .background(tint, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    SettingsRowIcon(symbol: symbol, tint: tint)
                 }
             }
         }
@@ -738,28 +754,24 @@ struct ColorPickerPrewarm: View {
 
 // MARK: - Reminder detail
 
-/// One reminder's settings: on/off, when, and what it's for.
+/// One reminder's settings: on/off and when.
 private struct ReminderDetailView: View {
     let title: String
     @Binding var isOn: Bool
     @Binding var minutes: Int
-    let about: String
 
     var body: some View {
         List {
             Section {
                 Toggle("Remind Me", isOn: $isOn)
                     .onChange(of: isOn) { _, _ in HapticEngine.shared.tap() }
-            } footer: {
-                Text(about)
             }
 
             if isOn {
                 Section {
                     DatePicker("Time", selection: timeBinding, displayedComponents: .hourAndMinute)
-                    LabeledContent("Arrives", value: minutes >= 12 * 60 ? "The night before" : "That morning")
-                } footer: {
-                    Text("Pick an evening time to be reminded the night before, or a morning time for that morning.")
+                    // Noon or later reminds the evening before.
+                    LabeledContent("Arrives", value: minutes >= 12 * 60 ? "Night before" : "Morning of")
                 }
             }
         }
@@ -783,12 +795,11 @@ private struct ReminderDetailView: View {
     }
 }
 
-/// "9:00 PM, night before" / "7:30 AM, morning of".
+/// "9:00 PM" from minutes after midnight.
 private enum ReminderTime {
-    static func summary(_ minutes: Int) -> String {
+    static func time(_ minutes: Int) -> String {
         let date = Calendar.current.date(bySettingHour: minutes / 60, minute: minutes % 60,
                                          second: 0, of: Date()) ?? Date()
-        let time = date.formatted(date: .omitted, time: .shortened)
-        return minutes >= 12 * 60 ? "\(time), night before" : "\(time), morning of"
+        return date.formatted(date: .omitted, time: .shortened)
     }
 }

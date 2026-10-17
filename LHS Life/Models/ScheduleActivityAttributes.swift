@@ -25,6 +25,24 @@ struct ScheduleActivityAttributes: ActivityAttributes {
     /// Full day schedule — used by the widget to know all transitions.
     var schedule: [ScheduledPeriod]
 
+    /// Set only on a PREVIEW card — the one Settings and the "couldn't
+    /// start" sheet put up to show what a Live Activity is. The widget draws
+    /// it frozen from these values instead of the schedule: nothing counts
+    /// down, nothing is sent to the server, and it says PREVIEW on it.
+    ///
+    /// Optional so the cards already on students' phones when this ships
+    /// still decode: a missing key reads as nil, a real card.
+    var preview: Preview? = nil
+
+    struct Preview: Codable, Hashable {
+        var className: String
+        var colorHex: String
+        var nextClassName: String
+        var minutesLeft: Int
+        var bellTime: String     // "10:50 AM"
+        var progress: Double     // 0...1, never moves
+    }
+
     // MARK: - Scheduled Period
 
     struct ScheduledPeriod: Codable, Hashable {

@@ -69,8 +69,10 @@ struct CapacityBanner: View {
             .background(Color.orange.opacity(0.14), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .transition(.opacity.combined(with: .move(edge: .top)))
             .sheet(isPresented: $showDetails) {
+                // The sheet scrolls, so a half sheet can never clip the
+                // title the way it did before the copy was cut down.
                 CapacityDetailsSheet(block: liveActivity.capacityBlock)
-                    .presentationDetents([.medium])
+                    .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
             }
         }
@@ -82,42 +84,80 @@ struct CapacityBanner: View {
 struct CapacityDetailsSheet: View {
     let block: LiveActivityService.CapacityBlock?
     @Environment(\.dismiss) private var dismiss
+    @State private var liveActivity = LiveActivityService.shared
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 10) {
-                Image(systemName: "exclamationmark.circle.fill")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(Color.orange)
-                Text("Live Activities Are Full")
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-            }
-
-            Text(CapacityMessage.body(limit: block?.limit))
-                .font(.system(size: 16, design: .rounded))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Spacer(minLength: 0)
-
-            VStack(spacing: 10) {
-                if let url = CapacityMessage.emailURL(to: block?.contact) {
-                    Link(destination: url) {
-                        Text("Ask for an Upgrade")
-                            .font(.system(size: 17, weight: .semibold, design: .rounded))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(Color.lsBlue, in: Capsule())
-                            .foregroundStyle(.white)
-                    }
+        // Scrolls on the smallest phones rather than clipping.
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(Color.orange)
+                    Text("Live Activities Are Full")
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
                 }
-                Button("Not Now") { dismiss() }
-                    .font(.system(size: 17, weight: .medium, design: .rounded))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
+
+                Text(CapacityMessage.body(limit: block?.limit))
+                    .font(.system(size: 16, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 0)
+
+                VStack(spacing: 10) {
+                    // The hook: most students have never seen a Live Activity.
+                    // One look at the card is what makes the upgrade worth asking
+                    // for. It runs on this phone alone, so a full server is no
+                    // obstacle.
+                    if LiveActivityPreviewButton.isAvailable || liveActivity.isPreviewRunning {
+                        Button {
+                            HapticEngine.shared.tick()
+                            if liveActivity.isPreviewRunning {
+                                Task { await liveActivity.endPreview() }
+                            } else {
+                                liveActivity.startPreview()
+                            }
+                        } label: {
+                            Text(liveActivity.isPreviewRunning ? "End Preview" : "Preview Live Activities")
+                                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .foregroundStyle(liveActivity.isPreviewRunning ? Color.lsDestructive : Color.lsBlue)
+                                .overlay(Capsule().strokeBorder(
+                                    liveActivity.isPreviewRunning ? Color.lsDestructive : Color.lsBlue,
+                                    lineWidth: 1.5))
+                        }
+                        .buttonStyle(.plain)
+                        if let hint = LiveActivityPreviewButton.hint {
+                            Text(hint)
+                                .font(.system(size: 13, design: .rounded))
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    if let url = CapacityMessage.emailURL(to: block?.contact) {
+                        Link(destination: url) {
+                            Text("Ask for an Upgrade")
+                                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(Color.lsBlue, in: Capsule())
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    Button("Not Now") { dismiss() }
+                        .font(.system(size: 17, weight: .medium, design: .rounded))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                }
             }
+            .padding(LS.lg)
+            // Room under "Not Now" so it doesn't sit on the sheet's bottom
+            // edge at half height.
+            .padding(.bottom, LS.lg)
         }
-        .padding(LS.lg)
     }
 }
 
@@ -127,13 +167,11 @@ struct CapacityDetailsSheet: View {
 /// alert and the details sheet so the two can't drift apart.
 enum CapacityMessage {
     static func body(limit: Int?) -> String {
-        let count = limit.map(String.init) ?? "a limited number of"
+        let full = limit.map { "The school's server is full at \($0) devices." } ?? "The school's server is full."
         return """
-        Live Activities are first come, first served, and the school's server currently supports \(count) devices. Yours couldn't get a spot.
+        \(full) Everything else in LHS Life works normally.
 
-        Everything else in LHS Life works normally — this only affects the live bell schedule on your Lock Screen.
-
-        If you'd like Live Activities, ask the principal to upgrade the server.
+        Want Live Activities? Ask the principal to upgrade the server.
         """
     }
 
