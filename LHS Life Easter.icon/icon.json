@@ -1,0 +1,69 @@
+{
+  "fill" : {
+    "automatic-gradient" : "display-p3:0.62000,0.50000,0.86000,1.00000"
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "glass-specializations" : [
+            {
+              "value" : true
+            },
+            {
+              "appearance" : "dark",
+              "value" : true
+            },
+            {
+              "appearance" : "tinted",
+              "value" : false
+            }
+          ],
+          "image-name" : "Lighting nobg.png",
+          "name" : "Lighting nobg",
+          "position" : {
+            "scale" : 0.6,
+            "translation-in-points" : [
+              1.5000000000000568,
+              -1.2000000000000455
+            ]
+          }
+        }
+      ],
+      "shadow" : {
+        "kind" : "layer-color",
+        "opacity" : 0.5
+      },
+      "specular-specializations" : [
+        {
+          "value" : true
+        },
+        {
+          "appearance" : "tinted",
+          "value" : true
+        }
+      ],
+      "translucency-specializations" : [
+        {
+          "value" : {
+            "enabled" : false,
+            "value" : 0.5
+          }
+        },
+        {
+          "appearance" : "tinted",
+          "value" : {
+            "enabled" : true,
+            "value" : 0.5
+          }
+        }
+      ]
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}

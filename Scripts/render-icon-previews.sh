@@ -22,4 +22,7 @@ render() {   # render <.icon name> <imageset name>
 }
 
 render "LHS Life Icon"      IconPreviewClassic
-render "LHS Life Halloween" IconPreviewHalloween
+render "LHS Life Halloween"    IconPreviewHalloween
+render "LHS Life Thanksgiving" IconPreviewThanksgiving
+render "LHS Life Christmas"    IconPreviewChristmas
+render "LHS Life Easter"       IconPreviewEaster

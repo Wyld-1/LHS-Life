@@ -2,12 +2,13 @@
 //  AppIconCard.swift
 //  LHS Life
 //
-//  The seasonal-icon choice: a pair of icon tiles, shown once as a card that
-//  slides up on the first open of the season, and kept in Settings after.
+//  The holiday-icon choice: a row of icon tiles, shown once as a card that
+//  slides up on the first open of a holiday window, and in Settings for the
+//  rest of it (see AppIconService for the windows).
 //
-//  The seasonal icon is already on the Home Screen when this appears — the
-//  update put it there. So the card isn't asking permission; it's saying
-//  "this is new, and here's how to undo it", with the seasonal icon selected.
+//  The card arrives with the holiday icon selected, and its button says what
+//  it will do ("Use Halloween Icon"), so one tap dresses the app up and
+//  nothing changes without the student asking.
 //
 
 import SwiftUI
@@ -15,26 +16,25 @@ import SwiftUI
 // MARK: - Tiles
 
 struct AppIconPicker: View {
-    @Binding var selection: AppIconChoice
+    let options: [AppIconService.Icon]
+    @Binding var selection: AppIconService.Icon
 
     var body: some View {
         HStack(spacing: LS.lg) {
-            tile(.classic, name: "Classic", asset: AppIconService.classicPreviewAsset)
-            if let season = AppIconService.season {
-                tile(.seasonal, name: season.name, asset: season.previewAsset)
-            }
+            ForEach(options) { tile($0) }
         }
         .frame(maxWidth: .infinity)
     }
 
-    private func tile(_ choice: AppIconChoice, name: String, asset: String) -> some View {
-        let isSelected = selection == choice
+    private func tile(_ icon: AppIconService.Icon) -> some View {
+        let isSelected = selection == icon
+        let name = icon.name
         return Button {
             HapticEngine.shared.tick()
-            withAnimation(.lsSnappy) { selection = choice }
+            withAnimation(.lsSnappy) { selection = icon }
         } label: {
             VStack(spacing: LS.sm) {
-                Image(asset)
+                Image(icon.previewAsset)
                     .resizable()
                     .scaledToFit()
                     .frame(width: 64, height: 64)
@@ -61,16 +61,28 @@ struct AppIconPicker: View {
 // MARK: - First-open card
 
 struct AppIconIntroCard: View {
-    let onDone: (AppIconChoice) -> Void
-    @State private var selection = AppIconService.shared.current
+    let onDone: (AppIconService.Icon) -> Void
 
-    /// Someone who picked Classic last season is still on Classic. They get
-    /// an offer, not an announcement that something already changed.
+    private let service = AppIconService.shared
+    private let holiday = AppIconService.activeHoliday()?.holiday.icon
+    @State private var selection: AppIconService.Icon
+
+    init(onDone: @escaping (AppIconService.Icon) -> Void) {
+        self.onDone = onDone
+        _selection = State(initialValue: AppIconService.activeHoliday()?.holiday.icon
+                                        ?? AppIconService.shared.current)
+    }
+
     private var title: String {
-        let name = AppIconService.season?.name ?? ""
-        return AppIconService.shared.current == .seasonal
-            ? "LHS Life Dressed Up for \(name)"
-            : "A \(name) Icon Is Here"
+        guard let holiday else { return "App Icon" }
+        return service.current == holiday
+            ? "Dressed Up for \(holiday.name)"
+            : "New \(holiday.name) Icon"
+    }
+
+    /// Says what the tap will do, so nothing changes by surprise.
+    private var buttonTitle: String {
+        selection == service.current ? "Done" : "Use \(selection.name) Icon"
     }
 
     var body: some View {
@@ -79,20 +91,20 @@ struct AppIconIntroCard: View {
                 Text(title)
                     .font(.lsHeadline)
                     .multilineTextAlignment(.center)
-                Text("Pick the icon you'd like on your Home Screen. You can change it anytime in Settings.")
+                Text("Change anytime in Settings.")
                     .font(.system(size: 14, design: .rounded))
                     .foregroundStyle(Color.lsSecondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            AppIconPicker(selection: $selection)
+            AppIconPicker(options: service.options, selection: $selection)
                 .padding(.vertical, LS.xs)
 
             Button {
                 onDone(selection)
             } label: {
-                Text("Done")
+                Text(buttonTitle)
                     .font(.system(size: 17, weight: .semibold, design: .rounded))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
@@ -116,8 +128,7 @@ struct AppIconIntroCard: View {
 }
 
 /// Places the intro card over the whole app: a light scrim, the card sliding
-/// up from the bottom. Tapping the scrim keeps whatever is selected now —
-/// the seasonal icon, unless they already chose Classic.
+/// up from the bottom. Tapping the scrim keeps the icon they have now.
 struct AppIconIntroOverlay: ViewModifier {
     @Binding var isPresented: Bool
 
@@ -137,7 +148,7 @@ struct AppIconIntroOverlay: ViewModifier {
         }
     }
 
-    private func finish(_ choice: AppIconChoice) {
+    private func finish(_ choice: AppIconService.Icon) {
         AppIconService.shared.markIntroduced()
         isPresented = false
         // After the card is gone, so iOS's "You have changed the icon" alert
