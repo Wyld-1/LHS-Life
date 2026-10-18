@@ -2,7 +2,7 @@
 //  AppIconService.swift
 //  LHS Life
 //
-//  Holiday app icons — Halloween, Thanksgiving, Christmas and Easter.
+//  Holiday app icons — Halloween, Thanksgiving and Christmas.
 //
 //  Every icon ships in the app; nothing waits on an App Store update. The
 //  classic icon is the app's PRIMARY icon, and each holiday icon is an
@@ -86,18 +86,6 @@ final class AppIconService {
             // December 1 through Epiphany, January 6.
             window: { year, cal in
                 interval(cal, from: (year, 12, 1), to: (year + 1, 1, 7))
-            }
-        ),
-        Holiday(
-            icon: Icon(id: "easter", name: "Easter",
-                       alternateName: "LHS Life Easter", previewAsset: "IconPreviewEaster"),
-            // Palm Sunday through Divine Mercy Sunday, the week after Easter.
-            window: { year, cal in
-                guard let easter = easterSunday(year: year, calendar: cal),
-                      let start = cal.date(byAdding: .day, value: -7, to: easter),
-                      let end = cal.date(byAdding: .day, value: 8, to: easter)
-                else { return nil }
-                return DateInterval(start: start, end: end)
             }
         ),
     ]
@@ -195,23 +183,5 @@ final class AppIconService {
               let end = cal.date(from: DateComponents(year: b.0, month: b.1, day: b.2))
         else { return nil }
         return DateInterval(start: start, end: end)
-    }
-
-    /// Western (Gregorian) Easter Sunday — the anonymous Gregorian algorithm
-    /// ("Meeus/Jones/Butcher"). Exact for every year of the Gregorian
-    /// calendar, so no table of dates to maintain.
-    static func easterSunday(year: Int, calendar: Calendar) -> Date? {
-        let a = year % 19
-        let b = year / 100, c = year % 100
-        let d = b / 4, e = b % 4
-        let f = (b + 8) / 25
-        let g = (b - f + 1) / 3
-        let h = (19 * a + b - d - g + 15) % 30
-        let i = c / 4, k = c % 4
-        let l = (32 + 2 * e + 2 * i - h - k) % 7
-        let m = (a + 11 * h + 22 * l) / 451
-        let month = (h + l - 7 * m + 114) / 31
-        let day = (h + l - 7 * m + 114) % 31 + 1
-        return calendar.date(from: DateComponents(year: year, month: month, day: day))
     }
 }

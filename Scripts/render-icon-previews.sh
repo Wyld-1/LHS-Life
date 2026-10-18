@@ -26,7 +26,6 @@ ICONS=(
   "LHS Life Halloween:IconPreviewHalloween"
   "LHS Life Thanksgiving:IconPreviewThanksgiving"
   "LHS Life Christmas:IconPreviewChristmas"
-  "LHS Life Easter:IconPreviewEaster"
 )
 
 # Xcode's own copy of Icon Composer: the one building the app.
