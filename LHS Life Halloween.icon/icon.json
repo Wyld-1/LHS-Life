@@ -1,100 +1,86 @@
 {
-  "fill" : {
-    "automatic-gradient" : "display-p3:0.04852,0.08496,0.68311,1.00000"
+  "fill": {
+    "automatic-gradient": "srgb:1.00000,0.35484,0.00000,1.00000"
   },
-  "groups" : [
+  "groups": [
     {
-      "blur-material" : null,
-      "layers" : [
+      "blur-material": null,
+      "layers": [
         {
-          "image-name" : "pumpkin 2_4x.png",
-          "name" : "pumpkin 2_4x",
-          "position" : {
-            "scale" : 0.42,
-            "translation-in-points" : [
-              238,
-              216
+          "image-name": "pumpkin 2_4x.png",
+          "name": "pumpkin 2_4x",
+          "position": {
+            "scale": 0.49,
+            "translation-in-points": [
+              -231.51999999999998,
+              248.71000000000015
             ]
           }
         },
         {
-          "blend-mode" : "normal",
-          "glass" : true,
-          "hidden" : true,
-          "image-name" : "pumpkin images_4x 2.png",
-          "name" : "pumpkin images_4x 2",
-          "position" : {
-            "scale" : 0.38,
-            "translation-in-points" : [
-              -113,
-              261
-            ]
-          }
-        },
-        {
-          "glass-specializations" : [
+          "glass-specializations": [
             {
-              "value" : true
+              "value": true
             },
             {
-              "appearance" : "dark",
-              "value" : true
+              "appearance": "dark",
+              "value": true
             },
             {
-              "appearance" : "tinted",
-              "value" : false
+              "appearance": "tinted",
+              "value": false
             }
           ],
-          "image-name" : "Lighting nobg.png",
-          "name" : "Lighting nobg",
-          "position" : {
-            "scale" : 0.6,
-            "translation-in-points" : [
+          "image-name": "Lighting nobg.png",
+          "name": "Lighting nobg",
+          "position": {
+            "scale": 0.6,
+            "translation-in-points": [
               1.5000000000000568,
               -1.2000000000000455
             ]
           }
         }
       ],
-      "refractivity" : {
-        "depth" : 0,
-        "enabled" : false,
-        "strength" : 0.3122265625
+      "refractivity": {
+        "depth": 0,
+        "enabled": false,
+        "strength": 0.3122265625
       },
-      "shadow" : {
-        "kind" : "layer-color",
-        "opacity" : 0.5
+      "shadow": {
+        "kind": "layer-color",
+        "opacity": 0.5
       },
-      "specular-specializations" : [
+      "specular-specializations": [
         {
-          "value" : true
+          "value": true
         },
         {
-          "appearance" : "tinted",
-          "value" : true
+          "appearance": "tinted",
+          "value": true
         }
       ],
-      "translucency-specializations" : [
+      "translucency-specializations": [
         {
-          "value" : {
-            "enabled" : false,
-            "value" : 0.5
+          "value": {
+            "enabled": false,
+            "value": 0.5
           }
         },
         {
-          "appearance" : "tinted",
-          "value" : {
-            "enabled" : true,
-            "value" : 0.5
+          "appearance": "tinted",
+          "value": {
+            "enabled": true,
+            "value": 0.5
           }
         }
       ]
     }
   ],
-  "supported-platforms" : {
-    "circles" : [
+  "supported-platforms": {
+    "circles": [
       "watchOS"
     ],
-    "squares" : "shared"
+    "squares": "shared"
   }
 }

@@ -1,10 +1,21 @@
 {
   "fill" : {
-    "automatic-gradient" : "display-p3:0.04000,0.38000,0.17000,1.00000"
+    "automatic-gradient" : "extended-gray:1.00000,1.00000"
   },
   "groups" : [
     {
       "layers" : [
+        {
+          "image-name" : "wreath.png",
+          "name" : "wreath",
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              85,
+              -85
+            ]
+          }
+        },
         {
           "glass-specializations" : [
             {
