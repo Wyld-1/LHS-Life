@@ -158,6 +158,17 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		231F306F2FB04A0F00F58221 /* App Icons */ = {
+			isa = PBXGroup;
+			children = (
+				231F30642FB04A0F00F58221 /* LHS Life Icon.icon */,
+				231F30662FB04A0F00F58221 /* LHS Life Halloween.icon */,
+				231F30682FB04A0F00F58221 /* LHS Life Thanksgiving.icon */,
+				231F306A2FB04A0F00F58221 /* LHS Life Christmas.icon */,
+			);
+			path = "App Icons";
+			sourceTree = "<group>";
+		};
 		23E395982FA5399800574B85 = {
 			isa = PBXGroup;
 			children = (
@@ -167,10 +178,7 @@
 				23E3960A2FA57AE300574B85 /* LaSalle Widgets */,
 				23E396052FA57AE200574B85 /* Frameworks */,
 				23E395A22FA5399800574B85 /* Products */,
-				231F30642FB04A0F00F58221 /* LHS Life Icon.icon */,
-				231F306A2FB04A0F00F58221 /* LHS Life Christmas.icon */,
-				231F30682FB04A0F00F58221 /* LHS Life Thanksgiving.icon */,
-				231F30662FB04A0F00F58221 /* LHS Life Halloween.icon */,
+				231F306F2FB04A0F00F58221 /* App Icons */,
 				2335D8672FBE7E470054E1EC /* APNS Worker.json */,
 			);
 			sourceTree = "<group>";
@@ -387,10 +395,10 @@
 			);
 			inputPaths = (
 				"$(SRCROOT)/Scripts/render-icon-previews.sh",
-				"$(SRCROOT)/LHS Life Icon.icon",
-				"$(SRCROOT)/LHS Life Halloween.icon",
-				"$(SRCROOT)/LHS Life Thanksgiving.icon",
-				"$(SRCROOT)/LHS Life Christmas.icon",
+				"$(SRCROOT)/App Icons/LHS Life Icon.icon",
+				"$(SRCROOT)/App Icons/LHS Life Halloween.icon",
+				"$(SRCROOT)/App Icons/LHS Life Thanksgiving.icon",
+				"$(SRCROOT)/App Icons/LHS Life Christmas.icon",
 			);
 			name = "Render Icon Previews";
 			outputFileListPaths = (

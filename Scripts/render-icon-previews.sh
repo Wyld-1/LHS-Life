@@ -15,8 +15,9 @@
 #
 #   ./Scripts/render-icon-previews.sh --all
 #
-# ADDING A HOLIDAY: add a line to ICONS below, and add the .icon folder and
-# its preview PNG to the build phase's input and output files.
+# ADDING A HOLIDAY: put its .icon in App Icons/, add a line to ICONS below,
+# and add the .icon folder and its preview PNG to the build phase's input and
+# output files.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -31,16 +32,17 @@ ICONS=(
 # Xcode's own copy of Icon Composer: the one building the app.
 DEV="${DEVELOPER_DIR:-$(xcode-select -p)}"
 ICTOOL="$DEV/../Applications/Icon Composer.app/Contents/Executables/ictool"
+ICON_DIR="App Icons"
 ASSETS="LHS Life/IconPreviews.xcassets"
 
 for pair in "${ICONS[@]}"; do
   icon="${pair%%:*}"; set="${pair#*:}"
   out="$ASSETS/$set.imageset/$set.png"
   # Up to date: a preview exists and nothing in the .icon is newer.
-  if [[ "${1:-}" != "--all" && -f "$out" && -z "$(find "$icon.icon" -newer "$out" -print -quit)" ]]; then
+  if [[ "${1:-}" != "--all" && -f "$out" && -z "$(find "$ICON_DIR/$icon.icon" -newer "$out" -print -quit)" ]]; then
     continue
   fi
-  "$ICTOOL" "$icon.icon" --export-image --output-file "$out" \
+  "$ICTOOL" "$ICON_DIR/$icon.icon" --export-image --output-file "$out" \
     --platform iOS --rendition Default --width 60 --height 60 --scale 3 >/dev/null
   echo "Rendered $icon → $out"
 done

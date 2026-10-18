@@ -88,6 +88,7 @@ A Live Activity can't wake itself up at 8:50 to say "next period". So when you t
 | `APNS Worker.json` | The Cloudflare Worker (it's JavaScript, despite the name) — its header explains every page and variable |
 | `LHS LifeTests/` | Unit tests for schedule parsing and the schedule engine |
 | `Docs/` | Architecture notes, requirements and test plans |
+| `App Icons/` | The Icon Composer files for Classic and the holiday icons, plus their source artwork |
 | `App Store Content/` | App Store screenshots, demo video and support images |
 | `Marketing/` | Posters and promo video |
 

@@ -93,6 +93,10 @@ LHS Life/
 ├── Assets.xcassets            shared with the widget extension
 ├── IconPreviews.xcassets      app-only; GENERATED at build time (see §10)
 └── Resources/PRIVACY.md       shown in the app and linked from the App Store
+
+App Icons/                     the four Icon Composer files (Classic + holidays)
+└── Artwork/                   source art (pumpkin, poinsettia, cornucopia); not built
+Scripts/render-icon-previews.sh  renders the in-app icon pictures (build phase)
 ```
 
 `[shared]` files compile into both the app and the widget extension (target
@@ -328,7 +332,7 @@ app-only `IconPreviews.xcassets` (writing to the shared `Assets.xcassets` would
 make the app and widget targets depend on each other), and script sandboxing is
 off for the app target so it can read inside `.icon` folders.
 
-**Adding a holiday:** the `.icon` file in the app target, its name in the
+**Adding a holiday:** the `.icon` file in `App Icons/` and the app target, its name in the
 alternate list, a line in the script's `ICONS` and the phase's inputs and
 outputs, and an entry in `AppIconService.holidays`.
 
