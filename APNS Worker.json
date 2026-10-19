@@ -1,58 +1,58 @@
 /**
  * LHS Life — Cloudflare Worker
  *
- * Pushes the bell schedule to students' Lock Screens (Live Activities) at each
- * period change during the school day.
+ * Moves the Live Activity on students' Lock Screens to the next class at each
+ * bell, Monday to Friday.
+ *
+ * ── How it works: broadcast (iOS 18, app builds after 1.2) ─────────────────
+ * Each phone posts its day's bell times to /bells. Phones on the same schedule
+ * post the same list, so the Worker keeps each DISTINCT schedule once — no
+ * device ID, no push token, nothing about the phone. A cron runs every minute,
+ * Mon–Fri 6 AM–5 PM Pacific. At each bell in the union of today's schedules it
+ * sends ONE push to Apple's broadcast channel ("the bell at minute X just
+ * rang"), to production and sandbox both, and Apple delivers it to every phone
+ * listening. Each Live Activity carries its own day's schedule and works out
+ * its own class, so one message serves every schedule. After the last bell one
+ * "end" push dismisses them all. 40 phones or 1,400 cost the same. How many
+ * phones are listening: Apple's Push Notifications Console → Overview →
+ * subscriptions — this Worker never knows.
+ *
+ * ── Legacy: one push per phone (v1.2 transition — remove after students update)
+ * v1.2 registers a push token per phone (/register) and the cron pushes each
+ * phone at its own bells. Broadcast goes first in every run and legacy gets the
+ * requests left over, which on the Free plan is about 35 phones. The device ID
+ * it stores is a random number the app invents; it identifies no student.
  *
  * ── Pages you can open in a browser ─────────────────────────────────────────
- * Sign-in: any username, and the password is this Worker's CLIENT_SECRET
- * (Cloudflare → Worker → Settings → Variables). /health needs no sign-in.
+ * Sign-in: any username; the password is CLIENT_SECRET. /health needs none.
+ *   /health   Alive? Password set? Did the latest bell's broadcast go out?
+ *             Prints "broadcast: ok, last 08:55" or "broadcast: FAILED …" —
+ *             point an uptime monitor at it and alert on FAILED.
+ *   /status   Start here. broadcast: today's bells, how many schedules were
+ *             reported, what was sent when, and Apple's last answer. issues:
+ *             problems phones reported today. devices: legacy v1.2 phones.
+ *             ?full=1 adds each schedule's times, the past week of problems,
+ *             and every legacy phone's bell times.
+ *   /test-broadcast?env=sandbox|production|both&minutes=480&end=1
+ *             Sends one broadcast now and says in plain English what Apple
+ *             answered. Default sandbox (Xcode builds). production reaches
+ *             every student; ending them there also needs &confirm=yes.
+ *   /test-push   The same for one legacy phone. ?deviceId=… picks one.
+ *   /purge?confirm=yes   Dismisses and deletes every legacy registration.
+ *   /rebuild  Legacy recovery only: rebuilds the device list. Rarely needed.
  *
- *   /health   Alive? Password configured? Start here.
- *   /status   Start here for "is something wrong?". Two parts:
- *               issues  — what the app reports as broken TODAY, each problem
- *                         once, with how many phones hit it.
- *                         devicesReportingToday: 0 means all clear. Three
- *                         phones is somebody's wifi; 180 is an outage, and
- *                         "example" names what broke.
- *               devices — every phone signed up, with an anonymous ID, app
- *                         build, iOS version and bells expected, plus the
- *                         device limit and slots left. When slots run out the
- *                         app tells students the server is full and points
- *                         them at CAPACITY_CONTACT; raising the limit means
- *                         the Workers Paid plan plus SUBREQUEST_BUDGET (below).
- *   /status?full=1   Shows the past week of problems with the phones behind
- *             each, and every phone's actual bell times ("08:00", "08:55"…) —
- *             the view that answers "should a push have gone out at 8:00?"
- *   /test-push   Sends one update now and says in plain English what Apple
- *             answered, so you know within seconds whether the problem is
- *             Apple's keys, this Worker, or the phone. ?deviceId=… picks one.
- *   /purge?confirm=yes   Clears every Lock Screen card and every
- *             registration. Phones sign back up by themselves the next day.
- *   /rebuild  Recovery only: rebuilds the device list. Rarely needed.
+ * POST /bells, /register, /report and DELETE /unregister belong to the app.
  *
- * POST /register, /unregister and /report belong to the app, not to people.
- * Nothing here identifies a student — the device ID is a random number the
- * app invents, and it changes if the app is reset.
- *
- * ── How it works ────────────────────────────────────────────────────────────
- * Phones register the bell times they expect. A cron runs every minute,
- * Mon–Fri 6 AM–5 PM Pacific, pushes an update within 2 minutes of each of
- * those times, and a dismissal at the last bell. A new phone joins within
- * about 2 minutes; phones Apple reports as dead are dropped automatically.
- *
- * In KV: registry:devices, every record in one blob, written only by the cron
- * (why: see readRegistry); token:{deviceId}, written only by that device;
- * issue:{day}:{kind}:{subject}:{deviceId}, a reported problem whose details
- * live in KV metadata and which expires by itself after 7 days.
+ * In KV: bells:{day}:{hash}, one per distinct schedule, its minutes in the
+ * metadata; broadcast:{day}, what was sent and Apple's answers; issue:…, a
+ * reported problem (7 days). The first two expire after 3 days. Legacy:
+ * registry:devices, token:{deviceId}, capacity:observed.
  *
  * Variables: APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID, APNS_PRIVATE_KEY (the
  * .p8 file's full contents) from Apple Developer; CLIENT_SECRET, matching
- * AppConstants.workerSecret in the iOS app and doubling as the password
- * above; TOKENS, the KV binding. Optional: SUBREQUEST_BUDGET, the requests
- * one bell may spend (default 45, the Free plan's ceiling, which serves 40
- * phones) — on the Paid plan set it to ~900 and the phone limit rises to
- * match by itself; MAX_DEVICES, to hold the phone limit down deliberately.
+ * AppConstants.workerSecret in the app and doubling as the password above;
+ * TOKENS, the KV binding. Optional, legacy only: SUBREQUEST_BUDGET (default
+ * 45, the Free plan's ceiling; ~900 on Paid), MAX_DEVICES (hold the cap down).
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -68,18 +68,23 @@ export default {
     // /health is the only open route — it says nothing about anyone. Every
     // other route needs the shared secret (see requireAuth).
     if (request.method === "GET" && url.pathname === "/health") {
-      // Also reports whether auth is wired up. No secret is exposed — just
-      // whether CLIENT_SECRET exists — so this can stay open, and it's the
-      // first thing to check when the sign-in box refuses to appear.
-      const configured = env.CLIENT_SECRET ? "configured" : "NOT CONFIGURED";
-      return new Response(`OK\nauth: ${configured}\n`, {
-        status: 200,
-        headers: { "content-type": "text/plain; charset=utf-8" },
-      });
+      return handleHealth(env);
     }
 
     const denied = requireAuth(request, env);
     if (denied) return denied;
+
+    // The app reports its day's bell times. See handleBells.
+    if (request.method === "POST" && url.pathname === "/bells") {
+      return handleBells(request, env);
+    }
+
+    // Diagnostics: send ONE broadcast now and report what Apple said.
+    if (request.method === "GET" && url.pathname === "/test-broadcast") {
+      return handleTestBroadcast(env, url);
+    }
+
+    // ── Legacy routes below: v1.2 transition — remove after students update.
 
     if (request.method === "POST" && url.pathname === "/register") {
       return handleRegister(request, env);
@@ -124,7 +129,8 @@ export default {
       return handleReport(request, env);
     }
 
-    // Diagnostics: how many devices are registered, without exposing tokens.
+    // Diagnostics: broadcast first, then problem reports, then the legacy
+    // device list (without exposing tokens).
     if (request.method === "GET" && url.pathname === "/status") {
       const devices = await readRegistry(env);
       // ?full=1 prints the actual bell times a device is registered for,
@@ -132,12 +138,15 @@ export default {
       // 8:00 transition even stored?" when a push doesn't land — a count of
       // 15 looks identical whether the times are right or nonsense.
       const full = url.searchParams.get("full") === "1";
+      const broadcast = await readBroadcastStatus(env, full);
       const { limit: capacity, source } = await effectiveLimit(env);
       const observed = await readCapacity(env);
       const issues = await readIssues(env, full);
       return new Response(JSON.stringify({
-        deviceCount: devices.length,
+        broadcast,
         issues,
+        legacy: "Everything below is v1.2 phones on one-push-per-phone (transition — remove after students update).",
+        deviceCount: devices.length,
         limit: capacity,
         limitSource: source,
         slotsFree: Math.max(0, capacity - devices.length),
@@ -161,11 +170,15 @@ export default {
     return new Response("LHS Life Push Worker", { status: 200 });
   },
 
-  // Cron handler — fires every minute, pushes at period transitions
+  // Cron handler — fires every minute: broadcast first, then legacy pushes
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(runPushCycle(env));
+    ctx.waitUntil(runCron(env));
   },
 };
+
+// ── Legacy capacity (v1.2 transition — remove after students update) ───────
+// Everything from here to the Auth section only limits the one-push-per-phone
+// path. Broadcast has no per-phone cost, so none of it applies to broadcast.
 
 /**
  * Who to contact about raising the device limit. Sent to the app so the
@@ -190,10 +203,11 @@ const CAPACITY_CONTACT = "phudson@lasalleyakima.org";
  * HOW THE LIMIT IS CHOSEN (effectiveLimit):
  *   1. MAX_DEVICES, if set — a human holding the number down deliberately.
  *   2. Otherwise, worked out from SUBREQUEST_BUDGET: every phone costs about
- *      one subrequest per bell, plus a small fixed overhead per run. On the
- *      Free plan's default of 45 that is 40 phones; set SUBREQUEST_BUDGET to
- *      900 on the Paid plan and it is ~895. That one variable is all an
- *      upgrade needs.
+ *      one subrequest per bell, plus a small fixed overhead per run, plus
+ *      what the broadcast spends first (BROADCAST_RUN_COST). On the Free
+ *      plan's default of 45 that is 35 phones; set SUBREQUEST_BUDGET to 900
+ *      on the Paid plan and it is ~890. That one variable is all an upgrade
+ *      needs.
  *   3. Capped by a wall measured under the current budget, if there is one.
  */
 const CAPACITY_KEY = "capacity:observed";
@@ -214,6 +228,14 @@ const CAPACITY_WRITE_RESERVE = 3;
  * does, that run stops short and records a wall, which caps the limit below.
  */
 const RUN_OVERHEAD = 2;
+/**
+ * The most a run's broadcast spends before legacy pushing starts: read
+ * broadcast:{day}, list today's schedules, two channel pushes (update OR end,
+ * never both), one write. The cron broadcasts first and shares one counter,
+ * so legacy pushing gets whatever is left; this keeps the legacy phone limit
+ * honest about that.
+ */
+const BROADCAST_RUN_COST = 5;
 
 function subrequestBudget(env) {
   return Number(env.SUBREQUEST_BUDGET ?? DEFAULT_SUBREQUEST_BUDGET);
@@ -221,7 +243,7 @@ function subrequestBudget(env) {
 
 /** How many phones one bell can reach on this budget: one push each. */
 function budgetLimit(env) {
-  return Math.max(1, subrequestBudget(env) - CAPACITY_WRITE_RESERVE - RUN_OVERHEAD);
+  return Math.max(1, subrequestBudget(env) - CAPACITY_WRITE_RESERVE - RUN_OVERHEAD - BROADCAST_RUN_COST);
 }
 
 async function readCapacity(env) {
@@ -363,7 +385,604 @@ function timingSafeEqual(a, b) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MARK: - Token registration
+// MARK: - Broadcast
+//
+// iOS 18 broadcast channels: ONE push per bell to a channel, and Apple
+// delivers it to every phone whose Live Activity subscribed to that channel.
+// The push says only "the bell at minute X just rang"; each Live Activity
+// carries its own day's schedule and works out its own class, so a single
+// message serves students on different schedules.
+//
+// WHAT IS STORED — no device data at all:
+//
+//   bells:{day}:{hash}   one per DISTINCT schedule, not per phone. Every
+//                        phone on the Regular schedule posts the same list,
+//                        lands on the same key, and costs no write after the
+//                        first. The minutes ride in KV metadata so the cron
+//                        reads them all from one list() and no get()s.
+//   broadcast:{day}      one record: today's union of bells (as of the last
+//                        listing), which bells went out and when, and what
+//                        Apple answered on each channel. Written only when
+//                        something changes — about one write per bell.
+//
+// Both expire after 3 days on their own.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Apple's broadcast channels for this app, one per APNs environment. Not
+ * secrets: a channel ID is useless without our signing key, and the app ships
+ * them too (AppConstants.broadcastChannel*). App Store and TestFlight builds
+ * listen on production; builds run from Xcode listen on sandbox. Every bell
+ * goes to both, so both kinds of build keep working.
+ *
+ * Created once with Apple's channel-management API; they do not expire. If
+ * one is ever deleted or recreated, update it here AND in the app.
+ */
+const BROADCAST_BUNDLE_ID = "com.lasalleyakima.lhslife";
+const BROADCAST_CHANNELS = {
+  production: "JJ+34svREfEAAGpsYJ+BOQ==",
+  sandbox:    "oikr1cvOEfEAAPYv+t4beg==",
+};
+const BROADCAST_HOSTS = {
+  production: "api.push.apple.com",
+  sandbox:    "api.sandbox.push.apple.com",
+};
+
+/** Keys under bells: and broadcast: expire on their own after this. */
+const BROADCAST_TTL_SECONDS = 3 * 24 * 60 * 60;
+
+/**
+ * Most distinct schedules accepted for one day. A school has a handful
+ * (Regular, Late Start, Assembly, finals…); 30 is far past honest use and
+ * bounds what a leaked secret could make the cron do.
+ */
+const MAX_SCHEDULES_PER_DAY = 30;
+
+/** Bell times accepted from the app: 5:00 AM to 8:00 PM, at most 40 a day. */
+const MIN_BELL_MINUTE = 300;
+const MAX_BELL_MINUTE = 1200;
+const MAX_BELLS_PER_SCHEDULE = 40;
+
+/**
+ * How late a bell may still go out. A cron run can be skipped or late; a bell
+ * up to 2 minutes old is still worth sending, an older one is not — by then
+ * the card has already moved on by its own clock.
+ */
+const BROADCAST_CATCH_UP_MINUTES = 2;
+
+/** The cron's window (see runCron). Bells outside it are never broadcast. */
+const CRON_FIRST_MINUTE = 6 * 60;
+const CRON_END_MINUTE = 17 * 60;
+
+/** How many failed "end" attempts before giving up for the day. */
+const MAX_END_ATTEMPTS = 3;
+
+// ── POST /bells ──────────────────────────────────────────────────────────────
+
+/**
+ * POST /bells — the app reports its day's bell times.
+ *
+ * Body: { day: "yyyy-MM-dd" (Pacific), minutes: [Int], environment? }
+ * minutes are every start and end of that phone's day, as minutes since
+ * Pacific midnight. environment is accepted and ignored: every bell goes to
+ * both channels anyway.
+ *
+ * Repeats are the normal case — every phone on the Regular schedule sends
+ * the same list, and a phone re-sends when its card restarts — so a schedule
+ * already on file costs one KV read and no write. That is what keeps a whole
+ * school inside the free 1,000 writes a day: a handful of writes, not one per
+ * phone.
+ */
+async function handleBells(request, env) {
+  let body;
+  try { body = await request.json(); } catch {
+    return json({ error: "Bad JSON" }, 400);
+  }
+  if (!body || typeof body !== "object") return json({ error: "Expected a JSON object." }, 400);
+  if (!env.TOKENS) return json({ error: "KV binding 'TOKENS' is not configured." }, 500);
+
+  const { day, minutes } = body;
+  const today = nowInPT().iso;
+  const tomorrow = addDaysISO(today, 1);
+  if (day !== today && day !== tomorrow) {
+    return json({ error: `day must be today (${today}) or tomorrow (${tomorrow}), Pacific time.` }, 400);
+  }
+
+  if (!Array.isArray(minutes) || minutes.length === 0 || minutes.length > MAX_BELLS_PER_SCHEDULE * 2) {
+    return json({ error: `minutes must be a list of 1–${MAX_BELLS_PER_SCHEDULE} bell times.` }, 400);
+  }
+  const bells = cleanBells(minutes);
+  if (!bells) {
+    return json({
+      error: `Every bell must be a whole number of minutes since midnight between ${MIN_BELL_MINUTE} (${clockTime(MIN_BELL_MINUTE)}) and ${MAX_BELL_MINUTE} (${clockTime(MAX_BELL_MINUTE)}).`,
+    }, 400);
+  }
+  if (bells.length > MAX_BELLS_PER_SCHEDULE) {
+    return json({ error: `At most ${MAX_BELLS_PER_SCHEDULE} distinct bell times.` }, 400);
+  }
+
+  const key = `bells:${day}:${await scheduleHash(bells)}`;
+
+  // Already on file — by far the common case.
+  if (await env.TOKENS.get(key) !== null) return json({ status: "ok" }, 200);
+
+  // A new schedule for this day. Only now is the cap worth a list().
+  const existing = await env.TOKENS.list({ prefix: `bells:${day}:` });
+  if (existing.keys.length >= MAX_SCHEDULES_PER_DAY) {
+    console.error(`[Bells] REFUSED a new schedule for ${day} — already ${existing.keys.length} (cap ${MAX_SCHEDULES_PER_DAY})`);
+    return json({
+      status: "too_many_schedules",
+      error: `This day already has ${existing.keys.length} different schedules, the most the server accepts.`,
+    }, 429);
+  }
+
+  try {
+    await env.TOKENS.put(key, JSON.stringify(bells), {
+      expirationTtl: BROADCAST_TTL_SECONDS,
+      metadata: { m: bells },
+    });
+  } catch (e) {
+    console.error(`[Bells] KV write failed: ${e.message}`);
+    return json({ error: "Could not store the schedule." }, 500);
+  }
+
+  console.log(`[Bells] New schedule for ${day}: ${bells.map(clockTime).join(" ")}`);
+  return json({ status: "ok" }, 200);
+}
+
+/**
+ * Whole minutes in range, deduplicated and sorted — or null if anything in
+ * the list is not a valid bell. Also used on what comes back from KV.
+ */
+function cleanBells(list) {
+  if (!Array.isArray(list) || list.length === 0) return null;
+  if (!list.every(m => Number.isInteger(m) && m >= MIN_BELL_MINUTE && m <= MAX_BELL_MINUTE)) return null;
+  return [...new Set(list)].sort((a, b) => a - b);
+}
+
+/**
+ * Short, stable name for a schedule: the first 12 hex digits of the SHA-256
+ * of its sorted minutes. The same list always gives the same key, which is
+ * the whole trick behind one write per schedule rather than per phone.
+ */
+async function scheduleHash(bells) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(bells.join(",")));
+  return [...new Uint8Array(digest)].slice(0, 6).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** "2026-10-19" + 1 -> "2026-10-20". Calendar arithmetic only, no time zone. */
+function addDaysISO(iso, days) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+
+/**
+ * Today's schedules from ONE list() call — the minutes come back in the
+ * metadata, so no key is read. Returns the union of all bells, sorted.
+ */
+async function readSchedules(env, day) {
+  const listing = await env.TOKENS.list({ prefix: `bells:${day}:` });
+  const schedules = [];
+  for (const entry of listing.keys) {
+    const bells = cleanBells(entry.metadata?.m);
+    if (bells) schedules.push({ id: entry.name.slice(`bells:${day}:`.length), bells });
+  }
+  const union = [...new Set(schedules.flatMap(s => s.bells))].sort((a, b) => a - b);
+  return { bells: union, schedules };
+}
+
+// ── Cron: the broadcast cycle ────────────────────────────────────────────────
+
+function emptyBroadcastRecord(day) {
+  return {
+    day,
+    bells: [],        // union of today's schedules, as of the last listing
+    schedules: 0,     // how many distinct schedules that union came from
+    sent: [],         // bells production accepted, plus "end"
+    seen: {},         // bell -> the minute the cron first learned of it
+    endAttempts: 0,
+    log: [],          // every attempt: { kind, bell, at, production, sandbox }
+    last: {},         // Apple's latest answer per environment
+  };
+}
+
+/**
+ * Runs inside runCron, before the legacy pushes, every minute 6 AM–5 PM.
+ *
+ * Cost per run, all counted against the shared subrequest budget:
+ *   1 KV read          broadcast:{day}
+ *   1 KV list          today's schedules — ODD minutes only (the legacy
+ *                      registry lists on even ones; together they stay under
+ *                      the 1,000 lists/day cap). Even minutes use the union
+ *                      saved in broadcast:{day}.
+ *   2 APNs pushes      only at a bell (one per channel)
+ *   1 KV write         only when something changed
+ * BROADCAST_RUN_COST is the worst case of these.
+ *
+ * At a bell: every bell m in the union with now-2 <= m <= now that has not
+ * gone out yet is due. Only the LATEST due one is sent (the card needs only
+ * the newest state) and all of them are marked sent. At or after the last
+ * bell, "end" goes instead, dismissing every card.
+ *
+ * A bell counts as sent once PRODUCTION accepts it — that is the channel
+ * students' phones use. If it fails, the next run retries, for as long as the
+ * bell is inside the 2-minute catch-up window. Sending the same bell twice is
+ * harmless: the card shows the same state.
+ */
+async function runBroadcastCycle(env, nowPT) {
+  const day = nowPT.iso;
+  const now = nowPT.hours * 60 + nowPT.minutes;
+  const key = `broadcast:${day}`;
+
+  const stored = await env.TOKENS.get(key, "json");
+  const record = { ...emptyBroadcastRecord(day), ...(stored ?? {}) };
+  let dirty = false;
+
+  if (now % 2 === 1) {
+    const { bells, schedules } = await readSchedules(env, day);
+    if (bells.join(",") !== record.bells.join(",") || schedules.length !== record.schedules) {
+      console.log(`[Broadcast] ${day}: ${schedules.length} schedule(s), bells ${bells.map(clockTime).join(" ") || "none"}`);
+      record.bells = bells;
+      record.schedules = schedules.length;
+      // When each bell first appeared, so /health only judges bells this
+      // Worker knew about before they rang. A phone that reports at 8:48
+      // brings an 8:00 bell nobody could have sent — not a failure.
+      record.seen = { ...(record.seen ?? {}) };
+      for (const m of bells) if (!(m in record.seen)) record.seen[m] = now;
+      dirty = true;
+    }
+  }
+
+  const bells = record.bells;
+  const sent = new Set(record.sent);
+  const lastBell = bells.length ? bells[bells.length - 1] : null;
+
+  // "end" goes at the day's LAST bell. If some schedule runs past 5 PM the
+  // cron is asleep by then, and ending at an earlier bell would dismiss that
+  // schedule's cards mid-event — so no end is sent and the cards retire on
+  // their own clock instead.
+  const due = bells.filter(m => m <= now && m >= now - BROADCAST_CATCH_UP_MINUTES && !sent.has(m));
+  const endDue = lastBell !== null && lastBell < CRON_END_MINUTE && now >= lastBell
+    && !sent.has("end") && record.endAttempts < MAX_END_ATTEMPTS;
+
+  if (endDue || due.length > 0) {
+    const kind = endDue ? "end" : "update";
+    const bell = endDue ? lastBell : due[due.length - 1];
+    const results = await broadcastEverywhere(env, kind, bell);
+    const accepted = results.production.ok;
+
+    if (accepted) {
+      for (const m of due) sent.add(m);
+      if (endDue) { sent.add(lastBell); sent.add("end"); }
+      record.sent = [...sent];
+    }
+    if (endDue) record.endAttempts += 1;
+
+    const at = new Date().toISOString();
+    record.log = [...record.log, {
+      kind, bell, at,
+      production: results.production.summary,
+      sandbox: results.sandbox.summary,
+    }].slice(-200);
+    for (const environment of Object.keys(BROADCAST_CHANNELS)) {
+      record.last[environment] = { ...results[environment].summary, kind, bell, at };
+    }
+    dirty = true;
+
+    const verdict = Object.entries(results).map(([e, r]) => `${e} ${r.summary.status ?? "—"}${r.ok ? "" : ` ${r.summary.reason ?? ""}`}`).join(", ");
+    (accepted ? console.log : console.error)(
+      `[Broadcast] ${kind} ${clockTime(bell)}${due.length > 1 ? ` (covers ${due.map(clockTime).join(" ")})` : ""} — ${verdict}`
+    );
+  }
+
+  if (dirty) {
+    await env.TOKENS.put(key, JSON.stringify(record), { expirationTtl: BROADCAST_TTL_SECONDS });
+  }
+}
+
+// ── Sending ──────────────────────────────────────────────────────────────────
+
+/** The push itself. "end" dismisses every card on the channel at once. */
+function broadcastPayload(kind, bell) {
+  const now = Math.floor(Date.now() / 1000);
+  if (kind === "end") {
+    return {
+      aps: {
+        timestamp: now,
+        event: "end",
+        // In the past, so iOS removes the card immediately.
+        "dismissal-date": now - 60,
+        "content-state": { slotStartMinutes: bell, isEnded: true },
+      },
+    };
+  }
+  return {
+    aps: {
+      timestamp: now,
+      event: "update",
+      "content-state": { slotStartMinutes: bell, isEnded: false },
+    },
+  };
+}
+
+/**
+ * Sends one broadcast to each listed environment's channel, in parallel.
+ * Never throws: a key problem comes back as a failed result for each
+ * environment, so it is recorded and shown on /status and /health.
+ */
+async function broadcastEverywhere(env, kind, bell, environments = Object.keys(BROADCAST_CHANNELS)) {
+  const payload = broadcastPayload(kind, bell);
+  let jwt;
+  try {
+    jwt = await getAPNsJWT(env);
+  } catch (e) {
+    const failed = { ok: false, status: null, body: "", summary: { status: null, reason: e.message } };
+    return Object.fromEntries(environments.map(environment => [environment, { ...failed, environment }]));
+  }
+  const results = await Promise.all(environments.map(environment => sendBroadcast(env, environment, payload, jwt)));
+  return Object.fromEntries(results.map(r => [r.environment, r]));
+}
+
+/** One POST to Apple's broadcast endpoint. Success is HTTP 200. */
+async function sendBroadcast(env, environment, payload, jwt) {
+  if (env.__tally) env.__tally.n++;   // a push is a subrequest like any other
+  const channel = BROADCAST_CHANNELS[environment];
+  const url = `https://${BROADCAST_HOSTS[environment]}/4/broadcasts/apps/${BROADCAST_BUNDLE_ID}`;
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        "authorization":   `bearer ${jwt}`,
+        "apns-push-type":  "liveactivity",
+        "apns-priority":   "10",
+        "apns-expiration": "0",
+        "apns-channel-id": channel,
+        "content-type":    "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    const body = await resp.text();
+    const reason = resp.status === 200 ? null : apnsReason(body) ?? (body.slice(0, 120) || null);
+    return {
+      environment,
+      channel,
+      ok: resp.status === 200,
+      status: resp.status,
+      body,
+      apnsId: resp.headers.get("apns-id"),
+      apnsRequestId: resp.headers.get("apns-request-id"),
+      summary: { status: resp.status, reason },
+    };
+  } catch (e) {
+    return { environment, channel, ok: false, status: null, body: "", summary: { status: null, reason: e.message } };
+  }
+}
+
+/** Apple's error bodies are {"reason":"..."}; pull the reason out. */
+function apnsReason(body) {
+  try { return JSON.parse(body).reason ?? null; } catch { return null; }
+}
+
+/** Plain English for the broadcast failures; falls back to explainAPNs. */
+function explainBroadcast(status, body) {
+  if (status === 200) return "Accepted. Apple will deliver it to every phone listening on this channel.";
+  if (status === null) return "Never reached Apple — see error.";
+  if (body.includes("BadChannelId") || body.includes("ChannelNotRegistered") || body.includes("MissingChannelId")) {
+    return "Apple does not know this channel on this host. Production channel IDs only work on api.push.apple.com and sandbox ones on the sandbox host; if that is right, the channel was deleted and must be recreated (here AND in the app).";
+  }
+  if (body.includes("InvalidPushType")) {
+    return "Apple refused the push type. Broadcasts must be apns-push-type: liveactivity.";
+  }
+  if (body.includes("BadPath") || status === 404) {
+    return "Wrong URL. The broadcast path is /4/broadcasts/apps/<bundle ID>.";
+  }
+  if (status === 429 || body.includes("TooManyRequests")) {
+    return "Apple is rate-limiting this channel. One push per bell is far below the limit, so something is sending too often.";
+  }
+  return explainAPNs(status, body);
+}
+
+// ── GET /test-broadcast ──────────────────────────────────────────────────────
+
+/**
+ * GET /test-broadcast[?env=sandbox|production|both][&minutes=480][&end=1]
+ *
+ * Sends ONE broadcast now and returns Apple's verdict, in plain English, per
+ * channel — the broadcast twin of /test-push. Default env is sandbox, which
+ * reaches only builds run from Xcode. Default minutes is today's most recent
+ * bell, which is what every card should already show, so a production test
+ * at the default changes nothing a student can see.
+ *
+ * &end=1 sends "end" instead, which DISMISSES every card on that channel. On
+ * production that is every student's Lock Screen, so it also needs
+ * &confirm=yes. Nothing here is written to KV.
+ */
+async function handleTestBroadcast(env, url) {
+  const envParam = url.searchParams.get("env") ?? "sandbox";
+  const environments = envParam === "both" ? ["production", "sandbox"] : [envParam];
+  if (!environments.every(e => e in BROADCAST_CHANNELS)) {
+    return json({ error: "env must be sandbox, production or both." }, 400);
+  }
+
+  const end = url.searchParams.get("end") === "1";
+  if (end && environments.includes("production") && url.searchParams.get("confirm") !== "yes") {
+    return json({
+      error: "Refusing to end every student's Live Activity without confirmation.",
+      howTo: "Add &confirm=yes to this URL, or test with env=sandbox.",
+    }, 400);
+  }
+
+  const nowPT = nowInPT();
+  const now = nowPT.hours * 60 + nowPT.minutes;
+  let bell;
+  const minutesParam = url.searchParams.get("minutes");
+  if (minutesParam !== null) {
+    bell = Number(minutesParam);
+    if (!Number.isInteger(bell) || bell < 0 || bell > 1439) {
+      return json({ error: "minutes must be a whole number from 0 to 1439 (minutes since midnight)." }, 400);
+    }
+  } else {
+    const record = env.TOKENS ? await env.TOKENS.get(`broadcast:${nowPT.iso}`, "json") : null;
+    const passed = (record?.bells ?? []).filter(m => m <= now);
+    bell = passed.length ? passed[passed.length - 1] : now;
+  }
+
+  // Build the signing token up front, like /test-push: a key that will not
+  // even load is a different problem from Apple saying no, with its own fix.
+  try {
+    await getAPNsJWT(env);
+  } catch (e) {
+    return json({
+      step: "building the APNs token",
+      ok: false,
+      error: e.message,
+      hint: "Check APNS_PRIVATE_KEY (whole .p8 including BEGIN/END lines), APNS_KEY_ID, APNS_TEAM_ID.",
+    }, 500);
+  }
+
+  const kind = end ? "end" : "update";
+  const results = await broadcastEverywhere(env, kind, bell, environments);
+  const attempts = environments.map(e => {
+    const r = results[e];
+    return {
+      endpoint: e,
+      host: BROADCAST_HOSTS[e],
+      channel: BROADCAST_CHANNELS[e],
+      status: r.status,
+      ok: r.ok,
+      apnsId: r.apnsId ?? null,
+      apnsRequestId: r.apnsRequestId ?? null,
+      response: r.status === null ? undefined : (r.body || "(empty — this is what success looks like)"),
+      error: r.status === null ? r.summary.reason : undefined,
+      meaning: explainBroadcast(r.status, r.body ?? ""),
+    };
+  });
+
+  const allOk = attempts.every(a => a.ok);
+  return json({
+    sent: kind,
+    slotStartMinutes: bell,
+    bell: clockTime(bell),
+    attempts,
+    verdict: allOk
+      ? "Apple accepted it. Every phone listening on that channel should change within seconds. If one does not, the problem is on that phone: an app build from before broadcast, a card started before the update, or Live Activities turned off."
+      : attempts.some(a => a.ok)
+        ? "Apple accepted it on some channels and refused others — see meaning for each."
+        : "Apple refused every attempt — see meaning for each.",
+    note: environments.includes("production")
+      ? "production reaches every student on an App Store or TestFlight build."
+      : "sandbox reaches only builds run from Xcode. Add &env=production or &env=both for the real thing.",
+  }, 200);
+}
+
+// ── /status and /health ──────────────────────────────────────────────────────
+
+function describeResult(summary) {
+  if (!summary) return null;
+  if (summary.status === 200) return "200 accepted";
+  return `${summary.status ?? "no answer"}${summary.reason ? ` ${summary.reason}` : ""}`;
+}
+
+/** The broadcast section of /status. One KV read and one list(). */
+async function readBroadcastStatus(env, full) {
+  const day = nowInPT().iso;
+  const note = "Per-phone counts now come from Apple's Push Notifications Console (Overview → subscriptions) — this Worker stores nothing about phones for broadcast.";
+  if (!env.TOKENS) return { note, error: "KV binding 'TOKENS' is not configured." };
+
+  const record = await env.TOKENS.get(`broadcast:${day}`, "json");
+  const live = await readSchedules(env, day);
+  const sent = new Set(record?.sent ?? []);
+
+  return {
+    note,
+    today: day,
+    schedulesReportedToday: live.schedules.length,
+    bellsToday: live.bells.map(clockTime),
+    bellsSent: live.bells.filter(m => sent.has(m)).map(clockTime),
+    endSent: sent.has("end"),
+    sends: (record?.log ?? []).map(e => ({
+      kind: e.kind,
+      bell: clockTime(e.bell),
+      at: e.at,
+      production: describeResult(e.production),
+      sandbox: describeResult(e.sandbox),
+    })),
+    lastResult: {
+      production: record?.last?.production
+        ? { result: describeResult(record.last.production), kind: record.last.production.kind, bell: clockTime(record.last.production.bell), at: record.last.production.at }
+        : null,
+      sandbox: record?.last?.sandbox
+        ? { result: describeResult(record.last.sandbox), kind: record.last.sandbox.kind, bell: clockTime(record.last.sandbox.bell), at: record.last.sandbox.at }
+        : null,
+    },
+    channels: BROADCAST_CHANNELS,
+    ...(full ? { schedules: live.schedules.map(s => ({ id: s.id, bells: s.bells.map(clockTime) })) } : {}),
+  };
+}
+
+/**
+ * GET /health — open, so it says nothing about anyone: whether auth is set
+ * up, and whether today's most recent bell went out. An uptime monitor
+ * watching for "FAILED" catches a broken key or channel within one bell.
+ */
+async function handleHealth(env) {
+  // No secret is exposed — just whether CLIENT_SECRET exists — and it's the
+  // first thing to check when the sign-in box refuses to appear.
+  const configured = env.CLIENT_SECRET ? "configured" : "NOT CONFIGURED";
+  let broadcast;
+  try {
+    broadcast = await broadcastHealth(env);
+  } catch (e) {
+    broadcast = `broadcast: UNKNOWN (could not read KV: ${e.message})`;
+  }
+  return new Response(`OK\nauth: ${configured}\n${broadcast}\n`, {
+    status: 200,
+    headers: { "content-type": "text/plain; charset=utf-8" },
+  });
+}
+
+/**
+ * One line: "broadcast: ok, last 08:55", "broadcast: FAILED …", or idle.
+ *
+ * Judges the most recent bell that is more than the catch-up window old — a
+ * bell that rang 30 seconds ago has not had its cron run yet and is not a
+ * failure. The last bell counts as sent when the "end" went out.
+ */
+async function broadcastHealth(env) {
+  const nowPT = nowInPT();
+  if (nowPT.dow === 0 || nowPT.dow === 6) return "broadcast: idle (weekend)";
+  if (!env.TOKENS) return "broadcast: UNKNOWN (no KV binding)";
+
+  const record = await env.TOKENS.get(`broadcast:${nowPT.iso}`, "json");
+  const all = record?.bells ?? [];
+  const bells = all.filter(m => m >= CRON_FIRST_MINUTE && m < CRON_END_MINUTE);
+  if (bells.length === 0) return "broadcast: idle (no bells reported today)";
+
+  const now = nowPT.hours * 60 + nowPT.minutes;
+  // Only bells known before they rang (see record.seen). Records written
+  // before "seen" existed judge nothing, rather than raise a false alarm.
+  const seen = record.seen ?? {};
+  const judged = bells.filter(m => now - m > BROADCAST_CATCH_UP_MINUTES && m in seen && seen[m] < m);
+  if (judged.length === 0) return `broadcast: ok, waiting for first bell ${clockTime(bells[0])}`;
+
+  const bell = judged[judged.length - 1];
+  const sent = new Set(record.sent ?? []);
+  const lastBell = all[all.length - 1];
+  const delivered = sent.has(bell) || (bell === lastBell && sent.has("end"));
+
+  const sandbox = record.last?.sandbox;
+  const sandboxNote = sandbox && sandbox.status !== 200 ? ` (sandbox: ${describeResult(sandbox)})` : "";
+
+  if (delivered) {
+    return `broadcast: ok, last ${clockTime(bell)}${bell === lastBell ? " (day ended)" : ""}${sandboxNote}`;
+  }
+  const production = record.last?.production;
+  const why = production ? `production: ${describeResult(production)}` : "never attempted";
+  return `broadcast: FAILED, ${clockTime(bell)} not delivered (${why})`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: - Token registration (legacy: v1.2 transition — remove after students update)
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function handleRegister(request, env) {
@@ -470,7 +1089,7 @@ async function handleUnregister(request, env) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MARK: - Purge (diagnostics)
+// MARK: - Purge (legacy: v1.2 transition — remove after students update)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -591,7 +1210,7 @@ function clockTime(minutes) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MARK: - Test push (diagnostics)
+// MARK: - Test push (legacy: v1.2 transition — remove after students update)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -905,12 +1524,21 @@ function json(obj, status) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MARK: - Push cycle
+// MARK: - Cron
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function runPushCycle(rawEnv) {
+/**
+ * Every minute: the broadcast, then the legacy per-phone pushes.
+ *
+ * Broadcast goes FIRST because it serves everyone on a current build for two
+ * requests, and it must never be the thing that runs out of budget. Both
+ * share one subrequest counter, so the legacy loop's own budget check sees
+ * what the broadcast already spent and simply pushes fewer phones.
+ */
+async function runCron(rawEnv) {
   // Everything this run touches goes through a counted KV handle, so the
-  // budget check below knows what has already been spent. Reset per run.
+  // budget checks (broadcast's and legacy's) know what has already been
+  // spent. Reset per run.
   const tally = { n: 0 };
   const env = { ...rawEnv, TOKENS: countingKV(rawEnv.TOKENS, tally), __tally: tally };
 
@@ -941,10 +1569,27 @@ async function runPushCycle(rawEnv) {
     return;
   }
 
+  // A broadcast failure is logged and recorded, never allowed to stop the
+  // legacy pushes that follow.
+  try {
+    await runBroadcastCycle(env, nowPT);
+  } catch (e) {
+    console.error(`[Broadcast] cycle failed — ${e.message}`);
+  }
+
+  await runLegacyPushCycle(env, currentMinutes);
+}
+
+/**
+ * One push per registered phone at that phone's own bells.
+ * v1.2 transition — remove after students update.
+ */
+async function runLegacyPushCycle(env, currentMinutes) {
   // Reconcile on even minutes only. list() is capped at 1,000/day: every
   // other minute is 720, every minute would be 1,440 and would start failing
   // partway through the afternoon. On reconcile minutes the returned list is
-  // reused, so the blob is not read twice.
+  // reused, so the blob is not read twice. The broadcast lists on the ODD
+  // minutes, so inside the 6 AM–5 PM window the two cost 330 each.
   //
   // Keyed off currentMinutes (minutes since local midnight), which the
   // transition matching below also uses — one source of truth for "what time
@@ -1015,7 +1660,7 @@ async function runPushCycle(rawEnv) {
  *
  * Every KV read, write, delete, list and every APNs push counts against the
  * same allowance, so they are all tallied through one counter that
- * scheduled() resets at the start of each run.
+ * runCron() resets at the start of each run.
  */
 function spent(env) { return env.__tally ? env.__tally.n : 0; }
 
@@ -1284,7 +1929,7 @@ async function getAPNsJWT(env) {
   // Without this, an unset secret surfaces as
   // "TypeError: Cannot read properties of undefined (reading 'replace')"
   // from deep inside generateJWT — which says nothing about WHICH variable is
-  // missing, and buried the real cause for days. runPushCycle then throws
+  // missing, and buried the real cause for days. The push cycle then throws
   // before sending anything, so there are no [APNs] lines at all and the
   // failure looks like silence rather than an error.
   const required = ["APNS_PRIVATE_KEY", "APNS_KEY_ID", "APNS_TEAM_ID", "APNS_BUNDLE_ID"];
@@ -1345,7 +1990,7 @@ async function generateJWT(keyId, teamId, privateKeyPem) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MARK: - KV helpers
+// MARK: - Legacy registry (v1.2 transition — remove after students update)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
