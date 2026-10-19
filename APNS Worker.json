@@ -1049,8 +1049,10 @@ async function broadcastHealth(env) {
 // MARK: - /status dashboard page
 //
 // One self-contained page: the data is embedded as JSON, the script draws it,
-// and switching days fetches /status.json. Charts come from Chart.js on
-// cdnjs; if that ever fails to load, the tables still show every number.
+// and switching days fetches /status.json. Nothing is loaded from anywhere
+// else — no chart library, no fonts, no CDN. The charts are plain elements
+// sized with CSS, so there is nothing to update and nothing that can go
+// missing.
 //
 // EDITING: the page is a String.raw template, so it may not contain a
 // backtick or a dollar sign followed by an opening brace. Its script uses
@@ -1085,10 +1087,11 @@ const STATUS_PAGE_HTML = String.raw`<!doctype html>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%232f5fc4'/><path d='M58 8 22 56h24l-6 36 38-50H54z' fill='%23f5b800'/></svg>">
 <style>
 /* La Salle colors, the same values as the app's DesignSystem.swift:
-   royal blue and gold for the brand, the app's own surfaces, text and
-   status colors. Light first, then dark. */
-:root{--bg:#f2f3f7;--card:#fff;--text:#0a0c10;--muted:#5b6472;--line:#e3e6ec;--soft:#f2f3f7;--accent:#2f5fc4;--on-accent:#fff;--gold:#a8790a;--ok:#1f9968;--bad:#d64545;--warn:#c9691f;--idle:#9aa1af;--c3:#6425c4;--c4:#0e8c7a;--c5:#b8368a;color-scheme:light}
-@media (prefers-color-scheme:dark){:root{--bg:#0a0c10;--card:#13161c;--text:#fff;--muted:#8a93a8;--line:#262b36;--soft:#1c2029;--accent:#3a6fd8;--on-accent:#fff;--gold:#f5b800;--ok:#34c78a;--bad:#ff6b6b;--warn:#fb923c;--idle:#646c82;--c3:#7c3aed;--c4:#2dd4bf;--c5:#f472b6;color-scheme:dark}}
+   royal blue and gold for the brand, the app's own surfaces and text.
+   Good news is blue rather than green, which clashes with the gold.
+   Light first, then dark. */
+:root{--bg:#f2f3f7;--card:#fff;--text:#0a0c10;--muted:#5b6472;--line:#e3e6ec;--soft:#f2f3f7;--accent:#2f5fc4;--on-accent:#fff;--gold:#a8790a;--ok:#2f5fc4;--bad:#d64545;--warn:#c9691f;--idle:#9aa1af;--c3:#6425c4;--c4:#0e8c7a;--c5:#b8368a;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#0a0c10;--card:#13161c;--text:#fff;--muted:#8a93a8;--line:#262b36;--soft:#1c2029;--accent:#3a6fd8;--on-accent:#fff;--gold:#f5b800;--ok:#3a6fd8;--bad:#ff6b6b;--warn:#fb923c;--idle:#646c82;--c3:#7c3aed;--c4:#2dd4bf;--c5:#f472b6;color-scheme:dark}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-text-size-adjust:100%}
 main{max-width:1100px;margin:0 auto;padding:20px 16px 48px}
@@ -1132,9 +1135,22 @@ button:disabled{opacity:.6;cursor:default}
 .legend i,.chip i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
 .chip{font-size:12px;padding:3px 9px;border-radius:999px;background:var(--soft);white-space:nowrap}
-.chart{position:relative;height:240px}
-.chart.small{height:200px}
-.split{display:grid;grid-template-columns:minmax(0,1fr) 240px;gap:20px;align-items:center}
+.chartbox{padding-left:34px;margin:4px 0 6px}
+.ytitle{font-size:12px;color:var(--muted);margin:0 0 10px -34px}
+.plot{position:relative;border-bottom:1px solid var(--line)}
+.gridline{position:absolute;left:0;right:0;border-top:1px dashed var(--line)}
+.gridline span{position:absolute;left:-34px;width:28px;text-align:right;font-size:11px;line-height:1;color:var(--muted);transform:translateY(-50%)}
+.tbar{position:absolute;bottom:0;width:7px;margin-left:-3.5px;border-radius:3px 3px 0 0}
+.chartbox .axis{margin-top:4px}
+.cols{position:absolute;inset:0;display:flex;gap:8px;padding:0 4px}
+.col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;border-radius:6px 6px 0 0;cursor:pointer;min-width:0}
+.col.picked{background:var(--soft)}
+.col .total{font-size:11px;color:var(--muted);margin-bottom:3px}
+.stack{width:100%;max-width:44px;display:flex;flex-direction:column-reverse;border-radius:4px 4px 0 0;overflow:hidden}
+.xlabels{display:flex;gap:8px;padding:5px 4px 0;font-size:11px;color:var(--muted)}
+.xlabels span{flex:1;text-align:center;white-space:nowrap;overflow:hidden;min-width:0}
+.splitbar{display:flex;height:14px;border-radius:999px;overflow:hidden;background:var(--soft);margin:6px 0 4px}
+.subhead{font-size:13px;font-weight:600;margin:16px 0 0}
 .meter{height:12px;background:var(--soft);border-radius:999px;overflow:hidden;margin:8px 0 6px}
 .meter span{display:block;height:100%;background:var(--accent);border-radius:999px}
 .meter.full span{background:var(--bad)}
@@ -1162,7 +1178,6 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
   .timeline .row{grid-template-columns:minmax(0,1fr);gap:4px}
   .timeline .row .name small{display:inline;margin-left:6px}
   .axis .odd{display:none}
-  .split{grid-template-columns:minmax(0,1fr)}
   .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
   .kpi .value{font-size:21px}
 }
@@ -1172,7 +1187,6 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
 <main id="app"><p class="muted">Loading…</p></main>
 <noscript><main><p>This page needs JavaScript. The same data is at <a href="/status.json">/status.json</a>.</p></main></noscript>
 <script id="data" type="application/json">__STATUS_DATA__</script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>
 (function () {
   "use strict";
@@ -1181,8 +1195,6 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
   // first view, then from /status.json when the day changes. Text from phones
   // (problem reports) is only ever set with textContent, never as HTML.
   var data = JSON.parse(document.getElementById("data").textContent);
-  var charts = [];
-  var pending = [];
   var state = { schedule: "all", issueDay: null, issueKind: "all" };
 
   var STATUS = {
@@ -1199,7 +1211,7 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
     registration: "Server",
     web_load: "School website"
   };
-  var PALETTE = ["--accent", "--gold", "--c3", "--c4", "--c5", "--warn"];   // brand first
+  var PALETTE = ["var(--accent)", "var(--gold)", "var(--c3)", "var(--c4)", "var(--c5)", "var(--warn)"];   // brand first
 
   // ── Small helpers ─────────────────────────────────────────────────────────
 
@@ -1219,8 +1231,6 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
     });
     return n;
   }
-  function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
-  function color(c) { return c.slice(0, 2) === "--" ? cssVar(c) : c; }
   function clock(min) {
     if (min === null || min === undefined) return "—";
     var h = Math.floor(min / 60), m = min % 60;
@@ -1241,6 +1251,7 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
   }
   function isoDate(iso) { var p = iso.split("-").map(Number); return new Date(Date.UTC(p[0], p[1] - 1, p[2], 12)); }
   function dayName(iso) { return DAY.format(isoDate(iso)); }
+  function shortDay(iso) { var d = isoDate(iso); return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()] + " " + d.getUTCDate(); }
   function addDays(iso, n) { var d = isoDate(iso); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
   function kindName(k) { return KINDS[k] || k; }
   function plural(n, one, many) { return n + " " + (n === 1 ? one : (many || one + "s")); }
@@ -1259,18 +1270,39 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
     return el("select", { "aria-label": label, onchange: function () { onchange(this.value); } },
       options.map(function (o) { return el("option", { value: o[0], selected: o[0] === value, text: o[1] }); }));
   }
-  function chart(height, config) {
-    var box = el("div", { class: "chart" + (height === "small" ? " small" : "") });
-    if (window.Chart) {
-      var canvas = el("canvas", { role: "img", "aria-label": config.label || "Chart" });
-      box.appendChild(canvas);
-      pending.push({ canvas: canvas, config: config });
-    } else {
-      box.style.height = "auto";
-      box.appendChild(el("p", { class: "empty", text: "The chart library didn't load. The table below has the same numbers." }));
-    }
-    return box;
+  // ── Charts ──────────────────────────────────────────────────────────────
+  // Drawn with plain elements and CSS: no chart library, nothing loaded from
+  // anywhere but this Worker. Colors are CSS variables, so light and dark
+  // mode just work. Hover (or long-press) a bar for its details.
+
+  // One time axis for the bell timeline and the deliveries chart, so a bell
+  // sits at the same spot in both.
+  function timeScale(minutes) {
+    var first = Math.min.apply(null, minutes), last = Math.max.apply(null, minutes);
+    var lo = Math.floor((first - 20) / 60) * 60, hi = Math.ceil((last + 20) / 60) * 60;   // the school day, padded to the hour
+    var pct = function (m) { return ((m - lo) / (hi - lo) * 100).toFixed(2) + "%"; };
+    return {
+      lo: lo, hi: hi, pct: pct,
+      axis: function () {
+        var a = el("div", { class: "axis" });
+        for (var m = lo; m <= hi; m += 60) a.appendChild(el("span", { class: (m / 60) % 2 ? "odd" : null, style: "left:" + pct(m), text: shortClock(m) }));
+        return a;
+      }
+    };
   }
+  // A plot area with about four labelled gridlines, topped at a round number.
+  function plot(max, height, title) {
+    var steps = [1, 2, 5, 10, 15, 20, 30, 60, 120, 300, 600, 1200], step = steps[steps.length - 1];
+    for (var i = 0; i < steps.length; i++) if (max / steps[i] <= 4) { step = steps[i]; break; }
+    var top = Math.max(step, Math.ceil(max / step) * step);
+    var area = el("div", { class: "plot", style: "height:" + height + "px" });
+    for (var v = step; v <= top; v += step) area.appendChild(el("div", { class: "gridline", style: "bottom:" + (v / top * 100).toFixed(2) + "%" }, [el("span", { text: String(v) })]));
+    return { area: area, top: top, title: el("div", { class: "ytitle", text: title }) };
+  }
+  function legendOf(items) {
+    return el("div", { class: "legend" }, items.map(function (it) { return el("span", null, [el("i", { style: "background:" + it.color }), it.name]); }));
+  }
+
   function table(head, rows) {
     return el("div", { class: "tablewrap" }, [el("table", null, [
       el("thead", null, [el("tr", null, head.map(function (h) { return el("th", { text: h }); }))]),
@@ -1362,9 +1394,8 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
     if (!schedules.length) schedules = [{ id: "all-bells", name: "All bells", bells: bells.map(function (x) { return x.minute; }) }];
     if (state.schedule !== "all" && !schedules.some(function (s) { return s.id === state.schedule; })) state.schedule = "all";
 
-    var first = bells[0].minute, last = bells[bells.length - 1].minute;
-    var lo = Math.floor(Math.min(360, first - 15) / 60) * 60, hi = Math.ceil(Math.max(1020, last + 15) / 60) * 60;
-    var pct = function (m) { return ((m - lo) / (hi - lo) * 100).toFixed(2) + "%"; };
+    var scale = timeScale(bells.map(function (x) { return x.minute; }));
+    var lo = scale.lo, hi = scale.hi, pct = scale.pct;
     var nowMin = data.day === data.today ? minutesOf(data.generatedAt) : null;
 
     var track = function (list) {
@@ -1384,9 +1415,7 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
     if (schedules.length > 1 && state.schedule === "all") rows.push(row("Every bell", plural(bells.length, "bell"), bells.map(function (x) { return x.minute; })));
     shown.forEach(function (s) { rows.push(row(s.name, clock(s.bells[0]) + "–" + clock(s.bells[s.bells.length - 1]), s.bells)); });
 
-    var axis = el("div", { class: "axis" });
-    for (var m = lo; m <= hi; m += 60) axis.appendChild(el("span", { class: (m / 60) % 2 ? "odd" : null, style: "left:" + pct(m), text: shortClock(m) }));
-    rows.push(el("div", { class: "row" }, [el("div"), axis]));
+    rows.push(el("div", { class: "row" }, [el("div"), scale.axis()]));
 
     // Exact times for one schedule; with several, the dropdown picks which.
     var chips = shown.length === 1
@@ -1410,35 +1439,25 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
 
   function sendsCard() {
     var sends = data.broadcast.sends || [];
-    var desc = "One bar per push to Apple, by how long after the bell Apple accepted it. The Worker checks once a minute, so up to about 60 seconds is normal. Red means Apple refused it on production, the channel students' phones use.";
+    var desc = "One bar per push to Apple, placed at its bell, as tall as the wait before Apple accepted it. The Worker checks once a minute, so up to about 60 seconds is normal. Red means Apple refused it on production, the channel students' phones use; a retry sits just right of the first try.";
     if (!sends.length) return card("Deliveries", desc, null, [el("p", { class: "empty", text: "Nothing has been sent " + (data.day === data.today ? "yet today." : "on this day.") })]);
     var good = function (s) { return s.production && s.production.status === 200; };
+    var scale = timeScale(sends.map(function (s) { return s.bell; }).concat((data.broadcast.bells || []).map(function (x) { return x.minute; })));
+    var p = plot(Math.max.apply(null, sends.map(function (s) { return Math.max(0, s.delaySeconds); }).concat([10])), 170, "Seconds after the bell");
+    var tries = {};
+    sends.forEach(function (s) {
+      var key = s.kind + s.bell, nth = tries[key] = (tries[key] || 0) + 1;
+      var delay = Math.max(0, s.delaySeconds);
+      p.area.appendChild(el("div", {
+        class: "tbar",
+        style: "left:" + scale.pct(s.bell + (nth - 1) * 3) + ";height:max(2px," + (delay / p.top * 100).toFixed(2) + "%);background:" + (good(s) ? "var(--ok)" : "var(--bad)"),
+        title: clock(s.bell) + (s.kind === "end" ? " end of day" : "") + (nth > 1 ? " (retry)" : "") + " · " + delay + " s after the bell · production " + (s.production ? s.production.text : "—") + " · sandbox " + (s.sandbox ? s.sandbox.text : "—")
+      }));
+    });
+    var refused = sends.some(function (s) { return !good(s); });
     var body = [
-      chart("normal", {
-        label: "Seconds after each bell that Apple accepted the push",
-        type: "bar",
-        data: {
-          labels: sends.map(function (s, i) {
-            var retry = sends.slice(0, i).some(function (p) { return p.bell === s.bell && p.kind === s.kind; });
-            return clock(s.bell) + (s.kind === "end" ? " · end" : "") + (retry ? " · retry" : "");
-          }),
-          datasets: [{
-            data: sends.map(function (s) { return Math.max(0, s.delaySeconds); }),
-            backgroundColor: sends.map(function (s) { return color(good(s) ? "--ok" : "--bad"); }),
-            borderRadius: 4, maxBarThickness: 36
-          }]
-        },
-        options: {
-          plugins: { legend: { display: false }, tooltip: { callbacks: {
-            label: function (c) { return c.parsed.y + " s after the bell"; },
-            afterLabel: function (c) {
-              var s = sends[c.dataIndex];
-              return ["Production: " + (s.production ? s.production.text : "—"), "Sandbox: " + (s.sandbox ? s.sandbox.text : "—"), "Sent " + timeOf(s.at)];
-            }
-          } } },
-          scales: { y: { beginAtZero: true, title: { display: true, text: "Seconds after the bell" } }, x: { grid: { display: false } } }
-        }
-      }),
+      el("div", { class: "chartbox", role: "img", "aria-label": "Seconds after each bell that Apple accepted the push" }, [p.title, p.area, scale.axis()]),
+      legendOf([{ name: "Accepted", color: "var(--ok)" }].concat(refused ? [{ name: "Refused", color: "var(--bad)" }] : [])),
       el("details", null, [
         el("summary", { text: "Every send (" + sends.length + ")" }),
         table(["Bell", "Kind", "Sent at", "Delay", "Production", "Sandbox"], sends.slice().reverse().map(function (s) {
@@ -1475,24 +1494,24 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
       select("Kind", kindOptions, state.issueKind, function (v) { state.issueKind = v; render(); })
     ]);
 
-    var weekChart = chart("small", {
-      label: "Phones reporting each kind of problem, per day",
-      type: "bar",
-      data: {
-        labels: days.map(dayName),
-        datasets: kinds.map(function (k, i) {
-          return {
-            label: kindName(k),
-            data: days.map(function (d) { return groups.filter(function (g) { return g.day === d && g.kind === k; }).reduce(function (a, g) { return a + g.deviceCount; }, 0); }),
-            backgroundColor: color(PALETTE[i % PALETTE.length]), borderRadius: 3, maxBarThickness: 40
-          };
-        })
-      },
-      options: {
-        plugins: { legend: { position: "bottom", labels: { boxWidth: 10, boxHeight: 10 } } },
-        scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 }, title: { display: true, text: "Phones" } } }
-      }
-    });
+    var count = function (d, k) { return groups.filter(function (g) { return g.day === d && g.kind === k; }).reduce(function (n, g) { return n + g.deviceCount; }, 0); };
+    var totals = days.map(function (d) { return kinds.reduce(function (n, k) { return n + count(d, k); }, 0); });
+    var p = plot(Math.max.apply(null, totals.concat([4])), 140, "Phones reporting, per day · tap a day to list it");
+    p.area.appendChild(el("div", { class: "cols" }, days.map(function (d, di) {
+      return el("div", { class: "col" + (d === state.issueDay ? " picked" : ""), title: dayName(d) + ": " + plural(totals[di], "phone"), onclick: function () { state.issueDay = d; render(); } }, [
+        totals[di] ? el("div", { class: "total", text: String(totals[di]) }) : null,
+        el("div", { class: "stack", style: "height:" + (totals[di] / p.top * 100).toFixed(2) + "%" }, kinds.map(function (k, i) {
+          var n = count(d, k);
+          return n ? el("div", { style: "flex:" + n + " 1 0;background:" + PALETTE[i % PALETTE.length], title: kindName(k) + ": " + plural(n, "phone") }) : null;
+        }))
+      ]);
+    })));
+    var weekChart = el("div", null, [
+      el("div", { class: "chartbox", role: "img", "aria-label": "Phones reporting each kind of problem, per day, for the past week" }, [
+        p.title, p.area, el("div", { class: "xlabels" }, days.map(function (d) { return el("span", { text: shortDay(d) }); }))
+      ]),
+      legendOf(kinds.map(function (k, i) { return { name: kindName(k), color: PALETTE[i % PALETTE.length] }; }))
+    ]);
 
     var shown = groups.filter(function (g) {
       return (state.issueDay === "all" || g.day === state.issueDay) && (state.issueKind === "all" || g.kind === state.issueKind);
@@ -1534,14 +1553,14 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
       el("div", { class: "meter" + (L.atCapacity ? " full" : "") }, [el("span", { style: "width:" + used + "%" })]),
       el("div", { class: "muted", style: "font-size:12px", text: "Limit from " + L.limitSource + (L.provenCapacity ? " · most ever sent at one bell: " + L.provenCapacity : "") + (L.ceilingHitAt ? " · last hit the ceiling " + whenOf(L.ceilingHitAt) : "") })
     ]);
-    var donut = chart("small", {
-      label: "v1.2 phones by app version",
-      type: "doughnut",
-      data: { labels: names, datasets: [{ data: names.map(function (n) { return versions[n]; }), backgroundColor: names.map(function (_, i) { return color(PALETTE[i % PALETTE.length]); }), borderWidth: 0 }] },
-      options: { cutout: "62%", plugins: { legend: { position: "bottom", labels: { boxWidth: 10, boxHeight: 10 } } } }
-    });
-    return card("v1.2 phones", desc, null, [
-      el("div", { class: "split" }, [summary, donut]),
+    var byVersion = [
+      el("div", { class: "subhead", text: "By app version" }),
+      el("div", { class: "splitbar", role: "img", "aria-label": "v1.2 phones by app version" }, names.map(function (n, i) {
+        return el("span", { style: "flex:" + versions[n] + " 1 0;background:" + PALETTE[i % PALETTE.length], title: n + ": " + plural(versions[n], "phone") });
+      })),
+      legendOf(names.map(function (n, i) { return { name: n + " · " + versions[n], color: PALETTE[i % PALETTE.length] }; }))
+    ];
+    return card("v1.2 phones", desc, null, [summary].concat(byVersion).concat([
       el("details", null, [
         el("summary", { text: "Each phone (" + L.deviceCount + ")" }),
         table(["Device", "Build", "App", "iOS", "Bells", "Last bell", "Updated"], L.devices.map(function (d) {
@@ -1549,7 +1568,7 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
             String(d.bells.length), d.end ? hhmm(d.end) : "—", whenOf(d.updatedAt)];
         }))
       ])
-    ]);
+    ]));
   }
 
   function toolsCard() {
@@ -1571,23 +1590,10 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
   // ── Rendering and loading ─────────────────────────────────────────────────
 
   function render() {
-    charts.forEach(function (c) { c.destroy(); });
-    charts = []; pending = [];
     var app = document.getElementById("app");
     app.textContent = "";
     [header(), banner(), kpis(), bellsCard(), sendsCard(), issuesCard(), legacyCard(), toolsCard(), footer()]
       .forEach(function (n) { if (n) app.appendChild(n); });
-    if (window.Chart) {
-      Chart.defaults.color = cssVar("--muted");
-      Chart.defaults.borderColor = cssVar("--line");
-      Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
-      pending.forEach(function (p) {
-        p.config.options = p.config.options || {};
-        p.config.options.responsive = true;
-        p.config.options.maintainAspectRatio = false;
-        charts.push(new Chart(p.canvas, p.config));
-      });
-    }
   }
 
   function load(day) {
@@ -1611,10 +1617,6 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
       });
   }
 
-  if (window.matchMedia) {
-    var scheme = window.matchMedia("(prefers-color-scheme: dark)");
-    if (scheme.addEventListener) scheme.addEventListener("change", render);
-  }
   render();
 })();
 </script>

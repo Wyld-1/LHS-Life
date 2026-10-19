@@ -351,7 +351,7 @@ Apple ─► every card on the channel; each works out its own class
   `network`, not `server`. Reports expire after 7 days.
 - **Pages.** `/health` (open): `broadcast: ok, last 08:55` or
   `broadcast: FAILED …`; watch it with an uptime monitor and alert on FAILED.
-  `/status`: a dashboard page (HTML, with Chart.js from cdnjs): each bell
+  `/status`: a dashboard page, self-contained (no outside scripts): each bell
   marked sent, missed, reported after it rang, or coming up; a chart of how
   long after each bell Apple accepted the push; the week's problem reports;
   the legacy phones. Dropdowns pick the day (any with a record left, up to 3
