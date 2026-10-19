@@ -1023,11 +1023,15 @@ async function broadcastHealth(env) {
   // before "seen" existed judge nothing, rather than raise a false alarm.
   const seen = record.seen ?? {};
   const judged = bells.filter(m => now - m > BROADCAST_CATCH_UP_MINUTES && m in seen && seen[m] < m);
-  if (judged.length === 0) return `broadcast: ok, waiting for first bell ${clockTime(bells[0])}`;
-
-  const bell = judged[judged.length - 1];
   const sent = new Set(record.sent ?? []);
   const lastBell = all[all.length - 1];
+  if (judged.length === 0) {
+    if (sent.has("end")) return `broadcast: ok, last ${clockTime(lastBell)} (day ended)`;
+    if (now < bells[0]) return `broadcast: ok, waiting for first bell ${clockTime(bells[0])}`;
+    return "broadcast: ok, nothing to judge yet (today's bells were reported after they rang)";
+  }
+
+  const bell = judged[judged.length - 1];
   const delivered = sent.has(bell) || (bell === lastBell && sent.has("end"));
 
   const sandbox = record.last?.sandbox;
@@ -1304,6 +1308,7 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
       kind = "ok"; title = "Bells are going out";
       if ((m = /last (\S+ [AP]M)( \(day ended\))?/.exec(detail))) detail = m[2] ? "The last bell, " + m[1] + ", went out and ended the day." : "The latest bell, " + m[1] + ", went out.";
       else if ((m = /first bell (\S+ [AP]M)/.exec(detail))) detail = "Waiting for the first bell at " + m[1] + ".";
+      else if (/nothing to judge/.test(detail)) detail = "Today's bells were all reported after they rang, so none could have been sent. Nothing has failed.";
     }
     else if (/FAILED/.test(h)) { kind = "bad"; title = "A bell didn't go out"; detail = detail.replace(/^FAILED, /, ""); }
     else if (/idle/.test(h)) {
