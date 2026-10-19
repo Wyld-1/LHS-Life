@@ -30,30 +30,43 @@ struct LaSalle_WidgetsLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.leading) {
                     TimelineView(.explicit(transitions)) { tl in
                         let slot = resolveSlot(at: tl.date, schedule: schedule, state: state, scheduleTypeName: scheduleTypeName)
-                        HStack(spacing: 6) {
-                            if slot?.isPassing == true {
-                                Image(systemName: "clock")
-                                    .foregroundStyle(Color(hex: slot?.colorHex ?? "#3A6FD8"))
-                                    .font(.system(size: 14, weight: .semibold))
-                            } else {
-                                Image("lhs-lightning")
-                                    .resizable()
-                                    .renderingMode(.template)
-                                    .foregroundStyle(Color(hex: slot?.colorHex ?? "#3A6FD8"))
-                                    .frame(width: 14, height: 14)
+                        if isDayOver(at: tl.date, schedule: schedule, state: state) {
+                            HStack(spacing: 6) {
+                                DoneLightning(size: 14)
+                                Text("Done for today")
+                                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(.white).lineLimit(1)
                             }
-                            Text(slot?.displayName ?? "—")
-                                .font(.system(size: 15, weight: .semibold, design: .rounded))
-                                .foregroundStyle(.white).lineLimit(1)
+                            .padding(.leading, 4)
+                        } else {
+                            HStack(spacing: 6) {
+                                if slot?.isPassing == true {
+                                    Image(systemName: "clock")
+                                        .foregroundStyle(Color(hex: slot?.colorHex ?? "#3A6FD8"))
+                                        .font(.system(size: 14, weight: .semibold))
+                                } else {
+                                    Image("lhs-lightning")
+                                        .resizable()
+                                        .renderingMode(.template)
+                                        .foregroundStyle(Color(hex: slot?.colorHex ?? "#3A6FD8"))
+                                        .frame(width: 14, height: 14)
+                                }
+                                Text(slot?.displayName ?? "—")
+                                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(.white).lineLimit(1)
+                            }
+                            .padding(.leading, 4)
                         }
-                        .padding(.leading, 4)
                     }
                 }
 
                 DynamicIslandExpandedRegion(.trailing) {
                     TimelineView(.explicit(transitions)) { tl in
                         let slot = resolveSlot(at: tl.date, schedule: schedule, state: state, scheduleTypeName: scheduleTypeName)
-                        if let slot, slot.isPreSchool {
+                        if isDayOver(at: tl.date, schedule: schedule, state: state) {
+                            // Nothing left to count down to.
+                            EmptyView()
+                        } else if let slot, slot.isPreSchool {
                             // Before school: when it starts, not a countdown
                             // that could be hours long.
                             HStack(spacing: 4) {
@@ -84,7 +97,14 @@ struct LaSalle_WidgetsLiveActivity: Widget {
                         let slot  = resolveSlot(at: tl.date, schedule: schedule, state: state, scheduleTypeName: scheduleTypeName)
                         let color = Color(hex: slot?.colorHex ?? "#3A6FD8")
                         VStack(spacing: 6) {
-                            if let slot = slot {
+                            if isDayOver(at: tl.date, schedule: schedule, state: state) {
+                                HStack {
+                                    Text(scheduleTypeName)
+                                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                                        .foregroundStyle(.white.opacity(0.6)).lineLimit(1)
+                                    Spacer()
+                                }
+                            } else if let slot = slot {
                                 // Subtitle priority must match LockScreenContent:
                                 // passing → "Until", before school → schedule type,
                                 // otherwise → next period. This region was missing
@@ -152,13 +172,19 @@ struct LaSalle_WidgetsLiveActivity: Widget {
                     let slot  = resolveSlot(at: tl.date, schedule: schedule, state: state, scheduleTypeName: scheduleTypeName)
                     let color = Color(hex: slot?.colorHex ?? "#3A6FD8")
                     ZStack {
-                        if let slot = slot {
-                            LiveProgressArc(start: slot.startDate, end: slot.endDate, color: color)
+                        if isDayOver(at: tl.date, schedule: schedule, state: state) {
+                            // No arc: a full ring would say "this class is
+                            // ending", and none is. Same footprint as the arc.
+                            DoneLightning(size: 8).frame(width: 18, height: 18)
+                        } else {
+                            if let slot = slot {
+                                LiveProgressArc(start: slot.startDate, end: slot.endDate, color: color)
+                            }
+                            Image("lhs-lightning")
+                                .resizable()
+                                .renderingMode(.template)
+                                .foregroundStyle(color).frame(width: 8, height: 8)
                         }
-                        Image("lhs-lightning")
-                            .resizable()
-                            .renderingMode(.template)
-                            .foregroundStyle(color).frame(width: 8, height: 8)
                     }
                     .padding(2)
                 }
@@ -166,7 +192,12 @@ struct LaSalle_WidgetsLiveActivity: Widget {
             } compactTrailing: {
                 TimelineView(.explicit(transitions)) { tl in
                     let slot = resolveSlot(at: tl.date, schedule: schedule, state: state, scheduleTypeName: scheduleTypeName)
-                    if let slot {
+                    if isDayOver(at: tl.date, schedule: schedule, state: state) {
+                        Text("Done")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .padding(.trailing, 2)
+                    } else if let slot {
                         // A gray bell and the next bell's time — "🔔 8:55".
                         // No AM/PM: during the school day it's never in doubt,
                         // and the pill stays narrow enough to leave the status
@@ -190,18 +221,26 @@ struct LaSalle_WidgetsLiveActivity: Widget {
                     let slot  = resolveSlot(at: tl.date, schedule: schedule, state: state, scheduleTypeName: scheduleTypeName)
                     let color = Color(hex: slot?.colorHex ?? "#3A6FD8")
                     ZStack {
-                        if let slot = slot {
-                            LiveProgressArc(start: slot.startDate, end: slot.endDate, color: color)
+                        if isDayOver(at: tl.date, schedule: schedule, state: state) {
+                            // No arc: a full ring would say "this class is
+                            // ending", and none is. Same footprint as the arc.
+                            DoneLightning(size: 8).frame(width: 18, height: 18)
+                        } else {
+                            if let slot = slot {
+                                LiveProgressArc(start: slot.startDate, end: slot.endDate, color: color)
+                            }
+                            Image("lhs-lightning")
+                                .resizable()
+                                .renderingMode(.template)
+                                .foregroundStyle(color).frame(width: 8, height: 8)
                         }
-                        Image("lhs-lightning")
-                            .resizable()
-                            .renderingMode(.template)
-                            .foregroundStyle(color).frame(width: 8, height: 8)
                     }
                     .padding(2)
                 }
             }
-            .keylineTint(Color(hex: resolveSlot(at: Date(), schedule: schedule, state: state, scheduleTypeName: scheduleTypeName)?.colorHex ?? "#3A6FD8"))
+            .keylineTint(Color(hex: isDayOver(at: Date(), schedule: schedule, state: state)
+                ? lsBlueHex
+                : resolveSlot(at: Date(), schedule: schedule, state: state, scheduleTypeName: scheduleTypeName)?.colorHex ?? lsBlueHex))
         }
     }
 }
@@ -375,8 +414,15 @@ private struct ActiveSlotInfo {
 private let lsBlueHex = "#3A6FD8"
 
 /// Resolves the active slot from attributes.schedule using state.slotStartMinutes.
-/// The worker pushes slotStartMinutes — widget looks it up locally for name/color/dates.
-/// Falls back to time-based resolution before first push arrives.
+///
+/// The worker broadcasts ONE push per bell to every card on the channel, and
+/// the bell may be another student's: slotStartMinutes is that bell's minute.
+/// When it matches the start of one of this card's own slots, that's the
+/// slot; when it doesn't, the push is just a nudge to redraw, and the clock
+/// decides. Also the fallback before the first push arrives.
+///
+/// After the last bell, callers show the "Done for today" state instead —
+/// see isDayOver — so this never has to describe a finished day.
 private func resolveSlot(
     at date: Date,
     schedule: [ScheduleActivityAttributes.ScheduledPeriod],
@@ -516,6 +562,65 @@ private func transitionDates(from schedule: [ScheduleActivityAttributes.Schedule
     return [firstBell.addingTimeInterval(-12 * 3600)] + starts + ends
 }
 
+// MARK: - Done for today
+//
+// The worker can't dismiss one student's card at that student's last bell:
+// a broadcast reaches every card, and last bells differ by student. So from
+// its own last bell until the app ends it, the card says the day is over —
+// rather than freezing on the last class with a countdown stuck at zero.
+
+/// Whether this card's school day is over at `date`. Checked BEFORE
+/// resolveSlot, because the last push usually names the final class and the
+/// pushed slot would otherwise win.
+private func isDayOver(
+    at date: Date,
+    schedule: [ScheduleActivityAttributes.ScheduledPeriod],
+    state: ScheduleActivityAttributes.ContentState
+) -> Bool {
+    if state.isEnded { return true }
+    guard let last = schedule.last else { return false }
+    return date >= last.endDate
+}
+
+/// The lightning mark in LaSalle blue: no class color applies any more.
+private struct DoneLightning: View {
+    let size: CGFloat
+
+    var body: some View {
+        Image("lhs-lightning")
+            .resizable()
+            .renderingMode(.template)
+            .foregroundStyle(Color(hex: lsBlueHex))
+            .frame(width: size, height: size)
+    }
+}
+
+private struct DoneLockScreenContent: View {
+    let scheduleTypeName: String
+
+    var body: some View {
+        // One row, same insets and type as the in-class card's top row. No
+        // progress bar: there's nothing left to measure.
+        HStack(spacing: 8) {
+            DoneLightning(size: 18)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Done for today")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Text(scheduleTypeName)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .lineLimit(1)
+            }
+            Spacer()
+        }
+        .padding(16)
+        .activityBackgroundTint(Color(hex: "#0D1220"))
+        .activitySystemActionForegroundColor(.white)
+    }
+}
+
 // MARK: - Lock Screen
 
 private struct LockScreenView: View {
@@ -524,7 +629,9 @@ private struct LockScreenView: View {
 
     var body: some View {
         TimelineView(.explicit(transitionDates(from: attributes.schedule))) { tl in
-            if let slot = resolveSlot(at: tl.date, schedule: attributes.schedule, state: state, scheduleTypeName: attributes.scheduleTypeName) {
+            if isDayOver(at: tl.date, schedule: attributes.schedule, state: state) {
+                DoneLockScreenContent(scheduleTypeName: attributes.scheduleTypeName)
+            } else if let slot = resolveSlot(at: tl.date, schedule: attributes.schedule, state: state, scheduleTypeName: attributes.scheduleTypeName) {
                 LockScreenContent(slot: slot, schedule: attributes.schedule)
             }
         }
@@ -830,4 +937,10 @@ extension ScheduleActivityAttributes {
     LaSalle_WidgetsLiveActivity()
 } contentStates: {
     ScheduleActivityAttributes.ContentState()
+}
+
+#Preview("Done for Today", as: .content, using: ScheduleActivityAttributes.preview) {
+    LaSalle_WidgetsLiveActivity()
+} contentStates: {
+    ScheduleActivityAttributes.ContentState(isEnded: true)
 }

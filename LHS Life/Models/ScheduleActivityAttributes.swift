@@ -6,8 +6,10 @@
 //
 //  Design:
 //  — Static attributes carry the full day schedule, written once at start.
-//  — ContentState carries the CURRENT period's display data, pushed at each
-//    bell transition by a BGProcessingTask the app schedules at launch.
+//  — ContentState carries only which slot is current. The worker broadcasts
+//    it at every bell on the school's channel (one push for every card, so
+//    the bell may be another student's); a BGProcessingTask the app
+//    schedules is the on-device fallback.
 //  — The widget uses ContentState for text/color and ProgressView(timerInterval:)
 //    for the live progress bar — no render budget consumed.
 //
@@ -25,8 +27,8 @@ struct ScheduleActivityAttributes: ActivityAttributes {
     /// Full day schedule — used by the widget to know all transitions.
     var schedule: [ScheduledPeriod]
 
-    /// Set only on a PREVIEW card — the one Settings and the "couldn't
-    /// start" sheet put up to show what a Live Activity is. The widget draws
+    /// Set only on a PREVIEW card — the one Settings puts up to show what a
+    /// Live Activity is. The widget draws
     /// it frozen from these values instead of the schedule: nothing counts
     /// down, nothing is sent to the server, and it says PREVIEW on it.
     ///
@@ -55,14 +57,15 @@ struct ScheduleActivityAttributes: ActivityAttributes {
     }
 
     // MARK: - ContentState
-    // Pushed at each bell transition by a BGProcessingTask.
-    // Widget renders directly from these values.
+    // Broadcast by the worker at each bell (and set by the BGProcessingTask
+    // fallback). The widget resolves it against its own schedule.
 
     public struct ContentState: Codable, Hashable {
-        /// Minutes since midnight identifying which slot just started.
-        /// Widget matches this against attributes.schedule to resolve name/color/dates.
+        /// Minutes since midnight of the bell that just rang. The widget
+        /// matches it against attributes.schedule; a bell that isn't one of
+        /// this card's own falls back to the clock.
         var slotStartMinutes: Int
-        /// True when the app signals end of day
+        /// True when the app ends the card; the widget shows "Done for today".
         var isEnded: Bool
 
         init(slotStartMinutes: Int = 0, isEnded: Bool = false) {
