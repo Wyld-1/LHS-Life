@@ -4,7 +4,7 @@ _Effective October 2026_
 
 LHS Life is a student-built companion app for La Salle High School in Yakima, WA. It's designed to keep as much as possible on your own device. This policy explains what the app stores, what leaves your device, how long it's kept, and how to delete it.
 
-**The short version:** your school email, grades, assignments, and settings never reach an LHS Life server. The only thing the app sends to its own server is what it needs to update the bell schedule on your Lock Screen, and only if you turn Live Activities on. There are no ads, no analytics, no tracking, and no third-party SDKs.
+**The short version:** your school email, grades, assignments, and settings never reach an LHS Life server. The app sends its own server only two things: today's bell times, if you turn Live Activities on, and a short note when something the school can fix is broken. Neither says who you are. There are no ads, no analytics, no tracking, and no third-party SDKs.
 
 ## What stays on your device
 
@@ -18,11 +18,11 @@ If you're signed in to iCloud, LHS Life uses Apple's iCloud key-value storage to
 
 ## What's sent to the LHS Life server (only with Live Activities on)
 
-To keep the bell schedule on your Lock Screen and Dynamic Island up to date, a small server sends one update at each bell through Apple's push service, and Apple delivers that same update to every phone showing the LHS Life Live Activity. Each phone works out its own class from the schedule it already has. So the server never needs to know which phones are listening — the app sends it only:
+To keep the bell schedule on your Lock Screen and Dynamic Island up to date, a small server sends one update at each bell through Apple's push service, and Apple delivers that same update to every phone showing the LHS Life Live Activity. Your phone signs up for those updates with Apple directly, and Apple doesn't tell the server who signed up. Each phone works out its own class from the schedule it already has. So the server never needs to know which phones are listening — the app sends it only:
 
 | Data | Why |
 |---|---|
-| Today's period start and end times (not counting periods you turned off) | So the server sends an update at each of your bells. |
+| Today's date and its period start and end times (not counting periods you turned off) | So the server sends an update at each of your bells. |
 
 The app also says whether it's an App Store or a test build, which the server ignores. Nothing identifies your device: no device ID, no push token, no app or iOS version. Phones on the same schedule send the same times, so the server keeps each different schedule once, with nothing to say whose it is.
 
@@ -32,7 +32,11 @@ The app also says whether it's an App Store or a test build, which the server ig
 
 ## Problem reports
 
-When something breaks in a way the school can fix — the school calendar can't be reached, a posted schedule can't be read, a school website won't load — the app tells the same server, so the school can see how many devices are affected instead of waiting for someone to report it. It sends a random install ID, the app and iOS version, and a short description of the failure, at most once per device per problem per day. It never sends what you typed, what you were looking at, or anything about you. These reports are deleted automatically after 7 days.
+When something breaks in a way the school can fix — the school calendar can't be reached, a posted schedule can't be read, a school website won't load — the app tells the same server, so the school can see how many devices are affected instead of waiting for someone to report it. It sends a random install ID, the app and iOS version, and a short description of the failure, at most once per device per problem per day. It never sends what you typed, what you were looking at, or anything about you. The install ID is made up by the app, isn't connected to your name, email, or Apple account, and only lets the server count each phone once. Reports are shown only on a password-protected status page for the people who run LHS Life, and are deleted automatically after 7 days.
+
+## If you used version 1.2
+
+Before version 1.3, the server sent each phone its own Lock Screen updates, so the app also sent a random device ID, a Live Activity push token from Apple, and its app and iOS version along with your bell times. Once you update, that's no longer sent. The old record is deleted automatically, usually within a day after that version's Live Activity ends, and every remaining one is deleted when the old system is switched off.
 
 ## Who else is involved
 
