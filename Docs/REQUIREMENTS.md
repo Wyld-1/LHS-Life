@@ -231,9 +231,10 @@ High School · Yakima".
 - No phone limit, inside Cloudflare's free plan.
 - `/health` says whether the latest bell went out ("ok" or "FAILED") so an
   uptime monitor can alert.
-- A status page an administrator can read without help: today's bells, sends
-  and Apple's answers, today's problems with device counts, and more with
-  `?full=1`.
+- A status dashboard an administrator can read without help: charts of
+  today's bells (sent, missed, reported too late), how long Apple took, and
+  the week's problems with device counts; dropdowns for the day, schedule and
+  problem kind. The same data as JSON at `/status.json`.
 - A one-click test (`/test-broadcast`) that explains Apple's answer; ending
   every production card needs an explicit confirm.
 - Problem reports expire after 7 days.

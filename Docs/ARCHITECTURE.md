@@ -351,9 +351,14 @@ Apple ─► every card on the channel; each works out its own class
   `network`, not `server`. Reports expire after 7 days.
 - **Pages.** `/health` (open): `broadcast: ok, last 08:55` or
   `broadcast: FAILED …`; watch it with an uptime monitor and alert on FAILED.
-  `/status`: the broadcast section first (today's bells, schedules reported,
-  sends and Apple's answers), then problem reports; `?full=1` adds each
-  schedule and the past week. `/test-broadcast?env=sandbox|production|both`
+  `/status`: a dashboard page (HTML, with Chart.js from cdnjs): each bell
+  marked sent, missed, reported after it rang, or coming up; a chart of how
+  long after each bell Apple accepted the push; the week's problem reports;
+  the legacy phones. Dropdowns pick the day (any with a record left, up to 3
+  back), a schedule, and a problem day and kind. The page embeds its data and
+  fetches `/status.json?day=` to switch days; it never refreshes on its own,
+  because each load spends 2 of the 1,000 daily KV lists. Phone-supplied text
+  is only ever set as text. `/test-broadcast?env=sandbox|production|both`
   sends one broadcast now and explains Apple's answer; `&minutes=` picks the
   bell, `&end=1` sends an end, which on production also needs `&confirm=yes`.
   Everything but `/health` needs `CLIENT_SECRET`.

@@ -28,11 +28,11 @@
  *   /health   Alive? Password set? Did the latest bell's broadcast go out?
  *             Prints "broadcast: ok, last 08:55" or "broadcast: FAILED …" —
  *             point an uptime monitor at it and alert on FAILED.
- *   /status   Start here. broadcast: today's bells, how many schedules were
- *             reported, what was sent when, and Apple's last answer. issues:
- *             problems phones reported today. devices: legacy v1.2 phones.
- *             ?full=1 adds each schedule's times, the past week of problems,
- *             and every legacy phone's bell times.
+ *   /status   Start here: a dashboard with charts. Today's bells and whether
+ *             each went out, how long Apple took, problem reports from the
+ *             past week, and the legacy v1.2 phones. A dropdown picks the day
+ *             (up to 3 back). /status.json?day=yyyy-MM-dd is the same data
+ *             as JSON, for scripts.
  *   /test-broadcast?env=sandbox|production|both&minutes=480&end=1
  *             Sends one broadcast now and says in plain English what Apple
  *             answered. Default sandbox (Xcode builds). production reaches
@@ -129,42 +129,16 @@ export default {
       return handleReport(request, env);
     }
 
-    // Diagnostics: broadcast first, then problem reports, then the legacy
-    // device list (without exposing tokens).
-    if (request.method === "GET" && url.pathname === "/status") {
-      const devices = await readRegistry(env);
-      // ?full=1 prints the actual bell times a device is registered for,
-      // rather than just how many. This is the view that answers "was the
-      // 8:00 transition even stored?" when a push doesn't land — a count of
-      // 15 looks identical whether the times are right or nonsense.
-      const full = url.searchParams.get("full") === "1";
-      const broadcast = await readBroadcastStatus(env, full);
-      const { limit: capacity, source } = await effectiveLimit(env);
-      const observed = await readCapacity(env);
-      const issues = await readIssues(env, full);
-      return new Response(JSON.stringify({
-        broadcast,
-        issues,
-        legacy: "Everything below is v1.2 phones on one-push-per-phone (transition — remove after students update).",
-        deviceCount: devices.length,
-        limit: capacity,
-        limitSource: source,
-        slotsFree: Math.max(0, capacity - devices.length),
-        atCapacity: devices.length >= capacity,
-        provenCapacity: observed.proven,
-        ceilingHitAt: observed.wallAt,
-        devices: devices.map(d => ({
-          deviceId: d.deviceId,
-          environment: d.environment,
-          appVersion: d.appVersion ?? null,
-          osVersion: d.osVersion ?? null,
-          transitions: full
-            ? (d.transitions ?? []).map(clockTime)
-            : (d.transitions ?? []).length,
-          endMinutes: full ? clockTime(d.endMinutes) : d.endMinutes,
-          updatedAt: d.updatedAt,
-        })),
-      }, null, 2), { status: 200, headers: { "content-type": "application/json" } });
+    // The dashboard: today's bells, every send and Apple's answer, problem
+    // reports, legacy phones. Charts and dropdowns for people; the same data
+    // as JSON at /status.json?day=yyyy-MM-dd for scripts (and for the page
+    // itself, when it switches days).
+    if (request.method === "GET" && (url.pathname === "/status" || url.pathname === "/status.json")) {
+      const today = nowInPT().iso;
+      const day = url.searchParams.get("day") ?? today;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return json({ error: "day must look like 2026-10-19." }, 400);
+      const data = await statusData(env, day);
+      return url.pathname === "/status.json" ? json(data, 200) : statusPage(data);
     }
 
     return new Response("LHS Life Push Worker", { status: 200 });
@@ -883,40 +857,126 @@ function describeResult(summary) {
   return `${summary.status ?? "no answer"}${summary.reason ? ` ${summary.reason}` : ""}`;
 }
 
-/** The broadcast section of /status. One KV read and one list(). */
-async function readBroadcastStatus(env, full) {
-  const day = nowInPT().iso;
-  const note = "Per-phone counts now come from Apple's Push Notifications Console (Overview → subscriptions) — this Worker stores nothing about phones for broadcast.";
-  if (!env.TOKENS) return { note, error: "KV binding 'TOKENS' is not configured." };
+/**
+ * What happened to one bell, in the words the dashboard uses:
+ *
+ *   sent      production accepted it (the last bell: the "end" went out)
+ *   upcoming  hasn't rung yet, or rang within the catch-up window
+ *   outside   before 6 AM or from 5 PM on — the cron is asleep then
+ *   late      first reported after it rang, so nobody could have sent it
+ *   missed    known in time and never accepted — a real failure
+ *
+ * Records from before "seen" was kept have no way to tell late from missed,
+ * so they say late rather than raise a false alarm.
+ */
+function bellStatus(m, { now, sent, seen, lastBell }) {
+  if (sent.has(m) || (m === lastBell && sent.has("end"))) return "sent";
+  if (m < CRON_FIRST_MINUTE || m >= CRON_END_MINUTE) return "outside";
+  if (now - m <= BROADCAST_CATCH_UP_MINUTES) return "upcoming";
+  if (!seen || !(m in seen) || seen[m] >= m) return "late";
+  return "missed";
+}
+
+/**
+ * The broadcast part of /status for one day: one KV read and one list().
+ * Every time is minutes since Pacific midnight, with a clock-time twin.
+ */
+async function readBroadcastStatus(env, day) {
+  const note = "How many phones are listening comes from Apple's Push Notifications Console (Overview → subscriptions) — this Worker stores nothing about phones for broadcast.";
+  if (!env.TOKENS) return { note, day, error: "KV binding 'TOKENS' is not configured." };
 
   const record = await env.TOKENS.get(`broadcast:${day}`, "json");
   const live = await readSchedules(env, day);
+  // A past day's schedules can expire a little before its record does.
+  const bells = live.bells.length ? live.bells : (record?.bells ?? []);
   const sent = new Set(record?.sent ?? []);
+
+  const nowPT = nowInPT();
+  const now = day === nowPT.iso ? nowPT.hours * 60 + nowPT.minutes
+    : day < nowPT.iso ? 24 * 60 : -1;
+  const context = { now, sent, seen: record?.seen ?? null, lastBell: bells.length ? bells[bells.length - 1] : null };
+
+  const result = summary => summary ? { status: summary.status ?? null, reason: summary.reason ?? null, text: describeResult(summary) } : null;
 
   return {
     note,
-    today: day,
-    schedulesReportedToday: live.schedules.length,
-    bellsToday: live.bells.map(clockTime),
-    bellsSent: live.bells.filter(m => sent.has(m)).map(clockTime),
+    day,
+    schedulesReported: live.schedules.length || record?.schedules || 0,
+    bells: bells.map(m => ({ minute: m, time: clockTime(m), status: bellStatus(m, context) })),
     endSent: sent.has("end"),
-    sends: (record?.log ?? []).map(e => ({
-      kind: e.kind,
-      bell: clockTime(e.bell),
-      at: e.at,
-      production: describeResult(e.production),
-      sandbox: describeResult(e.sandbox),
+    schedules: live.schedules.map(s => ({ id: s.id, bells: s.bells, times: s.bells.map(clockTime) })),
+    sends: (record?.log ?? []).map(e => {
+      // How long after the bell Apple accepted it: the cron runs once a
+      // minute, so anything up to about a minute is normal.
+      const t = nowInPT(new Date(e.at));
+      return {
+        kind: e.kind,
+        bell: e.bell,
+        time: clockTime(e.bell),
+        at: e.at,
+        delaySeconds: t.hours * 3600 + t.minutes * 60 + t.seconds - e.bell * 60,
+        production: result(e.production),
+        sandbox: result(e.sandbox),
+      };
+    }),
+    lastResult: Object.fromEntries(Object.keys(BROADCAST_CHANNELS).map(environment => {
+      const last = record?.last?.[environment];
+      return [environment, last ? { ...result(last), kind: last.kind, bell: last.bell, time: clockTime(last.bell), at: last.at } : null];
     })),
-    lastResult: {
-      production: record?.last?.production
-        ? { result: describeResult(record.last.production), kind: record.last.production.kind, bell: clockTime(record.last.production.bell), at: record.last.production.at }
-        : null,
-      sandbox: record?.last?.sandbox
-        ? { result: describeResult(record.last.sandbox), kind: record.last.sandbox.kind, bell: clockTime(record.last.sandbox.bell), at: record.last.sandbox.at }
-        : null,
-    },
     channels: BROADCAST_CHANNELS,
-    ...(full ? { schedules: live.schedules.map(s => ({ id: s.id, bells: s.bells.map(clockTime) })) } : {}),
+  };
+}
+
+/** The legacy part of /status: v1.2 phones on one push per phone. */
+async function readLegacyStatus(env) {
+  const devices = await readRegistry(env);
+  const { limit, source } = await effectiveLimit(env);
+  const observed = await readCapacity(env);
+  return {
+    note: "v1.2 phones on one push per phone (transition — remove after students update). Push tokens are never shown.",
+    deviceCount: devices.length,
+    limit,
+    limitSource: source,
+    slotsFree: Math.max(0, limit - devices.length),
+    atCapacity: devices.length >= limit,
+    provenCapacity: observed.proven,
+    ceilingHitAt: observed.wallAt,
+    devices: devices.map(d => ({
+      deviceId: d.deviceId,
+      environment: d.environment,
+      appVersion: d.appVersion ?? null,
+      osVersion: d.osVersion ?? null,
+      bells: (d.transitions ?? []).map(clockTime),
+      end: clockTime(d.endMinutes),
+      updatedAt: d.updatedAt,
+    })),
+  };
+}
+
+/**
+ * Days the dashboard can show: today, plus the earlier days whose
+ * broadcast:{day} record hasn't expired yet (they last 3 days).
+ */
+async function statusDays(env, today) {
+  const earlier = [1, 2, 3].map(n => addDaysISO(today, -n));
+  const kept = await Promise.all(earlier.map(async d => (env.TOKENS && await env.TOKENS.get(`broadcast:${d}`) !== null) ? d : null));
+  return [today, ...kept.filter(Boolean)];
+}
+
+/** Everything /status shows, for one day. Also served raw as /status.json. */
+async function statusData(env, day) {
+  const today = nowInPT().iso;
+  let health;
+  try { health = await broadcastHealth(env); } catch (e) { health = `broadcast: UNKNOWN (could not read KV: ${e.message})`; }
+  return {
+    generatedAt: new Date().toISOString(),
+    today,
+    day,
+    days: await statusDays(env, today),
+    health,
+    broadcast: await readBroadcastStatus(env, day),
+    issues: await readIssues(env),
+    legacy: await readLegacyStatus(env),
   };
 }
 
@@ -980,6 +1040,577 @@ async function broadcastHealth(env) {
   const why = production ? `production: ${describeResult(production)}` : "never attempted";
   return `broadcast: FAILED, ${clockTime(bell)} not delivered (${why})`;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: - /status dashboard page
+//
+// One self-contained page: the data is embedded as JSON, the script draws it,
+// and switching days fetches /status.json. Charts come from Chart.js on
+// cdnjs; if that ever fails to load, the tables still show every number.
+//
+// EDITING: the page is a String.raw template, so it may not contain a
+// backtick or a dollar sign followed by an opening brace. Its script uses
+// plain string concatenation for that reason. Text from phones (problem
+// reports) is set with textContent only, never as HTML.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function statusPage(data) {
+  // Safe inside <script type="application/json">: no "<" can close the tag.
+  const embedded = JSON.stringify(data)
+    .replace(/</g, "\\u003c")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+  return new Response(STATUS_PAGE_HTML.replace("__STATUS_DATA__", () => embedded), {
+    status: 200,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+      "x-frame-options": "DENY",
+      "referrer-policy": "no-referrer",
+    },
+  });
+}
+
+const STATUS_PAGE_HTML = String.raw`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>LHS Life Server</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔔</text></svg>">
+<style>
+:root{--bg:#f5f5f4;--card:#fff;--text:#1c1917;--muted:#78716c;--line:#e7e5e4;--soft:#f5f5f4;--accent:#c9691f;--on-accent:#fff;--ok:#15803d;--bad:#dc2626;--warn:#d97706;--idle:#a8a29e;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#0c0a09;--card:#1c1917;--text:#f5f5f4;--muted:#a8a29e;--line:#2e2a27;--soft:#292524;--accent:#fb923c;--on-accent:#1c1917;--ok:#4ade80;--bad:#f87171;--warn:#fbbf24;--idle:#78716c;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-text-size-adjust:100%}
+main{max-width:1100px;margin:0 auto;padding:20px 16px 48px}
+a{color:var(--accent)}
+h1{font-size:22px;margin:0;letter-spacing:-.01em}
+h2{font-size:17px;margin:0}
+.sub,.desc,.hint,.muted{color:var(--muted)}
+.sub{font-size:13px}
+.top{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:16px}
+.controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+select,button,.btn{font:inherit;font-size:14px;padding:7px 12px;border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--text);max-width:100%}
+button,.btn{cursor:pointer;text-decoration:none;display:inline-block}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600}
+button:disabled{opacity:.6;cursor:default}
+.banner{display:flex;gap:12px;align-items:flex-start;background:var(--card);border:1px solid var(--line);border-left:5px solid var(--idle);border-radius:12px;padding:12px 16px;margin-bottom:16px}
+.banner.ok{border-left-color:var(--ok)}.banner.bad{border-left-color:var(--bad)}.banner.warn{border-left-color:var(--warn)}
+.banner b{display:block;font-size:16px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;min-width:0}
+.kpi .label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.kpi .value{font-size:24px;font-weight:650;margin-top:2px;line-height:1.25}
+.kpi .value.bad{color:var(--bad)}
+.kpi .hint{font-size:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px;min-width:0}
+.cardhead{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start;margin-bottom:12px}
+.cardhead .desc{font-size:13px;margin:2px 0 0;max-width:640px}
+.filters{display:flex;gap:8px;flex-wrap:wrap}
+.empty{color:var(--muted);padding:18px 0;text-align:center}
+.timeline .row{display:grid;grid-template-columns:150px minmax(0,1fr);gap:10px;align-items:center;margin:8px 0}
+.timeline .name{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.timeline .name small{display:block;color:var(--muted);font-size:11px}
+.track{position:relative;height:26px;background:var(--soft);border-radius:7px}
+.tick{position:absolute;top:4px;bottom:4px;width:4px;margin-left:-2px;border-radius:2px}
+.s-sent{background:var(--ok)}.s-missed{background:var(--bad)}.s-late{background:var(--warn)}
+.s-upcoming{background:transparent;box-shadow:inset 0 0 0 1.5px var(--idle)}.s-outside{background:var(--idle)}
+.nowline{position:absolute;top:-5px;bottom:-5px;width:2px;margin-left:-1px;background:var(--accent);border-radius:1px}
+.axis{position:relative;height:16px;font-size:11px;color:var(--muted)}
+.axis span{position:absolute;transform:translateX(-50%);white-space:nowrap}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted);margin-top:10px}
+.legend i,.chip i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.chip{font-size:12px;padding:3px 9px;border-radius:999px;background:var(--soft);white-space:nowrap}
+.chart{position:relative;height:240px}
+.chart.small{height:200px}
+.split{display:grid;grid-template-columns:minmax(0,1fr) 240px;gap:20px;align-items:center}
+.meter{height:12px;background:var(--soft);border-radius:999px;overflow:hidden;margin:8px 0 6px}
+.meter span{display:block;height:100%;background:var(--accent);border-radius:999px}
+.meter.full span{background:var(--bad)}
+.issue{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0}
+.issue .line{display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap}
+.issue .count{font-weight:650;white-space:nowrap}
+.issue .meta{font-size:12px;color:var(--muted);margin-top:2px}
+.issue .example{font-size:13px;margin-top:6px;overflow-wrap:anywhere}
+.badge{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--soft);margin-right:6px;vertical-align:1px}
+details{margin-top:10px}
+summary{cursor:pointer;font-size:13px;color:var(--muted)}
+.tablewrap{overflow-x:auto;margin-top:8px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:top}
+th{font-weight:600;color:var(--muted);font-size:12px}
+td.wrap{white-space:normal;min-width:180px;overflow-wrap:anywhere}
+.ok-text{color:var(--ok)}.bad-text{color:var(--bad)}
+.tools{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.tool{border:1px solid var(--line);border-radius:10px;padding:12px}
+.tool a{font-weight:600;text-decoration:none}
+.tool p{margin:4px 0 0;font-size:13px;color:var(--muted)}
+footer{font-size:12px;color:var(--muted);margin-top:8px}
+.error{border-left-color:var(--bad)}
+@media (max-width:640px){
+  .timeline .row{grid-template-columns:minmax(0,1fr);gap:4px}
+  .timeline .row .name small{display:inline;margin-left:6px}
+  .axis .odd{display:none}
+  .split{grid-template-columns:minmax(0,1fr)}
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .kpi .value{font-size:21px}
+}
+</style>
+</head>
+<body>
+<main id="app"><p class="muted">Loading…</p></main>
+<noscript><main><p>This page needs JavaScript. The same data is at <a href="/status.json">/status.json</a>.</p></main></noscript>
+<script id="data" type="application/json">__STATUS_DATA__</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  // Everything on this page comes from the Worker as JSON: inline for the
+  // first view, then from /status.json when the day changes. Text from phones
+  // (problem reports) is only ever set with textContent, never as HTML.
+  var data = JSON.parse(document.getElementById("data").textContent);
+  var charts = [];
+  var pending = [];
+  var state = { schedule: "all", issueDay: null, issueKind: "all" };
+
+  var STATUS = {
+    sent:     "Sent",
+    missed:   "Missed",
+    late:     "Reported after it rang",
+    upcoming: "Coming up",
+    outside:  "Outside 6 AM–5 PM (never sent)"
+  };
+  var KINDS = {
+    calendar_fetch: "Calendar",
+    schedule_image: "Schedule picture",
+    live_activity_start: "Live Activity",
+    registration: "Server",
+    web_load: "School website"
+  };
+  var PALETTE = ["--accent", "#3b82f6", "#8b5cf6", "#14b8a6", "#e11d48", "#64748b"];
+
+  // ── Small helpers ─────────────────────────────────────────────────────────
+
+  function el(tag, attrs, kids) {
+    var n = document.createElement(tag);
+    if (attrs) Object.keys(attrs).forEach(function (k) {
+      var v = attrs[k];
+      if (v === null || v === undefined || v === false) return;
+      if (k === "class") n.className = v;
+      else if (k === "text") n.textContent = v;
+      else if (k.slice(0, 2) === "on") n.addEventListener(k.slice(2), v);
+      else n.setAttribute(k, v === true ? "" : String(v));
+    });
+    (kids || []).forEach(function (c) {
+      if (c === null || c === undefined || c === false) return;
+      n.appendChild(typeof c === "object" ? c : document.createTextNode(String(c)));
+    });
+    return n;
+  }
+  function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function color(c) { return c.slice(0, 2) === "--" ? cssVar(c) : c; }
+  function clock(min) {
+    if (min === null || min === undefined) return "—";
+    var h = Math.floor(min / 60), m = min % 60;
+    return (h % 12 || 12) + ":" + (m < 10 ? "0" : "") + m + (h >= 12 ? " PM" : " AM");
+  }
+  function shortClock(min) { return clock(min).replace(":00", "").replace(" AM", " am").replace(" PM", " pm"); }
+  function hhmm(text) { return text.replace(/\b(\d{2}):(\d{2})\b/g, function (_, h, m) { return clock(Number(h) * 60 + Number(m)); }); }
+  var PT_TIME = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit", second: "2-digit" });
+  var PT_WHEN = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", weekday: "short", hour: "numeric", minute: "2-digit" });
+  var PT_PARTS = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  var DAY = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" });
+  function timeOf(iso) { return iso ? PT_TIME.format(new Date(iso)) : "—"; }
+  function whenOf(iso) { return iso ? PT_WHEN.format(new Date(iso)) : "—"; }
+  function minutesOf(iso) {
+    var p = PT_PARTS.formatToParts(new Date(iso));
+    var get = function (t) { return Number(p.filter(function (x) { return x.type === t; })[0].value); };
+    return (get("hour") % 24) * 60 + get("minute");
+  }
+  function isoDate(iso) { var p = iso.split("-").map(Number); return new Date(Date.UTC(p[0], p[1] - 1, p[2], 12)); }
+  function dayName(iso) { return DAY.format(isoDate(iso)); }
+  function addDays(iso, n) { var d = isoDate(iso); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+  function kindName(k) { return KINDS[k] || k; }
+  function plural(n, one, many) { return n + " " + (n === 1 ? one : (many || one + "s")); }
+  function median(list) { var s = list.slice().sort(function (a, b) { return a - b; }); return s.length ? s[Math.floor((s.length - 1) / 2)] : null; }
+  function letter(i) { return String.fromCharCode(65 + (i % 26)); }
+
+  function card(title, desc, right, body) {
+    return el("section", { class: "card" }, [
+      el("div", { class: "cardhead" }, [
+        el("div", null, [el("h2", { text: title }), desc ? el("p", { class: "desc", text: desc }) : null]),
+        right
+      ])
+    ].concat(body));
+  }
+  function select(label, options, value, onchange) {
+    return el("select", { "aria-label": label, onchange: function () { onchange(this.value); } },
+      options.map(function (o) { return el("option", { value: o[0], selected: o[0] === value, text: o[1] }); }));
+  }
+  function chart(height, config) {
+    var box = el("div", { class: "chart" + (height === "small" ? " small" : "") });
+    if (window.Chart) {
+      var canvas = el("canvas", { role: "img", "aria-label": config.label || "Chart" });
+      box.appendChild(canvas);
+      pending.push({ canvas: canvas, config: config });
+    } else {
+      box.style.height = "auto";
+      box.appendChild(el("p", { class: "empty", text: "The chart library didn't load. The table below has the same numbers." }));
+    }
+    return box;
+  }
+  function table(head, rows) {
+    return el("div", { class: "tablewrap" }, [el("table", null, [
+      el("thead", null, [el("tr", null, head.map(function (h) { return el("th", { text: h }); }))]),
+      el("tbody", null, rows.map(function (r) {
+        return el("tr", null, r.map(function (c) {
+          return c && typeof c === "object" && !c.nodeType ? el("td", { class: c.cls, title: c.title, text: c.text }) : el("td", null, [c]);
+        }));
+      }))
+    ])]);
+  }
+
+  // ── Sections ──────────────────────────────────────────────────────────────
+
+  function header() {
+    var days = data.days.indexOf(data.day) === -1 ? data.days.concat([data.day]) : data.days;
+    var options = days.map(function (d) { return [d, (d === data.today ? "Today · " : "") + dayName(d)]; });
+    return el("header", { class: "top" }, [
+      el("div", null, [
+        el("h1", { text: "LHS Life Server" }),
+        el("div", { class: "sub", text: "Live Activity bells and problem reports · all times Pacific" })
+      ]),
+      el("div", { class: "controls" }, [
+        select("Day", options, data.day, load),
+        el("button", { id: "refresh", class: "primary", onclick: function () { load(data.day); }, text: "Refresh" })
+      ])
+    ]);
+  }
+
+  function banner() {
+    var h = data.health || "";
+    var detail = hhmm(h.replace(/^broadcast:\s*/, ""));
+    var kind = "warn", title = "Can't tell whether bells are going out";
+    var m;
+    if (/^broadcast: ok/.test(h)) {
+      kind = "ok"; title = "Bells are going out";
+      if ((m = /last (\S+ [AP]M)( \(day ended\))?/.exec(detail))) detail = m[2] ? "The last bell, " + m[1] + ", went out and ended the day." : "The latest bell, " + m[1] + ", went out.";
+      else if ((m = /first bell (\S+ [AP]M)/.exec(detail))) detail = "Waiting for the first bell at " + m[1] + ".";
+    }
+    else if (/FAILED/.test(h)) { kind = "bad"; title = "A bell didn't go out"; detail = detail.replace(/^FAILED, /, ""); }
+    else if (/idle/.test(h)) {
+      kind = "idle"; title = "Nothing to send right now";
+      if (/weekend/.test(h)) detail = "It's the weekend.";
+      else if (/no bells/.test(h)) detail = "No phone has reported today's bells yet.";
+    }
+    if (data.day !== data.today) detail += " (That's today. Below is " + dayName(data.day) + ".)";
+    return el("div", { class: "banner " + kind, role: "status" }, [
+      el("div", null, [el("b", { text: title }), el("span", { class: "muted", text: detail.charAt(0).toUpperCase() + detail.slice(1) })])
+    ]);
+  }
+
+  function kpis() {
+    var b = data.broadcast, bells = b.bells || [];
+    var inHours = bells.filter(function (x) { return x.status !== "outside"; });
+    var sent = bells.filter(function (x) { return x.status === "sent"; }).length;
+    var missed = bells.filter(function (x) { return x.status === "missed"; }).length;
+    var last = b.lastResult && b.lastResult.production;
+    var delays = (b.sends || []).filter(function (s) { return s.production && s.production.status === 200; }).map(function (s) { return s.delaySeconds; });
+    var typical = median(delays);
+    var L = data.legacy || { deviceCount: 0, limit: 0 };
+    var item = function (label, value, hint, bad) {
+      return el("div", { class: "kpi" }, [
+        el("div", { class: "label", text: label }),
+        el("div", { class: "value" + (bad ? " bad" : ""), text: value }),
+        el("div", { class: "hint", text: hint })
+      ]);
+    };
+    return el("div", { class: "kpis" }, [
+      item("Bells sent", inHours.length ? sent + " of " + inHours.length : "—", missed ? plural(missed, "missed") : "none missed", missed > 0),
+      item("Schedules", String(b.schedulesReported || 0), "different bell schedules"),
+      item("Last send", last ? clock(last.bell) : "—", last ? (last.kind === "end" ? "end of day · " : "") + last.text : "nothing sent yet", last && last.status !== 200),
+      item("Typical delay", typical === null ? "—" : typical + " s", "after the bell"),
+      item("Problems today", String(data.issues.devicesReportingToday || 0), plural(data.issues.groupsToday || 0, "kind", "kinds") + " reported", (data.issues.devicesReportingToday || 0) > 0),
+      item("v1.2 phones", L.deviceCount + " / " + L.limit, "old per-phone path", L.atCapacity)
+    ]);
+  }
+
+  function bellsCard() {
+    var b = data.broadcast, bells = b.bells || [];
+    var desc = "Each tick is a bell. Phones report their bells when their Live Activity starts; the Worker sends one push per bell to everyone.";
+    if (!bells.length) {
+      return card("Bells", desc, null, [el("p", { class: "empty", text: "No phone has reported its bells for " + (data.day === data.today ? "today" : dayName(data.day)) + " yet. They usually do within the hour before first bell." })]);
+    }
+    var status = {};
+    bells.forEach(function (x) { status[x.minute] = x.status; });
+
+    var schedules = (b.schedules || []).slice().sort(function (p, q) { return (p.bells[0] - q.bells[0]) || (q.bells.length - p.bells.length); });
+    schedules.forEach(function (s, i) { s.name = "Schedule " + letter(i); });
+    if (!schedules.length) schedules = [{ id: "all-bells", name: "All bells", bells: bells.map(function (x) { return x.minute; }) }];
+    if (state.schedule !== "all" && !schedules.some(function (s) { return s.id === state.schedule; })) state.schedule = "all";
+
+    var first = bells[0].minute, last = bells[bells.length - 1].minute;
+    var lo = Math.floor(Math.min(360, first - 15) / 60) * 60, hi = Math.ceil(Math.max(1020, last + 15) / 60) * 60;
+    var pct = function (m) { return ((m - lo) / (hi - lo) * 100).toFixed(2) + "%"; };
+    var nowMin = data.day === data.today ? minutesOf(data.generatedAt) : null;
+
+    var track = function (list) {
+      var t = el("div", { class: "track" });
+      list.forEach(function (m) {
+        t.appendChild(el("div", { class: "tick s-" + status[m], style: "left:" + pct(m), title: clock(m) + " · " + STATUS[status[m]] }));
+      });
+      if (nowMin !== null && nowMin >= lo && nowMin <= hi) t.appendChild(el("div", { class: "nowline", style: "left:" + pct(nowMin), title: "Now · " + clock(nowMin) }));
+      return t;
+    };
+    var row = function (name, sub, list) {
+      return el("div", { class: "row" }, [el("div", { class: "name", title: name }, [name, el("small", { text: sub })]), track(list)]);
+    };
+
+    var shown = state.schedule === "all" ? schedules : schedules.filter(function (s) { return s.id === state.schedule; });
+    var rows = [];
+    if (schedules.length > 1 && state.schedule === "all") rows.push(row("Every bell", plural(bells.length, "bell"), bells.map(function (x) { return x.minute; })));
+    shown.forEach(function (s) { rows.push(row(s.name, clock(s.bells[0]) + "–" + clock(s.bells[s.bells.length - 1]), s.bells)); });
+
+    var axis = el("div", { class: "axis" });
+    for (var m = lo; m <= hi; m += 60) axis.appendChild(el("span", { class: (m / 60) % 2 ? "odd" : null, style: "left:" + pct(m), text: shortClock(m) }));
+    rows.push(el("div", { class: "row" }, [el("div"), axis]));
+
+    // Exact times for one schedule; with several, the dropdown picks which.
+    var chips = shown.length === 1
+      ? el("div", { class: "chips" }, shown[0].bells.map(function (m) {
+          return el("span", { class: "chip", title: STATUS[status[m]] }, [el("i", { class: "s-" + status[m] }), clock(m)]);
+        }))
+      : el("p", { class: "muted", style: "font-size:13px;margin:10px 0 0", text: "Pick a schedule above to list its times." });
+    var used = Object.keys(STATUS).filter(function (k) { return bells.some(function (x) { return x.status === k; }); });
+    var legend = el("div", { class: "legend" }, used.map(function (k) { return el("span", null, [el("i", { class: "s-" + k }), STATUS[k]]); }));
+    if (nowMin !== null) legend.appendChild(el("span", null, [el("i", { style: "background:var(--accent);width:3px" }), "Now"]));
+
+    var options = [["all", "All schedules"]].concat(schedules.map(function (s) {
+      return [s.id, s.name + " · " + plural(s.bells.length, "bell") + " · " + clock(s.bells[0]) + "–" + clock(s.bells[s.bells.length - 1])];
+    }));
+    var picker = schedules.length > 1 || schedules[0].id !== "all-bells"
+      ? el("div", { class: "filters" }, [select("Schedule", options, state.schedule, function (v) { state.schedule = v; render(); })])
+      : null;
+
+    return card("Bells", desc, picker, [el("div", { class: "timeline" }, rows), legend, chips]);
+  }
+
+  function sendsCard() {
+    var sends = data.broadcast.sends || [];
+    var desc = "One bar per push to Apple, by how long after the bell Apple accepted it. The Worker checks once a minute, so up to about 60 seconds is normal. Red means Apple refused it on production, the channel students' phones use.";
+    if (!sends.length) return card("Deliveries", desc, null, [el("p", { class: "empty", text: "Nothing has been sent " + (data.day === data.today ? "yet today." : "on this day.") })]);
+    var good = function (s) { return s.production && s.production.status === 200; };
+    var body = [
+      chart("normal", {
+        label: "Seconds after each bell that Apple accepted the push",
+        type: "bar",
+        data: {
+          labels: sends.map(function (s, i) {
+            var retry = sends.slice(0, i).some(function (p) { return p.bell === s.bell && p.kind === s.kind; });
+            return clock(s.bell) + (s.kind === "end" ? " · end" : "") + (retry ? " · retry" : "");
+          }),
+          datasets: [{
+            data: sends.map(function (s) { return Math.max(0, s.delaySeconds); }),
+            backgroundColor: sends.map(function (s) { return color(good(s) ? "--ok" : "--bad"); }),
+            borderRadius: 4, maxBarThickness: 36
+          }]
+        },
+        options: {
+          plugins: { legend: { display: false }, tooltip: { callbacks: {
+            label: function (c) { return c.parsed.y + " s after the bell"; },
+            afterLabel: function (c) {
+              var s = sends[c.dataIndex];
+              return ["Production: " + (s.production ? s.production.text : "—"), "Sandbox: " + (s.sandbox ? s.sandbox.text : "—"), "Sent " + timeOf(s.at)];
+            }
+          } } },
+          scales: { y: { beginAtZero: true, title: { display: true, text: "Seconds after the bell" } }, x: { grid: { display: false } } }
+        }
+      }),
+      el("details", null, [
+        el("summary", { text: "Every send (" + sends.length + ")" }),
+        table(["Bell", "Kind", "Sent at", "Delay", "Production", "Sandbox"], sends.slice().reverse().map(function (s) {
+          return [clock(s.bell), s.kind === "end" ? "End of day" : "Update", timeOf(s.at), s.delaySeconds + " s",
+            { text: s.production ? s.production.text : "—", cls: good(s) ? "ok-text" : "bad-text" },
+            { text: s.sandbox ? s.sandbox.text : "—", cls: s.sandbox && s.sandbox.status === 200 ? "ok-text" : "bad-text" }];
+        }))
+      ])
+    ];
+    return card("Deliveries", desc, null, body);
+  }
+
+  function issuesCard() {
+    var iss = data.issues || { groups: [] };
+    var groups = iss.groups || [];
+    var desc = "Phones report a problem the school can fix, at most once a day each. A handful of phones is someone's Wi-Fi; dozens is an outage. Kept for 7 days. Days here are UTC, so a new day starts at 5 PM Pacific.";
+    if (iss.note && !groups.length) return card("Problem reports", desc, null, [el("p", { class: "empty", text: iss.note })]);
+    if (!groups.length) return card("Problem reports", desc, null, [el("p", { class: "empty", text: "No problems reported in the past week." })]);
+
+    var days = [];
+    for (var i = 6; i >= 0; i--) days.push(addDays(iss.today, -i));
+    var kinds = [];
+    groups.forEach(function (g) { if (kinds.indexOf(g.kind) === -1) kinds.push(g.kind); });
+    if (state.issueDay === null) state.issueDay = iss.today;
+    if (state.issueKind !== "all" && kinds.indexOf(state.issueKind) === -1) state.issueKind = "all";
+
+    var dayOptions = [["all", "Past week"]].concat(days.slice().reverse().map(function (d) {
+      var n = groups.filter(function (g) { return g.day === d; }).reduce(function (a, g) { return a + g.deviceCount; }, 0);
+      return [d, (d === iss.today ? "Today · " : "") + dayName(d) + " (" + n + ")"];
+    }));
+    var kindOptions = [["all", "All kinds"]].concat(kinds.map(function (k) { return [k, kindName(k)]; }));
+    var filters = el("div", { class: "filters" }, [
+      select("Day", dayOptions, state.issueDay, function (v) { state.issueDay = v; render(); }),
+      select("Kind", kindOptions, state.issueKind, function (v) { state.issueKind = v; render(); })
+    ]);
+
+    var weekChart = chart("small", {
+      label: "Phones reporting each kind of problem, per day",
+      type: "bar",
+      data: {
+        labels: days.map(dayName),
+        datasets: kinds.map(function (k, i) {
+          return {
+            label: kindName(k),
+            data: days.map(function (d) { return groups.filter(function (g) { return g.day === d && g.kind === k; }).reduce(function (a, g) { return a + g.deviceCount; }, 0); }),
+            backgroundColor: color(PALETTE[i % PALETTE.length]), borderRadius: 3, maxBarThickness: 40
+          };
+        })
+      },
+      options: {
+        plugins: { legend: { position: "bottom", labels: { boxWidth: 10, boxHeight: 10 } } },
+        scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 }, title: { display: true, text: "Phones" } } }
+      }
+    });
+
+    var shown = groups.filter(function (g) {
+      return (state.issueDay === "all" || g.day === state.issueDay) && (state.issueKind === "all" || g.kind === state.issueKind);
+    });
+    var list = shown.length ? shown.map(function (g) {
+      return el("div", { class: "issue" }, [
+        el("div", { class: "line" }, [
+          el("div", null, [el("span", { class: "badge", text: kindName(g.kind) }), el("span", { text: g.subject || "—" })]),
+          el("span", { class: "count", text: plural(g.deviceCount, "phone") })
+        ]),
+        el("div", { class: "meta", text: dayName(g.day) + " · first " + whenOf(g.firstSeen) + " · last " + whenOf(g.lastSeen) + (g.appVersions.length ? " · app " + g.appVersions.join(", ") : "") }),
+        g.example ? el("div", { class: "example", text: g.example }) : null,
+        el("details", null, [
+          el("summary", { text: "Each report (" + g.reports.length + ")" }),
+          table(["When", "App", "iOS", "Device", "Message"], g.reports.map(function (r) {
+            return [whenOf(r.at), r.appVersion || "—", r.osVersion || "—", { text: (r.deviceId || "").slice(0, 8), title: r.deviceId }, { text: r.detail || "—", cls: "wrap" }];
+          }))
+        ])
+      ]);
+    }) : [el("p", { class: "empty", text: "Nothing reported for this choice." })];
+
+    var body = [weekChart].concat(list);
+    if (iss.truncated) body.push(el("p", { class: "muted", text: "Showing the first 1,000 reports only." }));
+    return card("Problem reports", desc, filters, body);
+  }
+
+  function legacyCard() {
+    var L = data.legacy;
+    if (!L) return null;
+    var desc = "Phones still on version 1.2 get one push each instead of the broadcast. On the free plan there's room for about " + L.limit + ". This section goes away once they've all updated.";
+    if (!L.deviceCount) return card("v1.2 phones", desc, null, [el("p", { class: "empty", text: "No v1.2 phones left. Once this stays at zero, the legacy code in the Worker can be removed." })]);
+
+    var versions = {};
+    L.devices.forEach(function (d) { var v = d.appVersion || "unknown"; versions[v] = (versions[v] || 0) + 1; });
+    var names = Object.keys(versions).sort();
+    var used = Math.min(100, Math.round(L.deviceCount / Math.max(1, L.limit) * 100));
+    var summary = el("div", null, [
+      el("div", { text: L.deviceCount + " of " + L.limit + " slots used" + (L.atCapacity ? " — full, new v1.2 phones are turned away" : "") }),
+      el("div", { class: "meter" + (L.atCapacity ? " full" : "") }, [el("span", { style: "width:" + used + "%" })]),
+      el("div", { class: "muted", style: "font-size:12px", text: "Limit from " + L.limitSource + (L.provenCapacity ? " · most ever sent at one bell: " + L.provenCapacity : "") + (L.ceilingHitAt ? " · last hit the ceiling " + whenOf(L.ceilingHitAt) : "") })
+    ]);
+    var donut = chart("small", {
+      label: "v1.2 phones by app version",
+      type: "doughnut",
+      data: { labels: names, datasets: [{ data: names.map(function (n) { return versions[n]; }), backgroundColor: names.map(function (_, i) { return color(PALETTE[i % PALETTE.length]); }), borderWidth: 0 }] },
+      options: { cutout: "62%", plugins: { legend: { position: "bottom", labels: { boxWidth: 10, boxHeight: 10 } } } }
+    });
+    return card("v1.2 phones", desc, null, [
+      el("div", { class: "split" }, [summary, donut]),
+      el("details", null, [
+        el("summary", { text: "Each phone (" + L.deviceCount + ")" }),
+        table(["Device", "Build", "App", "iOS", "Bells", "Last bell", "Updated"], L.devices.map(function (d) {
+          return [{ text: (d.deviceId || "").slice(0, 8), title: d.deviceId }, d.environment === "sandbox" ? "Xcode" : "App Store", d.appVersion || "—", d.osVersion || "—",
+            String(d.bells.length), d.end ? hhmm(d.end) : "—", whenOf(d.updatedAt)];
+        }))
+      ])
+    ]);
+  }
+
+  function toolsCard() {
+    var tool = function (href, name, about) {
+      return el("div", { class: "tool" }, [el("a", { href: href, target: "_blank", rel: "noopener", text: name }), el("p", { text: about })]);
+    };
+    return card("Tools", null, null, [el("div", { class: "tools" }, [
+      tool("/health", "Health check", "One line, no password. Point an uptime monitor at it and alert when it says FAILED."),
+      tool("/test-broadcast?env=sandbox", "Send a test bell to Xcode builds", "Sends one push on the sandbox channel and explains Apple's answer. Students' phones aren't affected."),
+      tool("/status.json?day=" + encodeURIComponent(data.day), "Raw data (JSON)", "Everything on this page, for scripts."),
+      tool("https://icloud.developer.apple.com/dashboard/notifications", "Apple Push Notifications Console", "How many phones are listening on the broadcast channel. The Worker never knows.")
+    ])]);
+  }
+
+  function footer() {
+    return el("footer", { text: "Loaded " + whenOf(data.generatedAt) + ". Each load uses 2 of the free plan's 1,000 daily storage listings, so this page refreshes only when you press Refresh." });
+  }
+
+  // ── Rendering and loading ─────────────────────────────────────────────────
+
+  function render() {
+    charts.forEach(function (c) { c.destroy(); });
+    charts = []; pending = [];
+    var app = document.getElementById("app");
+    app.textContent = "";
+    [header(), banner(), kpis(), bellsCard(), sendsCard(), issuesCard(), legacyCard(), toolsCard(), footer()]
+      .forEach(function (n) { if (n) app.appendChild(n); });
+    if (window.Chart) {
+      Chart.defaults.color = cssVar("--muted");
+      Chart.defaults.borderColor = cssVar("--line");
+      Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+      pending.forEach(function (p) {
+        p.config.options = p.config.options || {};
+        p.config.options.responsive = true;
+        p.config.options.maintainAspectRatio = false;
+        charts.push(new Chart(p.canvas, p.config));
+      });
+    }
+  }
+
+  function load(day) {
+    var button = document.getElementById("refresh");
+    if (button) { button.disabled = true; button.textContent = "Loading…"; }
+    fetch("/status.json?day=" + encodeURIComponent(day), { credentials: "same-origin", headers: { accept: "application/json" } })
+      .then(function (r) { if (!r.ok) throw new Error("The server answered " + r.status + "."); return r.json(); })
+      .then(function (d) {
+        data = d;
+        try { history.replaceState(null, "", d.day === d.today ? "/status" : "/status?day=" + d.day); } catch (e) {}
+        render();
+      })
+      .catch(function (e) {
+        if (button) { button.disabled = false; button.textContent = "Refresh"; }
+        var app = document.getElementById("app");
+        var old = document.getElementById("load-error");
+        if (old) old.remove();
+        app.insertBefore(el("div", { id: "load-error", class: "banner bad error", role: "alert" }, [
+          el("div", null, [el("b", { text: "Couldn't load" }), el("span", { class: "muted", text: e.message + " Try again, or reload the page to sign in again." })])
+        ]), app.children[1] || null);
+      });
+  }
+
+  if (window.matchMedia) {
+    var scheme = window.matchMedia("(prefers-color-scheme: dark)");
+    if (scheme.addEventListener) scheme.addEventListener("change", render);
+  }
+  render();
+})();
+</script>
+</body>
+</html>`;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MARK: - Token registration (legacy: v1.2 transition — remove after students update)
@@ -1413,20 +2044,20 @@ async function handleReport(request, env) {
 }
 
 /**
- * Every problem reported in the last week, grouped.
+ * Every problem reported in the last week, grouped, with the individual
+ * reports behind each group (device ID, app build, iOS version, message).
  *
  * One list() call. That matters: list() is capped at 1,000/day on the free
- * plan and the cron already spends ~720 reconciling the device registry, so
- * this stays a single call per page view rather than one per group.
+ * plan and the cron already spends ~660 of them, so this stays a single call
+ * per page view rather than one per group.
  *
- * Without full, only TODAY is listed. A row on this page means "this
- * happened", not "this is happening", and a three-day-old row sitting next to
- * a live one reads like a fire that is still burning. The older rows are
- * still worth keeping — they answer "when did this start?" — so full brings
- * back the whole week, along with the individual reports behind each row
- * (device ID, app build, iOS version, message).
+ * The whole week comes back; the dashboard shows today first and puts the
+ * older days behind a dropdown. A row means "this happened", not "this is
+ * happening", so a three-day-old row is not shown next to a live one unless
+ * someone asks — but it is kept, because it answers "when did this start?".
+ * Days are UTC, as the keys are.
  */
-async function readIssues(env, full) {
+async function readIssues(env) {
   if (!env.TOKENS) return { note: "KV binding 'TOKENS' is not configured.", groups: [] };
 
   let listing;
@@ -1470,49 +2101,30 @@ async function readIssues(env, full) {
     }
     if (meta.v) group.appVersions.add(meta.v);
     if (!group.example && meta.d) group.example = meta.d;
-    if (full) {
-      group.reports.push({
-        deviceId,
-        appVersion: meta.v ?? null,
-        osVersion: meta.o ?? null,
-        detail: meta.d ?? null,
-        at: meta.t ?? null,
-      });
-    }
+    group.reports.push({
+      deviceId,
+      appVersion: meta.v ?? null,
+      osVersion: meta.o ?? null,
+      detail: meta.d ?? null,
+      at: meta.t ?? null,
+    });
   }
 
-  // Today first, then the biggest problems — which is the order someone
+  // Newest day first, then the biggest problems — which is the order someone
   // looking at this page actually cares about.
   const sorted = [...groups.values()].sort((a, b) =>
     (b.day.localeCompare(a.day)) || (b.deviceCount - a.deviceCount)
   );
-
   const todayGroups = sorted.filter(g => g.day === today);
-  const shown = full ? sorted : todayGroups;
-  const hidden = sorted.length - shown.length;
 
   return {
+    today,
     // Named so the page answers "is anything wrong RIGHT NOW" before anyone
     // has to interpret a list.
     devicesReportingToday: todayGroups.reduce((n, g) => n + g.deviceCount, 0),
     groupsToday: todayGroups.length,
-    // Says out loud that there is more to see, so nobody concludes from an
-    // empty page that nothing has ever gone wrong.
-    ...(hidden > 0
-      ? { earlierDays: `${hidden} problem(s) from the past week — add ?full=1 to see them` }
-      : {}),
     truncated: listing.list_complete === false,
-    groups: shown.map(g => ({
-      day: g.day,
-      kind: g.kind,
-      subject: g.subject,
-      deviceCount: g.deviceCount,
-      firstSeen: g.firstSeen,
-      lastSeen: g.lastSeen,
-      appVersions: [...g.appVersions],
-      example: g.example,
-      ...(full ? { reports: g.reports } : {}),
-    })),
+    groups: sorted.map(g => ({ ...g, appVersions: [...g.appVersions] })),
   };
 }
 
@@ -2187,8 +2799,7 @@ async function removeDevice(deviceId, env) {
  *   dow — 0=Sunday … 6=Saturday (matches JS getDay() convention)
  *   iso — "YYYY-MM-DD" in Pacific time (for KV keys / schedule lookup)
  */
-function nowInPT() {
-  const now = new Date(); // UTC epoch — safe everywhere
+function nowInPT(now = new Date()) { // any epoch-safe Date; default now
 
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Los_Angeles",

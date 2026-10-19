@@ -131,8 +131,10 @@ a Live Activity on the iPad Lock Screen and can't open the App Store.
 
 ### 4.3 Server
 - [ ] During school, `/health` shows `broadcast: ok, last …`, never FAILED.
-- [ ] `/status` shows today's bells, at least one schedule reported, and each
-      send accepted by Apple (200) on production.
+- [ ] `/status` shows today's bells marked Sent in green, at least one
+      schedule, and each delivery bar green (Apple 200 on production).
+- [ ] `/status` day dropdown switches to yesterday and back; Refresh works.
+- [ ] `/status` reads well on a phone (no sideways scrolling) and in dark mode.
 - [ ] `/test-broadcast` (sandbox) on an Xcode build: the card changes within
       seconds and the page explains Apple's answer.
 - [ ] The uptime monitor on `/health` is running and alerts on FAILED.
