@@ -68,12 +68,10 @@ final class StaticAnalysisTests: XCTestCase {
             hits.map { "  \($0.file):\($0.line)  \($0.text)" }.joined(separator: "\n"))
     }
 
-    // MARK: 11.3 No ObservableObject conformance (except RemindersService)
+    // MARK: 11.3 No ObservableObject conformance
 
     func test_noObservableObject() {
-        let excluded = ["RemindersService.swift"]
-        let files    = appSwiftFiles.filter { !excluded.contains($0.lastPathComponent) }
-        let hits     = occurrences(of: ": ObservableObject", in: files)
+        let hits = occurrences(of: ": ObservableObject", in: appSwiftFiles)
         XCTAssertTrue(hits.isEmpty,
             ": ObservableObject found \(hits.count) time(s). Use @Observable instead.\n" +
             hits.map { "  \($0.file):\($0.line)  \($0.text)" }.joined(separator: "\n"))

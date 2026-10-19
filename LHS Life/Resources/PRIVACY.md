@@ -1,6 +1,6 @@
 # LHS Life Privacy Policy
 
-_Effective September 2026_
+_Effective October 2026_
 
 LHS Life is a student-built companion app for La Salle High School in Yakima, WA. It's designed to keep as much as possible on your own device. This policy explains what the app stores, what leaves your device, how long it's kept, and how to delete it.
 
@@ -18,26 +18,25 @@ If you're signed in to iCloud, LHS Life uses Apple's iCloud key-value storage to
 
 ## What's sent to the LHS Life server (only with Live Activities on)
 
-To keep the bell schedule on your Lock Screen and Dynamic Island up to date, a small server sends updates to your device at each bell. To do that, the app sends it:
+To keep the bell schedule on your Lock Screen and Dynamic Island up to date, a small server sends one update at each bell through Apple's push service, and Apple delivers that same update to every phone showing the LHS Life Live Activity. Each phone works out its own class from the schedule it already has. So the server never needs to know which phones are listening — the app sends it only:
 
 | Data | Why |
 |---|---|
-| A random device ID created by the app | Keeps your registration separate from other devices. Not tied to your name, email, or Apple ID. |
-| A Live Activity push token from Apple | Lets the server send your Lock Screen updates through Apple's push service. |
-| Today's period start and end times (not counting periods you turned off) | So updates arrive at the right moments for your schedule. |
-| App version and iOS version | Helps figure out which version is involved when something breaks. |
+| Today's period start and end times (not counting periods you turned off) | So the server sends an update at each of your bells. |
+
+The app also says whether it's an App Store or a test build, which the server ignores. Nothing identifies your device: no device ID, no push token, no app or iOS version. Phones on the same schedule send the same times, so the server keeps each different schedule once, with nothing to say whose it is.
 
 **Not sent:** your name, school email, graduation year, period names, grades, assignments, location, or contacts.
 
-**How long it's kept:** the server keeps a device's record only while that device's Live Activity is running. The record is deleted when the Live Activity ends, when Apple reports the push token is no longer valid, or when you use Delete All Data.
+**How long it's kept:** the bell times are deleted automatically after about 3 days.
 
 ## Problem reports
 
-When something breaks in a way the school can fix — the school calendar can't be reached, a posted schedule can't be read, a school website won't load — the app tells the same server, so the school can see how many devices are affected instead of waiting for someone to report it. It sends the random device ID, the app and iOS version, and a short description of the failure, at most once per device per problem per day. It never sends what you typed, what you were looking at, or anything about you. These reports are deleted automatically after a week.
+When something breaks in a way the school can fix — the school calendar can't be reached, a posted schedule can't be read, a school website won't load — the app tells the same server, so the school can see how many devices are affected instead of waiting for someone to report it. It sends a random install ID, the app and iOS version, and a short description of the failure, at most once per device per problem per day. It never sends what you typed, what you were looking at, or anything about you. These reports are deleted automatically after 7 days.
 
 ## Who else is involved
 
-- **Cloudflare** hosts the LHS Life server. Cloudflare can see the IP address of each request. The server doesn't store IP addresses, but Cloudflare keeps short-term request logs (a few days), which include the random device ID.
+- **Cloudflare** hosts the LHS Life server. Cloudflare can see the IP address of each request. The server doesn't store IP addresses, but Cloudflare keeps short-term request logs (a few days), which include the random install ID sent with problem reports.
 - **Apple** delivers Lock Screen updates and notifications through the Apple Push Notification service, and runs iCloud.
 
 LHS Life only uses these providers to run the features described here. Their handling of this data is covered by the [Cloudflare Privacy Policy](https://www.cloudflare.com/privacypolicy/) and the [Apple Privacy Policy](https://www.apple.com/legal/privacy/), which protect it at least as well as this policy does. LHS Life doesn't sell or share your data with anyone else.
@@ -61,10 +60,10 @@ Anything saved to Calendar or Reminders belongs to you and stays there, even if 
 
 ## Your choices and deleting your data
 
-- **Turn off Live Activities** (LHS Life Settings) to stop sending anything to the LHS Life server. Your record there is removed when the current Live Activity ends.
+- **Turn off Live Activities** (LHS Life Settings) to stop sending your bell times to the LHS Life server.
 - **Turn off notifications, calendar, or reminders access** at any time in the iOS Settings app, under LHS Life.
 - **Sign Out** (LHS Life Settings) clears your email and graduation year.
-- **Delete All Data** (LHS Life Settings) resets all LHS Life settings on your device and in iCloud, clears the saved copy of the school calendar, signs you out of PowerSchool, Schoology, and lunch ordering, and removes your device from the LHS Life server.
+- **Delete All Data** (LHS Life Settings) resets all LHS Life settings on your device and in iCloud, clears the saved copy of the school calendar, signs you out of PowerSchool, Schoology, and lunch ordering, and gives your device a new random ID for any future problem reports.
 - **Deleting the app** removes everything it stored on your device.
 
 Because the server doesn't know who you are, there's nothing about you to look up or delete on request beyond the steps above. If you have questions, contact us below.

@@ -176,7 +176,6 @@ private struct DayView: View {
                 // Fixed header
                 // Dynamic spacing tried and failed: Color.clear.frame(height: geo.safeAreaInsets.top)
                 Color.clear.frame(height: LS.contentTopInset)
-                PhoneCapacityBanner()
                 WeekStrip(selectedDate: Binding(
                     get: { uiState.selectedDate },
                     set: { uiState.selectedDate = $0 }
@@ -1190,7 +1189,6 @@ private struct MonthView: View {
         GeometryReader { geo in
             VStack(spacing: 0) {
                 Color.clear.frame(height: LS.contentTopInset)
-                PhoneCapacityBanner()
 
                 // Weekday header lifted OUT of MonthGrid and pinned here, the
                 // way Apple Calendar does it — one row for the whole view
@@ -1427,7 +1425,6 @@ private struct YearView: View {
         GeometryReader { geo in
             VStack(spacing: 0) {
                 Color.clear.frame(height: LS.contentTopInset)
-                PhoneCapacityBanner()
 
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: false) {
@@ -1596,19 +1593,4 @@ private struct MiniMonthView: View {
         .environment(CalendarStore())
         .environment(UserSettings.shared)
         .environment(CalendarUIState())
-}
-
-// MARK: - Server-full banner (iPhone)
-
-/// The Events tab lays itself out from a fixed top inset rather than the safe
-/// area, so the banner has to sit in that flow — a safe-area inset floated it
-/// over the week strip. iPad shows it in the sidebar instead.
-private struct PhoneCapacityBanner: View {
-    var body: some View {
-        if UIDevice.current.userInterfaceIdiom == .phone {
-            CapacityBanner()
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
-        }
-    }
 }

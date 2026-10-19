@@ -11,17 +11,17 @@
 import Foundation
 import EventKit
 import Observation
-import Combine
 
 @MainActor
-final class RemindersService: ObservableObject {
+@Observable
+final class RemindersService {
 
     // Shared instance so App Intents (Siri/Shortcuts) read the same
     // authorization/state the UI does — same reasoning as CalendarStore.shared.
     static let shared = RemindersService()
 
     private let ekStore = EKEventStore()
-    @Published var authorizationStatus: EKAuthorizationStatus = .notDetermined
+    var authorizationStatus: EKAuthorizationStatus = .notDetermined
 
     private static let listNameKey       = "homework_list_identifier"
     private static let defaultListTitle  = "Homework"

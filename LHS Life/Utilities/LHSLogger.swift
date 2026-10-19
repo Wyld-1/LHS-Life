@@ -26,7 +26,7 @@ enum LHSLogger {
     static let engine   = Logger(subsystem: "lhslife", category: "engine")
     /// Grad-year / Pathways / senior checks
     static let gradYear = Logger(subsystem: "lhslife", category: "gradYear")
-    /// Live Activity start/end decisions and push token registration.
+    /// Live Activity start/end decisions and bell reports to the worker.
     ///
     /// Use .notice or .error here, never .debug: debug-level messages aren't
     /// persisted by default, so they're invisible when inspecting a TestFlight

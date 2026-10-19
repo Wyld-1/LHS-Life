@@ -4,8 +4,7 @@
 //
 //  "Preview Live Activities" — puts up a frozen sample Live Activity, because
 //  most students don't know what one is until they see it. A row in
-//  Settings → Lock Screen; the "couldn't start" sheet and the first
-//  server-full alert call LiveActivityService.startPreview directly.
+//  Settings → Lock Screen, the one place it's offered.
 //
 //  Hidden while a real Live Activity is running (it's already on the Lock
 //  Screen) and on a Mac, which has no Lock Screen.

@@ -3,15 +3,15 @@
 //  LHS Life
 //
 //  Delete All Data, all of it. UserSettings.deleteAllData() resets what the
-//  app stores in UserDefaults and iCloud, but two things live out of its
+//  app stores in UserDefaults and iCloud, but some things live out of its
 //  reach — and UserSettings is compiled into the widget too, so it can't
-//  import WebKit or talk to the worker:
+//  import WebKit:
 //
 //    1. Web logins. PowerSchool, Schoology, and lunch ordering keep their
 //       cookies in WebKit's default data store. Without clearing it, the next
 //       person to sign in on a shared iPad lands in the previous student's
 //       grades.
-//    2. The Live Activity worker's record of this device.
+//    2. The anonymous install ID problem reports are filed under.
 //    3. The calendar — in memory, the disk cache, and the app-group blob the
 //       widgets render from.
 //
@@ -47,14 +47,13 @@ enum DataResetService {
                 modifiedSince: .distantPast
             )
 
-            // End before unregistering, so the activity can't rotate its
-            // token and re-register in between.
+            // Nothing to delete on the worker: it holds only the day's bell
+            // times, pooled from every phone with no device ID attached.
             await LiveActivityService.shared.end()
-            await PushTokenService.unregister()
 
-            // A fresh random ID next time, so nothing the worker or its logs
-            // saw before the reset can be tied to whoever uses this device next.
-            PushTokenService.resetDeviceId()
+            // A fresh random ID next time, so no problem report filed before
+            // the reset can be tied to whoever uses this device next.
+            InstallInfo.resetDeviceId()
             IssueReporter.resetDedupe()
             ReviewPrompter.reset()
         }

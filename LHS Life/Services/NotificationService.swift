@@ -433,9 +433,10 @@ enum NotificationService {
         center.removePendingNotificationRequests(withIdentifiers: ids)
 
         guard settings.liveActivityMode != .off, await isAuthorized else { return }
-        // The server turned this device away; a nudge to start Live
-        // Activities would only end in the same refusal.
-        guard !CapacityStatus.isRefused else { return }
+        // The card needs iOS 18 (broadcast channels, and the widget
+        // extension's own minimum), so on iOS 17 a nudge to start one would
+        // only lead to "Needs iOS 18".
+        guard #available(iOS 18, *) else { return }
 
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())

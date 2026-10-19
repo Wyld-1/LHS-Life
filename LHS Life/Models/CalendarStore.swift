@@ -2,7 +2,7 @@
 //  CalendarStore.swift
 //  LaSalle Schedule
 //
-//  @Observable replaces ObservableObject + @Published.
+//  @Observable, not the older Combine-based observation.
 //  SwiftUI now re-renders ONLY views that read the specific property that changed.
 //  The header timer ticking never causes EventsTabView or LunchTabView to re-render.
 //

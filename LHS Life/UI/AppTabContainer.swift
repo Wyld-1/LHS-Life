@@ -111,13 +111,8 @@ struct AppTabContainer: View {
     /// the appearance of a fast one makes the app worse for everyone, and a
     /// slow launch is more noticeable than a brief flash.
     @State private var launchScreenDue = false
-    @State private var showCapacityAlert = false
     /// The once-a-season "pick your icon" card (AppIconIntroCard).
     @State private var showIconIntro = false
-    /// Observed so the capacity refusal below can reach the UI; the
-    /// service is @Observable and a singleton, so this is a reference to
-    /// the same instance LiveActivityService.shared hands everyone else.
-    @State private var liveActivity = LiveActivityService.shared
     @State private var calendarUI   = CalendarUIState()
     @State private var navCoordinator = AppNavigationCoordinator.shared
 
@@ -157,13 +152,6 @@ struct AppTabContainer: View {
         (!store.events.isEmpty || launchDeadlinePassed) ? 1.0 : 0.0
     }
 
-    /// Spelled out rather than terse: this is the one failure in the app the
-    /// student can actually act on, and the ask ("please upgrade the server")
-    /// makes no sense without saying what is full and what still works.
-    private var capacityMessage: String {
-        CapacityMessage.body(limit: liveActivity.capacityBlock?.limit)
-    }
-
     /// Drops the launch screen once the gate is satisfied. Safe to call as
     /// often as you like; it does nothing after the first time.
     ///
@@ -192,7 +180,7 @@ struct AppTabContainer: View {
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(3))
             guard scenePhase == .active, !isLaunching, selectedTab == .events,
-                  !showSettings, !showHomework, !showContacts, !showCapacityAlert, !showIconIntro,
+                  !showSettings, !showHomework, !showContacts, !showIconIntro,
                   ReviewPrompter.isGoodTimeToAsk
             else { return }
             ReviewPrompter.markAsked()
@@ -207,7 +195,7 @@ struct AppTabContainer: View {
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(1))
             guard scenePhase == .active, !isLaunching,
-                  !showSettings, !showHomework, !showContacts, !showCapacityAlert,
+                  !showSettings, !showHomework, !showContacts,
                   AppIconService.shared.shouldIntroduce
             else { return }
             showIconIntro = true
@@ -216,8 +204,6 @@ struct AppTabContainer: View {
 
     var body: some View {
         Group {
-            // The "server full" banner is placed by each layout: under the
-            // nav bar on iPhone (PhoneToolbar), in the sidebar on iPad.
             if isPhone { iPhoneLayout } else { iPadLayout }
         }
         .overlay { EasterEggOverlay() }
@@ -274,29 +260,6 @@ struct AppTabContainer: View {
             async let p: () = powerschoolState.initialize()
             async let s: () = schoologyState.initialize()
             _ = await (l, p, s)
-        }
-        // The school's worker refused this device because it is full.
-        .onChange(of: liveActivity.capacityBlock) { _, block in
-            guard block != nil else { return }
-            // The alert only ever appears ONCE. The student can't fix this
-            // themselves — it's someone else's budget decision — so after the
-            // first time, CapacityBanner says it quietly on each day it
-            // happens, without interrupting anything.
-            let key = "lhs_capacity_alert_shown"
-            guard !UserDefaults.standard.bool(forKey: key) else { return }
-            UserDefaults.standard.set(true, forKey: key)
-            showCapacityAlert = true
-        }
-        .alert("Live Activities Are Full", isPresented: $showCapacityAlert) {
-            if let url = CapacityMessage.emailURL(to: liveActivity.capacityBlock?.contact) {
-                Link("Ask for an Upgrade", destination: url)
-            }
-            if LiveActivityPreviewButton.isAvailable {
-                Button("Preview") { liveActivity.startPreview() }
-            }
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(capacityMessage)
         }
         .task {
             // Catches the case onChange structurally cannot: a launch that is

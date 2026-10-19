@@ -65,10 +65,6 @@ struct LaSalle_ScheduleApp: App {
                     if ProcessInfo.processInfo.arguments.contains("-screenshotDemo") {
                         LiveActivityService.shared.startScreenshotDemo()
                     }
-                    // Same as Settings → Debug → Simulate Server Full.
-                    if ProcessInfo.processInfo.arguments.contains("-simulateServerFull") {
-                        LiveActivityService.shared.simulateOverCapacity()
-                    }
                     #endif
                     guard settings.accessApproved else { return }
                     // Covers anyone who signed in before the prompt moved to

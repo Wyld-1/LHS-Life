@@ -17,7 +17,7 @@ import SwiftUI
 struct HomeworkPopup: View {
     @Environment(CalendarStore.self) private var store
     @Environment(UserSettings.self) private var settings
-    @StateObject private var reminders = RemindersService()
+    @State private var reminders = RemindersService()
 
     let onDismiss: () -> Void
 

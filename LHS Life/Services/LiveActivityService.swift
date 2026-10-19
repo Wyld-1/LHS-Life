@@ -3,7 +3,12 @@
 //  LHS Life
 //
 //  Starts and ends the schedule Live Activity.
-//  All content updates are server-pushed via the Cloudflare Worker.
+//
+//  Cards subscribe to the school's broadcast channel
+//  (AppConstants.broadcastChannel). The Cloudflare Worker sends one push per
+//  bell to that channel and each card works out its own class from the
+//  schedule it carries, so all the worker needs from a phone is its bell
+//  times (BellReporter) — no token, no device ID.
 //
 //  currentActivity is in-memory only — lost on app suspend/resume.
 //  reconnect() restores it from ActivityKit's live activities list on launch.
@@ -49,29 +54,14 @@ final class LiveActivityService {
     /// for us. These are for a sophomore reading a card on their phone.
     private(set) var lastStartFailure: String?
 
-    /// Set when the school's worker refuses this device because it is full.
-    ///
-    /// Held rather than shown as a passing toast: the student can do something
-    /// about it — ask for the server to be upgraded — and an address they can
-    /// write to is not something to flash for two seconds. AppTabContainer
-    /// turns this into an alert, once a day at most.
-    var capacityBlock: CapacityBlock?
-
-    struct CapacityBlock: Equatable {
-        let contact: String
-        /// How many devices the server accepts, from its own reply — so the
-        /// message stays right after the cap is raised.
-        let limit: Int?
-    }
-
     /// Observes the running activity so we can tell, from the DEVICE side,
     /// whether pushes are arriving at all.
     ///
     /// This is the missing half of the diagnosis: worker logs prove APNs
     /// accepted a push, but only contentUpdates proves iOS delivered it and
     /// ActivityKit applied it. If the worker says 200 and this logs nothing,
-    /// the failure is between APNs and the device (budget throttling, stale
-    /// token). If this logs an update and the Lock Screen still shows the old
+    /// the failure is between APNs and the device (budget throttling, a
+    /// channel from the wrong APNs environment). If this logs an update and the Lock Screen still shows the old
     /// period, the failure is in the widget's rendering — two very different
     /// problems that look identical from the outside.
     private func observeActivity(_ activity: Activity<ScheduleActivityAttributes>) {
@@ -108,23 +98,14 @@ final class LiveActivityService {
             // day produces no device-side evidence at all.
             observeActivity(a)
 
-            // Re-register on reconnect.
-            //
-            // startIfNeeded bails right after this when an activity is already
-            // running, so without this the ONLY registration paths are a cold
-            // start and a token rotation observed in the same process. A
-            // rebuild, a relaunch, or an app the user killed and reopened all
-            // left the worker holding whatever it was told hours ago — stale
-            // transitions after a schedule change, and no re-registration if
-            // the push token rotated while the app wasn't running.
-            //
-            // attributes.schedule is the same [ScheduledPeriod] the activity
-            // was started with, so the transitions sent stay consistent.
-            PushTokenService.observeTokenUpdates(for: a, periods: a.attributes.schedule)
-            if let token = a.pushToken {
-                Task { await PushTokenService.register(token: token, periods: a.attributes.schedule) }
-            }
+            // Re-report the card's bells on reconnect. One small request per
+            // relaunch, and the worker merges repeats — but it heals a worker
+            // that lost today's list (a redeploy, a wiped store), which would
+            // otherwise leave this card without pushes for the rest of the day.
+            // attributes.schedule is the schedule the card was started with,
+            // so the bells sent are the ones the card will act on.
             if let lastBell = a.attributes.schedule.last?.endDate {
+                if lastBell > Date() { BellReporter.report(a.attributes.schedule) }
                 scheduleEndCheck(at: lastBell)
             }
         }
@@ -145,8 +126,8 @@ final class LiveActivityService {
             // this one started — an image-posted day that finished reading,
             // an event edited in CalendarWiz, a class turned on or off — the
             // only correction is to replace it. Otherwise it carries the wrong
-            // bells for the rest of the day, and so does the server, which
-            // was told the old times when it registered.
+            // bells for the rest of the day, and the worker never hears the
+            // new ones. The replacement reports them when it starts.
             if !isDebugSession, let schedule, scheduleHasChanged(since: running, to: schedule, settings: settings) {
                 // Checked BEFORE ending the old card, not just before starting
                 // the new one. Ending works from the background; starting
@@ -183,6 +164,13 @@ final class LiveActivityService {
                 "bail: liveActivityEffectivelyEnabled false (mode: \(String(describing: settings.liveActivityMode), privacy: .public), type: \(String(describing: scheduleType), privacy: .public))"
             )
             lastStartFailure = "Live Activities are turned off in LHS Life settings"
+            return
+        }
+        // Broadcast channels need iOS 18, and so does the widget extension
+        // that draws the card — on iOS 17 there would be nothing to show.
+        guard #available(iOS 18, *) else {
+            LHSLogger.liveActivity.notice("bail: iOS 17 — broadcast Live Activities need iOS 18")
+            lastStartFailure = "Needs iOS 18"
             return
         }
         guard let schedule = schedule else {
@@ -253,12 +241,16 @@ final class LiveActivityService {
             let activity = try Activity.request(
                 attributes: attributes,
                 content:    .init(state: state, staleDate: lastBell),
-                pushType:   .token
+                pushType:   .channel(AppConstants.broadcastChannel)
             )
             currentActivity = activity
             lastStartFailure = nil
             LHSLogger.liveActivity.notice("Started — id: \(activity.id, privacy: .public), \(periods.count) periods")
             observeActivity(activity)
+
+            // The worker only broadcasts at bells someone has reported, so a
+            // card whose bells it hasn't heard would sit still all day.
+            BellReporter.report(periods)
 
             // Cancel the "school starts soon" reminder — LA is already running
             let todayKey = DateFormatter.isoDay.string(from: Date())
@@ -266,30 +258,11 @@ final class LiveActivityService {
                 withIdentifiers: ["lareminder-\(todayKey)"]
             )
 
-            // Register the initial push token immediately (it's already available
-            // on activity.pushToken at this point), then watch for rotations.
-            // Relying solely on pushTokenUpdates risks missing the first token
-            // if the stream doesn't emit before the app backgrounds.
-            if let initialToken = activity.pushToken {
-                Task { @MainActor in
-                    let result = await PushTokenService.register(token: initialToken, periods: periods)
-                    switch result {
-                    case .overCapacity(let contact, let limit):
-                        await handleOverCapacity(contact: contact, limit: limit)
-                    case .registered:
-                        capacityBlock = nil   // a raised cap clears the banner
-                    case .failed:
-                        break
-                    }
-                }
-            }
-            PushTokenService.observeTokenUpdates(for: activity, periods: periods)
-
             let upcoming = periods.filter { $0.startDate > Date() }
             BellTransitionService.scheduleTransitions(for: upcoming)
             scheduleEndCheck(at: lastBell)
         } catch {
-            // The likeliest TestFlight-only failure: pushType: .token requires
+            // The likeliest TestFlight-only failure: a broadcast channel needs
             // the push entitlement, and an App Store provisioning profile
             // generated before Push Notifications was enabled on the App ID
             // won't carry it. Logged at .error so it survives to Console.app.
@@ -301,6 +274,10 @@ final class LiveActivityService {
 
     // MARK: - Dummy start (debug only)
     // Starts a fake 2-minute schedule anchored to now, immune to school-over checks.
+    //
+    // pushType nil: not on the broadcast channel, so it can't collide with a
+    // real card (one channel subscription per device) and never hears the
+    // worker. Only the on-device BellTransitionService moves it.
 
     func startDummy() {
         let now = Date()
@@ -338,15 +315,11 @@ final class LiveActivityService {
                     schedule: periods
                 ),
                 content: .init(state: state, staleDate: now.addingTimeInterval(6000)),
-                pushType: .token
+                pushType: nil
             )
             currentActivity = activity
             isDebugSession  = true
             print("[LiveActivity] Dummy started — id: \(activity.id)")
-            if let initialToken = activity.pushToken {
-                Task { await PushTokenService.register(token: initialToken, periods: periods) }
-            }
-            PushTokenService.observeTokenUpdates(for: activity, periods: periods)
             BellTransitionService.scheduleTransitions(for: periods.filter { $0.startDate > now })
         } catch {
             print("[LiveActivity] Dummy start failed: \(error)")
@@ -365,8 +338,8 @@ final class LiveActivityService {
     // while the real dates keep the same distances from the real now, so
     // the progress bar sits at the right point in the class.
     //
-    // pushType nil: this never registers with the worker. The other debug
-    // start does, which puts a simulator on the production device list.
+    // pushType nil: off the broadcast channel, so worker pushes can't move
+    // it away from the staged moment.
     func startScreenshotDemo(stagedHour: Int = 10, stagedMinute: Int = 27) {
         let realNow = Date()
         let cal = Calendar.current
@@ -428,12 +401,15 @@ final class LiveActivityService {
     /// Ends the card when the student's day is over: at their last bell if
     /// the app is open then, or on the next foreground (checkSchoolOver).
     ///
+    /// The worker can't end one student's card at that student's last bell —
+    /// a broadcast reaches every card — so from the last bell until this
+    /// runs, the card shows "Done for today" (LHS_WidgetsLiveActivity).
+    ///
     /// This used to ride on the header's once-a-second timer, which asked
     /// "is school over?" thousands of times a day. One wrong answer — an
     /// event misread as a holiday — then ended the card every second while
     /// the start logic put it back: the Oct 15 restart loop. Two checks a day
-    /// can't loop. The server dismisses the card at the last bell anyway; this
-    /// is the device-side backstop for when the app is open to see it.
+    /// can't loop.
     ///
     /// Task.sleep runs on the continuous clock, which keeps counting while the
     /// app is suspended, so a phone reopened after the last bell runs the
@@ -469,37 +445,6 @@ final class LiveActivityService {
 
     // MARK: - End
 
-    /// The server refused this device, so nothing will ever update the card.
-    ///
-    /// Ending it is the honest move. A Live Activity that is never pushed to
-    /// doesn't look broken — it looks CONFIDENT, sitting on the Lock Screen
-    /// all day insisting it is still first period. Better to take it down and
-    /// say why than to leave a lie on the student's phone.
-    @MainActor
-    private func handleOverCapacity(contact: String, limit: Int?) async {
-        LHSLogger.liveActivity.error(
-            "Server at capacity — ending activity, nothing would update it (contact: \(contact, privacy: .public))"
-        )
-        await end()
-        lastStartFailure = "The school's Live Activity server is full"
-        capacityBlock = CapacityBlock(contact: contact, limit: limit)
-        // No more "Tap to start Live Activities" nudges while refused: they
-        // would only lead to this same refusal.
-        let pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
-        UNUserNotificationCenter.current().removePendingNotificationRequests(
-            withIdentifiers: pending.map(\.identifier).filter { $0.hasPrefix("lareminder-") }
-        )
-    }
-
-    #if DEBUG
-    /// Debug-only: pretend the worker refused this device, so the alert and
-    /// the "end the doomed activity" behaviour can be checked without
-    /// actually filling the server.
-    func simulateOverCapacity() {
-        Task { await handleOverCapacity(contact: "phudson@lasalleyakima.org", limit: 40) }
-    }
-    #endif
-
     func end() async {
         isDebugSession = false
         CachedSchedule.clear()
@@ -517,12 +462,11 @@ final class LiveActivityService {
     // MARK: - Preview
 
     /// The PREVIEW card — what a Live Activity looks like, for students who
-    /// don't know the term. Started from Settings → Lock Screen, the
-    /// "couldn't start" sheet, or the first server-full alert.
+    /// don't know the term. Started from Settings → Lock Screen.
     ///
-    /// Entirely local: no push token, no server, no schedule. The widget draws
-    /// it frozen from `attributes.preview` (see LHS_WidgetsLiveActivity), so
-    /// it works at 9 PM on a Saturday and on a device the server turned away.
+    /// Entirely local: no broadcast channel, no server, no schedule. The
+    /// widget draws it frozen from `attributes.preview` (see
+    /// LHS_WidgetsLiveActivity), so it works at 9 PM on a Saturday.
     /// It ends from the app's End Preview button, a swipe on the Lock Screen,
     /// or a real Live Activity starting.
     private var previewActivity: Activity<ScheduleActivityAttributes>?
@@ -629,7 +573,8 @@ final class LiveActivityService {
 
         guard let current else { return nil }
 
-        // slotStartMinutes identifies the slot — worker and widget both use this
+        // slotStartMinutes identifies the slot — the widget matches it
+        // against its own schedule, as it does a broadcast
         let h = cal.component(.hour,   from: current.startDate)
         let m = cal.component(.minute, from: current.startDate)
         return ScheduleActivityAttributes.ContentState(
@@ -704,8 +649,8 @@ final class LiveActivityService {
 
         // Synthesize passing periods for implicit gaps between consecutive periods.
         // The schedule data has no explicit Passing entries — the gaps are implicit.
-        // Without this, the worker never fires during passing and the widget holds
-        // the previous period until the next class starts.
+        // Without this, the worker never hears the passing period's bell and the
+        // widget holds the previous period until the next class starts.
         var withPassing: [ScheduleActivityAttributes.ScheduledPeriod] = []
         for (i, period) in mapped.enumerated() {
             withPassing.append(period)
@@ -741,8 +686,8 @@ final class LiveActivityService {
 }
 
 extension ScheduleActivityAttributes {
-    /// Every Live Activity except the preview — the ones the server and the
-    /// school day are about.
+    /// Every Live Activity except the preview — the ones the broadcasts and
+    /// the school day are about.
     static var realActivities: [Activity<ScheduleActivityAttributes>] {
         Activity<ScheduleActivityAttributes>.activities.filter { $0.attributes.preview == nil }
     }

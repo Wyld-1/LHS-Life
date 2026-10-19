@@ -12,9 +12,9 @@
 //  question that matters ("is this one student or all of them?") without
 //  anyone having to read anything.
 //
-//  WHAT IS SENT: the anonymous device ID the app already registers with, the
-//  app build, the iOS version, and a short description of the failure. Never
-//  a name, an email address, a class schedule, or anything typed into the app.
+//  WHAT IS SENT: a random per-install ID (InstallInfo.deviceId), the app
+//  build, the iOS version, and a short description of the failure. Never a
+//  name, an email address, a class schedule, or anything typed into the app.
 //
 //  HOW OFTEN: once per device per kind per day. A phone with no signal
 //  reports "calendar unreachable" once, not every thirty seconds when the
@@ -29,7 +29,7 @@ enum IssueReporter {
 
     /// The kinds of failure worth a school's attention. Deliberately a closed
     /// list: these are the ones where someone at school can DO something —
-    /// fix a calendar entry, repost a schedule, ask for a server upgrade.
+    /// fix a calendar entry, repost a schedule, look at the worker.
     /// A student's own flaky wifi is not on it.
     enum Kind: String {
         /// The CalendarWiz feed didn't answer, or didn't parse.
@@ -38,10 +38,10 @@ enum IssueReporter {
         case scheduleImage      = "schedule_image"
         /// ActivityKit refused to start the Live Activity.
         case liveActivityStart  = "live_activity_start"
-        /// The worker refused or failed the push registration.
+        /// The worker refused or failed a report of today's bells
+        /// (subject "bells"). The raw value predates bell reports and stays
+        /// so the worker's /status page keeps grouping it the same way.
         case registration       = "registration"
-        /// The worker is full — the signal that it needs a plan upgrade.
-        case overCapacity       = "over_capacity"
         /// PowerSchool / Schoology / lunch ordering wouldn't load.
         case webLoad            = "web_load"
     }
@@ -71,12 +71,20 @@ enum IssueReporter {
 
         LHSLogger.ical.error("Issue reported: \(kind.rawValue, privacy: .public) — \(detail, privacy: .public)")
 
+        // Read here, on the main actor (UIDevice and AppConstants live
+        // there), and handed to the background task as plain values.
+        let deviceId = InstallInfo.deviceId
+        let appVersion = InstallInfo.appVersion
+        let osVersion = InstallInfo.osVersion
+        let workerURL = AppConstants.workerURL
+        let workerSecret = AppConstants.workerSecret
+
         Task.detached(priority: .background) {
-            guard let url = URL(string: "\(AppConstants.workerURL)/report") else { return }
+            guard let url = URL(string: "\(workerURL)/report") else { return }
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue("Bearer \(AppConstants.workerSecret)", forHTTPHeaderField: "Authorization")
+            request.setValue("Bearer \(workerSecret)", forHTTPHeaderField: "Authorization")
             struct Body: Encodable {
                 let deviceId: String
                 let kind: String
@@ -86,14 +94,14 @@ enum IssueReporter {
                 let osVersion: String
             }
             request.httpBody = try? JSONEncoder().encode(Body(
-                deviceId: PushTokenService.deviceId,
+                deviceId: deviceId,
                 kind: kind.rawValue,
                 subject: String(subject.prefix(40)),
                 // Truncated here as well as on the worker: the whole record
                 // lives in KV metadata, which is capped at 1 KB.
                 detail: String(detail.prefix(160)),
-                appVersion: PushTokenService.appVersion,
-                osVersion: PushTokenService.osVersion
+                appVersion: appVersion,
+                osVersion: osVersion
             ))
             _ = try? await URLSession.shared.data(for: request)
         }

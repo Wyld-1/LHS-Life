@@ -592,9 +592,6 @@
 		23E395C32FA5399A00574B85 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				// Render Icon Previews reads inside the .icon folders, whose contents
-				// change with every Icon Composer save and can't be listed as inputs.
-				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "\"LHS Life Halloween\" \"LHS Life Thanksgiving\" \"LHS Life Christmas\"";
 				ASSETCATALOG_COMPILER_APPICON_NAME = "LHS Life Icon";
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -604,6 +601,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 4NLQ9A3UM6;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "LHS-Life-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "LHS Life";
@@ -622,7 +620,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.0;
+				MARKETING_VERSION = 1.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lasalleyakima.lhslife;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -642,9 +640,6 @@
 		23E395C42FA5399A00574B85 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				// Render Icon Previews reads inside the .icon folders, whose contents
-				// change with every Icon Composer save and can't be listed as inputs.
-				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "\"LHS Life Halloween\" \"LHS Life Thanksgiving\" \"LHS Life Christmas\"";
 				ASSETCATALOG_COMPILER_APPICON_NAME = "LHS Life Icon";
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -654,6 +649,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 4NLQ9A3UM6;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "LHS-Life-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "LHS Life";
@@ -672,7 +668,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.0;
+				MARKETING_VERSION = 1.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lasalleyakima.lhslife;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -793,7 +789,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.2.0;
+				MARKETING_VERSION = 1.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lasalleyakima.lhslife.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -826,7 +822,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.2.0;
+				MARKETING_VERSION = 1.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lasalleyakima.lhslife.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;

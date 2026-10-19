@@ -265,7 +265,7 @@ struct SettingsSheetView: View {
     }
 
     private var appIconFooter: String {
-        if let (holiday, window) = AppIconService.activeHoliday() {
+        if let (_, window) = AppIconService.activeHoliday() {
             // The window's end is exclusive; the last day is the day before.
             let lastDay = window.end.addingTimeInterval(-1)
             let date = lastDay.formatted(.dateTime.month(.wide).day())
@@ -476,7 +476,7 @@ struct SettingsSheetView: View {
                 LiveActivityService.shared.startDummy()
             }
 
-            // Mid-class at a staged 10:27 AM, no server registration. See
+            // Mid-class at a staged 10:27 AM, off the broadcast channel. See
             // startScreenshotDemo for the matching simulator clock override.
             Button("Start Screenshot Demo Live Activity") {
                 LiveActivityService.shared.startScreenshotDemo()
@@ -489,11 +489,6 @@ struct SettingsSheetView: View {
                     settings: settings
                 )
                 print("[Debug] Real start attempted")
-            }
-
-            Button("Simulate Server Full") {
-                LiveActivityService.shared.simulateOverCapacity()
-                dismiss()
             }
 
             Button("End Live Activity", role: .destructive) {
