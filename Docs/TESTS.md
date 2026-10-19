@@ -20,8 +20,8 @@ No network, no UI, no clock: every test builds its own dates with
 `makeDate(...)` (Pacific time) and its own events and schedules from
 `TestHelpers.swift`.
 
-**Status (Oct 2026): 114 tests, 112 pass.** The two failures are style checks
-(§2.2), not logic.
+**Status (Oct 2026, version 1.3.0): 118 tests, all pass** (Debug
+configuration).
 
 ---
 
@@ -39,6 +39,7 @@ No network, no UI, no clock: every test builds its own dates with
 | `ColorPaletteTests` | 6 | Ten colors, valid hex, index clamping |
 | `DateHelperTests` | 7 | Homework due dates: tomorrow, next Monday from every weekday |
 | `SchoolEventTests` | 4 | Day keys, bell-schedule detection |
+| `BellReporterTests` | 4 | The bell minutes sent to the Worker: starts and ends, deduplicated and sorted; the last end included; an empty day; minutes in Pacific time, not the phone's zone |
 | `StaticAnalysisTests` | 7 | Architecture rules, enforced by scanning source (below) |
 
 ### 2.1 Notes on specific classes
@@ -59,16 +60,21 @@ No network, no UI, no clock: every test builds its own dates with
 
 | Rule | Status |
 |---|---|
-| No `@Published` | **Fails** — `RemindersService` still uses `ObservableObject`/`@Published`, and a comment in `CalendarStore` mentions `@Published` |
+| No `@Published` | Passes |
 | No `@EnvironmentObject` | Passes |
-| No `ObservableObject` (except `RemindersService`) | Passes |
+| No `ObservableObject` | Passes — `RemindersService` is now `@Observable` |
 | No `didSet` disk writes in `UserSettings` | Passes |
-| No bare numbers in `.padding()` / `.spacing()` in `UI/` — use `LS.*` | Failed on two bare numbers in the last run; both since fixed, not yet re-run |
+| No bare numbers in `.padding()` / `.spacing()` in `UI/` — use `LS.*` | Passes |
 | `[shared]` files import neither UIKit nor SwiftUI | Passes |
 | No `// TELEMETRY` debug prints | Passes |
 
-Fixing the first: move `RemindersService` to `@Observable` and reword the
-`CalendarStore` comment.
+### 2.3 The Worker
+
+The Worker's logic (bell storage, the broadcast cycle, `/health`, report
+expiry) is tested with a Node harness that runs the Worker against a mock KV:
+24 tests, all passing. The harness is kept outside the repo for now. It
+should be checked in, under `Scripts/` or a `worker-tests/` folder, so the
+Worker is tested alongside the app.
 
 ---
 
@@ -89,7 +95,7 @@ that exists only in code today.
 | `IssueReporter.isConnectionProblem` | Timeout, connection lost, cannot find host, DNS failure → true; bad server response → false | Decides "network" vs "server" on /status |
 | `ServeAThonService` | Any one grade's event lays out all four days | The feed omits a grade some years |
 | `NotificationService` timing | Noon or later → night before; earlier → morning of | The rule behind every reminder |
-| Worker | Capacity math (`SUBREQUEST_BUDGET` 45 → 40 phones), report expiry | Untested JavaScript; a small `node --test` file would do |
+| Worker harness in the repo | Check the mock-KV Node harness (§2.3) into the repo and document how to run it | Today it lives outside the repo, so a Worker change can ship untested |
 
 ---
 
@@ -102,11 +108,16 @@ a Live Activity on the iPad Lock Screen and can't open the App Store.
 - [ ] Open the app before school: card shows "Today", the schedule type, the
       first bell, and colored bands.
 - [ ] During a class: name, minutes left, "until" time, next class, bar moving.
-- [ ] Passing time and Break show correctly; the card moves at each bell with
-      the app closed (server push).
+- [ ] Passing time and Break show correctly.
+- [ ] With the app closed, the card moves at each bell (server broadcast).
+- [ ] A student on a different schedule, or with a period turned off, moves
+      only at their own bells; other students' bells leave the card unchanged.
 - [ ] Open the app during the **last** class: card shows that class, not
       "school starts".
-- [ ] At the last bell the card goes away.
+- [ ] After the student's last class the card shows "Done for today".
+- [ ] At the day's last bell, the one end broadcast clears every card
+      (check two phones on different schedules).
+- [ ] iOS 17 device: no card starts, and trying says "Needs iOS 18".
 - [ ] Expanded Dynamic Island: progress bar fully visible, nothing clipped.
 - [ ] A day with a non-schedule event mentioning a holiday: card stays up.
 
@@ -119,11 +130,12 @@ a Live Activity on the iPad Lock Screen and can't open the App Store.
 - [ ] Mac: the preview row is hidden.
 
 ### 4.3 Server
-- [ ] `/health` says OK; `/status` lists your device during school.
-- [ ] Debug → Simulate Server Full: alert once; banner on later launches;
-      sheet offers Preview and Ask for an Upgrade; ✕ hides it for the day.
-- [ ] After testing on a simulator, unregister its device ID and run
-      `/rebuild` so it doesn't hold a slot.
+- [ ] During school, `/health` shows `broadcast: ok, last …`, never FAILED.
+- [ ] `/status` shows today's bells, at least one schedule reported, and each
+      send accepted by Apple (200) on production.
+- [ ] `/test-broadcast` (sandbox) on an Xcode build: the card changes within
+      seconds and the page explains Apple's answer.
+- [ ] The uptime monitor on `/health` is running and alerts on FAILED.
 
 ### 4.4 Reminders
 - [ ] Each reminder fires at its set time, night before vs morning of
@@ -149,9 +161,10 @@ a Live Activity on the iPad Lock Screen and can't open the App Store.
       Stage Manager / a resized window).
 
 ### 4.7 Release
-- [ ] Unit tests pass (or only the known style failures).
+- [ ] Unit tests pass.
 - [ ] Marketing version bumped for the app and the widget extension (they
       must match).
 - [ ] `AppConstants.workerURL` points to the server that will keep running.
-- [ ] Worker redeployed if `APNS Worker.json` changed.
+- [ ] Worker redeployed if `APNS Worker.json` changed (paste into the
+      Cloudflare dashboard editor, Deploy), and the Worker harness passes.
 - [ ] A Release build tested on a real iPhone, during school hours.

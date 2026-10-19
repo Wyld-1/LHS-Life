@@ -20,12 +20,12 @@ How the app is put together, from the outside in. For what it must do, see
 │                                                                                          │
 │  Lunch · PowerSchool · Schoology ── embedded WKWebViews                                  │
 └──────────────────────────────────────┬──────────────────────────────────────────────────┘
-                                       │ bell times + push token   │ problem reports
+                                       │ bell times (no device ID) │ problem reports
                                        ▼                           ▼
                          Cloudflare Worker ("APNS Worker.json")  ── /status page
-                                       │ at every bell
+                                       │ one broadcast per bell
                                        ▼
-                         Apple Push Notification service ──► Lock Screen & Dynamic Island
+                         Apple Push Notification service ──► every card on the channel
 ```
 
 **The app is self-contained.** Everything a student sees is worked out on the
@@ -50,7 +50,7 @@ Targets:
 ```
 LHS Life/
 ├── LHS-LifeApp.swift          app entry; foreground hooks; notification delegate
-├── AppConstants.swift         Worker URL + secret, App Store ID, privacy policy
+├── AppConstants.swift         Worker URL + secret, broadcast channel IDs, App Store ID
 ├── Models/
 │   ├── CalendarStore          the central store: events, bell schedules, refresh
 │   ├── SchoolEvent            one calendar event + derived facts (category, home game, holiday…)
@@ -65,7 +65,8 @@ LHS Life/
 │   ├── CacheService                    last good feed on disk, for instant launch
 │   ├── NotificationService             every local reminder
 │   ├── LiveActivityService             start / end / reconnect / preview
-│   ├── PushTokenService                register with the Worker; capacity refusals
+│   ├── BellReporter                    today's bell minutes to the Worker (no device ID)
+│   ├── InstallInfo                     install ID, build, iOS version, APNs environment
 │   ├── BellTransitionService           on-device fallback push at each bell (BGTask)
 │   ├── IssueReporter                   once-a-day problem reports to the Worker
 │   ├── EmbeddedWebState                WKWebView lifecycle for the three web tabs
@@ -196,14 +197,14 @@ and the app can't disagree.
 ```
 iPhone: PhoneLayout                         iPad: iPadRootView
   NavigationStack per tab                     NavigationSplitView
-  PhoneToolbar: header pill (principal),        iPadSidebar: header pill, capacity
-    phone, settings                               banner, tabs, Settings pinned
+  PhoneToolbar: header pill (principal),        iPadSidebar: header pill, tabs,
+    phone, settings                               Settings pinned
   PhoneTabDock: native TabView (iOS 26+)        detail: the selected tab + toolbar
     or custom capsule (17–25)
 ```
 
-App-wide layers on top of either layout: the launch screen, the first-time
-capacity alert, the holiday icon card (`AppIconIntroOverlay`), the homework
+App-wide layers on top of either layout: the launch screen, the holiday icon
+card (`AppIconIntroOverlay`), the homework
 popup, the easter egg, and the confirmation overlay.
 
 **Header pill** (`ScheduleHeaderPill`): "22 min left in Chemistry" plus a
@@ -230,22 +231,33 @@ detail screen), ASB, Map, Sign Out, About.
 
 The card is a `ScheduleActivityAttributes` activity. Its **attributes** hold
 the whole day's schedule (fixed at start); its **content state** holds only
-`slotStartMinutes`, the slot the latest push says is current.
+`slotStartMinutes`, the minute of the bell the latest push was sent for.
 
 ```
 foreground ─► LiveActivityService.startIfNeeded
-               reconnect to a running card (re-register its token)
+               reconnect to a running card (re-report its bells)
                guards: Live Activities allowed, mode allows today
-                       (Every Day / Abnormal Days / Off), school left today,
-                       app in the foreground
-               Activity.request(pushType: .token)
-               PushTokenService.register ─► Worker
-                    accepted  → the Worker pushes at every bell
-                    full      → card ended, capacity alert/banner
+                       (Every Day / Abnormal Days / Off), iOS 18,
+                       school left today, app in the foreground
+               Activity.request(pushType: .channel(AppConstants.broadcastChannel))
+               BellReporter.report ─► Worker POST /bells
+                    {day, minutes: every start and end, environment}
                scheduleEndCheck(at: last bell)
 ```
 
-- **Who moves the card.** The Worker's pushes. iOS does not redraw a Live
+- **Broadcast, not per-device.** Every card subscribes to one APNs broadcast
+  channel (production or sandbox, picked by `InstallInfo.apnsEnvironment`
+  from the provisioning profile). The Worker broadcasts once at every minute
+  anyone reported, so a push may be for another student's bell. The widget
+  uses the pushed minute when it matches one of its own slots and otherwise
+  falls back to the clock, so a stranger's bell just redraws the card
+  unchanged. The Worker never learns who is listening: no token, no device ID.
+- **iOS 18 only.** Broadcast channels need iOS 18, as does the widget
+  extension, so on iOS 17 no card starts and the morning reminder isn't sent.
+- **One card per device.** A device can't hold two activities on the same
+  channel. The debug dummy, the screenshot demo and the preview start with
+  `pushType: nil`.
+- **Who moves the card.** The Worker's broadcasts. iOS does not redraw a Live
   Activity at its own scheduled times — a card cut off from pushes keeps
   showing the last slot. `BellTransitionService` is a best-effort on-device
   fallback (`BGProcessingTask` at each bell).
@@ -255,7 +267,9 @@ foreground ─► LiveActivityService.startIfNeeded
   stops the card from falling back to the before-school view during the final
   class. Countdowns use `Text(timer:)` and `ProgressView(timerInterval:)`,
   which iOS animates for free.
-- **Ending.** The Worker dismisses the card at the last bell. On device,
+- **Ending.** A broadcast can't end one student's card at their own last
+  bell, so from then the widget shows **Done for today** (lightning in LaSalle
+  blue, schedule type underneath; "Done" in the Dynamic Island). On device,
   `checkSchoolOver` runs at the last bell (if the app is open) and on every
   foreground — never on a timer, which is what once turned a misread holiday
   into a start/end loop.
@@ -263,8 +277,8 @@ foreground ─► LiveActivityService.startIfNeeded
   card, but only from the foreground, since a new card can't start from the
   background.
 - **Preview.** A frozen sample card (`attributes.preview`, PREVIEW badge) for
-  students who don't know what a Live Activity is. It never registers with the
-  Worker and is filtered out of every real-card code path
+  students who don't know what a Live Activity is. It isn't on the broadcast
+  channel and is filtered out of every real-card code path
   (`ScheduleActivityAttributes.realActivities`).
 
 ---
@@ -282,7 +296,7 @@ notifications per app, so lookahead windows are short (about two weeks).
 | Late Start | Chosen time, same rule; includes the first class time |
 | Home Games | Chosen time; includes the student-section theme when posted |
 | ASB | Announcements before first period; Student Store before Break and Lunch, on the student's work days |
-| Start Live Activity | Morning nudge on days the card should run; cancelled once it starts, never sent to a device the server refused |
+| Start Live Activity | Morning nudge on days the card should run; cancelled once it starts, never sent on iOS 17 |
 | Abnormal schedule | Morning of a non-regular day, only for students with Live Activities off |
 | Class Orientation | Before the student's grade-specific orientation window |
 
@@ -290,25 +304,65 @@ notifications per app, so lookahead windows are short (about two weeks).
 
 ## 9. The server (Cloudflare Worker)
 
-One file, `APNS Worker.json`, with KV binding `TOKENS` and a cron every minute
-Mon–Fri 6 AM–5 PM Pacific. Its header comment documents every page and
-variable.
+One file, `APNS Worker.json`, with KV binding `TOKENS` and a cron trigger
+every minute. The Worker acts only Monday to Friday, 6 AM–5 PM Pacific. Its
+header comment documents every page and variable. To deploy, paste the file
+into the Worker's editor in the Cloudflare dashboard and click Deploy; the
+binding, cron and variables are kept.
 
-- **Register.** The app sends an anonymous device ID, push token, bell times,
-  app build and iOS version. The Worker pushes within two minutes of each bell
-  and dismisses at the last one.
-- **Capacity.** The phone limit comes from `SUBREQUEST_BUDGET` (default 45 on
-  the free plan → 40 phones). Beyond it, the Worker answers "full" with a
-  contact, and the app ends the card, shows a one-time alert, then a daily
-  dismissible banner.
-- **Problem reports.** `IssueReporter` sends a short report at most once per
+```
+phone ─► POST /bells {day, minutes, environment}
+          stored once per DISTINCT schedule: bells:{day}:{hash}  (3 days)
+cron, every minute ─► union of today's schedules
+          at each bell: ONE update ─► production channel + sandbox channel
+          at the day's last bell: ONE end ─► both channels
+Apple ─► every card on the channel; each works out its own class
+```
+
+- **Bells.** `POST /bells` takes today's or tomorrow's bell minutes. Phones on
+  the same schedule send the same list, so it lands on the same key
+  (`bells:{day}:{hash}`, a hash of the sorted minutes) and costs no write after
+  the first. The minutes ride in KV metadata, so the cron reads every schedule
+  with one `list()`. No device ID or token is sent or stored. `environment` is
+  accepted and ignored, since every bell goes to both channels. At most 30
+  distinct schedules a day are accepted.
+- **Broadcast.** Each bell in the union of today's schedules goes out once, to
+  production (App Store and TestFlight builds) and to sandbox (Xcode builds).
+  A bell counts as sent when production accepts it; a failed one is retried
+  for up to two minutes. One "end" at the day's last bell dismisses every
+  card. If a schedule runs past 5 PM, no end is sent and the cards retire on
+  their own clock. What was sent and Apple's answers are kept in
+  `broadcast:{day}` (3 days).
+- **No phone limit.** The cost is one push per bell per channel, whatever the
+  number of phones, so a whole school fits Cloudflare's free plan.
+- **Channels.** Production `JJ+34svREfEAAGpsYJ+BOQ==`, sandbox
+  `oikr1cvOEfEAAPYv+t4beg==`. Not secrets; they are in both
+  `AppConstants.swift` and the Worker. They don't expire. The **Broadcast
+  Capability** is on for the App ID in Apple Developer. **Turning it off
+  deletes every channel permanently**; new channels would need an app update.
+- **Who is listening.** Apple's Push Notifications Console (Overview →
+  subscriptions), production builds only. The Worker stores nothing about
+  phones for broadcast.
+- **Problem reports.** `IssueReporter` sends `POST /report` at most once per
   device, per problem, per day — only for things the school can fix (calendar
-  unreachable, schedule picture unreadable, a school site down, registration
-  refused). A student's own bad connection is classed as `network`, not
-  `server`. Reports expire after a week.
-- **Pages.** `/health`, `/status` (today) and `/status?full=1` (the week, with
-  every phone's bell times), `/test-push`, `/purge`, `/rebuild`. Everything but
-  `/health` needs `CLIENT_SECRET`.
+  unreachable, schedule picture unreadable, a school site down, a bell report
+  refused). Each report carries the anonymous install ID, app and iOS version
+  and a short description. A student's own bad connection is classed as
+  `network`, not `server`. Reports expire after 7 days.
+- **Pages.** `/health` (open): `broadcast: ok, last 08:55` or
+  `broadcast: FAILED …`; watch it with an uptime monitor and alert on FAILED.
+  `/status`: the broadcast section first (today's bells, schedules reported,
+  sends and Apple's answers), then problem reports; `?full=1` adds each
+  schedule and the past week. `/test-broadcast?env=sandbox|production|both`
+  sends one broadcast now and explains Apple's answer; `&minutes=` picks the
+  bell, `&end=1` sends an end, which on production also needs `&confirm=yes`.
+  Everything but `/health` needs `CLIENT_SECRET`.
+- **Legacy (v1.2 transition — remove after students update).** Version 1.2
+  registers a push token per phone (`/register`, `/unregister`) and the cron
+  pushes each phone at its own bells. Broadcast runs first in every cron run;
+  legacy gets the requests left over, about 35 phones on the free plan.
+  `SUBREQUEST_BUDGET`, `MAX_DEVICES`, `/test-push`, `/purge` and `/rebuild`
+  apply only to this path.
 
 The Worker URL lives in `AppConstants.workerURL`. Moving the server means
 changing it there and shipping an update.
@@ -360,7 +414,7 @@ Navigation intents (`OpenLunchIntent`, …) go through `AppNavigationCoordinator
 | Header pill | On each minute (1 s under `-demoClock`) | `ScheduleHeaderPill` |
 | Live Activity end check | Last bell + every foreground | `LiveActivityService` |
 | Calendar refresh | Launch, foreground (30 s floor), pull | `CalendarStore` |
-| Bell pushes | Every minute, school hours | Worker cron |
+| Bell broadcasts | Every minute, Mon–Fri 6 AM–5 PM Pacific | Worker cron |
 | On-device bell fallback | One `BGProcessingTask` per bell | `BellTransitionService` |
 | Reminder lookahead | ~2 weeks, rebuilt each refresh | `NotificationService` |
 | Problem reports | ≤ once per device per problem per day | `IssueReporter` |
@@ -375,8 +429,7 @@ Debug builds only:
 |---|---|
 | `-demoClock "yyyy-MM-dd HH:mm"` | Runs the app on a fake, moving clock |
 | `-screenshotDemo` | A believable mid-class Live Activity, no server |
-| `-simulateServerFull` | Behaves as if the Worker refused this device |
-| Settings → Debug | Force header text, start dummy/real/demo cards, simulate full, end cards |
+| Settings → Debug | Force header text, start dummy/real/demo cards, end cards |
 
 Logging goes through `LHSLogger` (subsystem `lhslife`; categories such as
 `liveActivity`, `ical`, `notifications`, `appIcon`). Use `.notice` or `.error`

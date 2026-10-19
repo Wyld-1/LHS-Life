@@ -49,8 +49,8 @@ A change that breaks one of these is revised before it ships.
   posted times uses the standard schedule for that kind of day.
 - Holidays come only from Schedules-category events, so an event title that
   merely mentions a holiday can't cancel school.
-- The Live Activity never shows a confident lie. If the server can't update
-  it, it's taken down and the reason is shown.
+- The Live Activity never shows a confident lie. After a student's last
+  class it says "Done for today"; if it can't start, the student is told why.
 - A guard that can end something must never be able to loop with the thing
   that starts it.
 
@@ -63,9 +63,10 @@ A change that breaks one of these is revised before it ships.
 
 ### Respectful
 - No accounts, analytics, tracking or ads.
-- The only data that leaves the device is what Live Activities need (a random
-  device ID, push token, bell times, app and iOS version) and once-a-day
-  problem reports — never names, emails, classes or anything typed.
+- The only data that leaves the device is what Live Activities need (the
+  day's bell times, with no device ID or token) and once-a-day problem
+  reports (a random install ID, app and iOS version, and what failed) — never
+  names, emails, classes or anything typed.
 - Alert settings stay on each device; identity and classes sync through the
   student's own iCloud.
 - Calendar and Reminders access is requested only when the student asks to
@@ -90,7 +91,8 @@ A change that breaks one of these is revised before it ships.
 ### Maintainable
 - Colors, fonts, spacing and animations come from `DesignSystem.swift`
   (`LS.*` spacing; no bare numbers in `.padding`/`.spacing`).
-- `@Observable` only — no `ObservableObject` or `@Published` in new code.
+- `@Observable` only — no `ObservableObject` or `@Published` anywhere
+  (enforced by `StaticAnalysisTests`).
 - Comments explain *why*, especially when the obvious approach was tried and
   failed.
 - Generated assets regenerate themselves (icon previews are rendered at build
@@ -121,8 +123,6 @@ A change that breaks one of these is revised before it ships.
   one), location, description, student-section theme, Save to Calendar.
 - Pull to refresh on the day view; the calendar also refreshes on every
   return to the app.
-- A "Live Activities couldn't start" banner appears here on iPhone (in the
-  sidebar on iPad) when the server has turned the device away.
 
 ### 3.3 Web tabs — Order, Grades, Schoology
 - Lunch ordering, PowerSchool and Schoology, embedded and kept signed in.
@@ -146,16 +146,19 @@ A change that breaks one of these is revised before it ships.
   ("8:55").
 - Modes: Every Day (default), Abnormal Days, Off.
 - Starts when the student opens the app on a school day; a morning reminder
-  offers to start it on days they haven't. Ends at their last bell.
+  offers to start it on days they haven't.
 - Days with no school left for this student (after school, holidays, their
   Pathways day) never start a card.
-- **Preview:** "Preview Live Activities" in Settings (and in the server-full
-  sheet and alert) shows a frozen sample card marked PREVIEW. It works any
+- **Preview:** "Preview Live Activities" in Settings shows a frozen sample
+  card marked PREVIEW. It works any
   time, never contacts the server, and ends from End Preview (red) or a
   swipe.
-- **Capacity:** if the server is full, the student sees the explanation once
-  as an alert, then a daily dismissible banner whose sheet offers the preview
-  and an "Ask for an Upgrade" email.
+- **After the last bell** the card shows "Done for today" until the app
+  ends it or the server's end broadcast at the day's last bell clears it.
+- **iOS 18** is required for the card (broadcast channels); on iOS 17 none
+  starts, and trying says "Needs iOS 18".
+- **No phone limit.** One broadcast per bell serves the whole school, so no
+  student is ever turned away.
 
 ### 3.6 Reminders
 
@@ -177,7 +180,7 @@ for periods 0–8), App Icon (holiday windows only), Lock Screen (Live
 Activities mode, Preview Live Activities; footer "Pin your live bell schedule
 to your Lock Screen and Dynamic Island", Lock Screen only on iPad), Reminders,
 ASB (members choose work days as glass capsules that flow together), Map,
-Sign Out, Privacy Policy, Rate LHS Life. Footer: "LHS Life 1.2.0 · La Salle
+Sign Out, Privacy Policy, Rate LHS Life. Footer: "LHS Life 1.3.0 · La Salle
 High School · Yakima".
 
 ### 3.8 Holiday app icons
@@ -212,19 +215,33 @@ High School · Yakima".
 - Campus map with pinch zoom.
 - Rating prompt only after real use (5 different days over 10+ days), never on
   a day something broke; plus a permanent Rate LHS Life row.
-- Delete All Data clears settings, iCloud data, web logins, the calendar cache
-  and the server's record of the device.
+- Delete All Data clears settings, iCloud data, web logins and the calendar
+  cache, ends the Live Activity, and gives the device a new random ID for
+  problem reports. The server holds nothing about the device to delete.
 
 ---
 
 ## 4. Server requirements
 
-- Push within two minutes of each bell; dismiss at the last bell.
-- Serve as many phones as the plan allows (40 on the free plan) and refuse
-  politely beyond that; one variable (`SUBREQUEST_BUDGET`) raises the limit.
-- A status page an administrator can read without help: today's problems with
-  device counts, and a week of history with `?full=1`.
+- Store only bell times from phones: each distinct schedule once, no device
+  ID or push token, expiring after 3 days.
+- Broadcast once per bell in the union of today's schedules, to both the
+  production and sandbox channels, within two minutes of the bell; one end at
+  the day's last bell.
+- No phone limit, inside Cloudflare's free plan.
+- `/health` says whether the latest bell went out ("ok" or "FAILED") so an
+  uptime monitor can alert.
+- A status page an administrator can read without help: today's bells, sends
+  and Apple's answers, today's problems with device counts, and more with
+  `?full=1`.
+- A one-click test (`/test-broadcast`) that explains Apple's answer; ending
+  every production card needs an explicit confirm.
+- Problem reports expire after 7 days.
 - Every page but `/health` behind the shared secret.
+- The Broadcast Capability stays on for the App ID; turning it off deletes
+  every channel permanently.
+- Until students update from 1.2, the legacy one-push-per-phone path keeps
+  working (about 35 phones on the free plan).
 - Before release, the app's Worker URL must point somewhere the school can
   keep running.
 

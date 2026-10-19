@@ -57,9 +57,9 @@ On iPad, LHS Life spreads out into a sidebar layout with the day's countdown alw
 flowchart LR
     CAL[("La Salle calendar<br/>CalendarWiz iCal feed")] -->|"fetched live"| APP["LHS Life<br/>iPhone · iPad · Mac"]
     APP --> ON["Schedule, countdown,<br/>reminders — all on device"]
-    APP -.->|"bell times + push token<br/>(only with Live Activities on)"| W["Cloudflare Worker"]
-    W -->|"at every bell"| APNS["Apple Push<br/>Notification service"]
-    APNS --> LA["Lock Screen &<br/>Dynamic Island"]
+    APP -.->|"today's bell times only<br/>(only with Live Activities on)"| W["Cloudflare Worker"]
+    W -->|"one broadcast per bell"| APNS["Apple Push<br/>Notification service"]
+    APNS -->|"every phone on the channel"| LA["Lock Screen &<br/>Dynamic Island"]
 ```
 
 ### 1 · The app does the work
@@ -71,10 +71,10 @@ flowchart LR
 
 ### 2 · The server keeps the Lock Screen live
 
-A Live Activity can't wake itself up at 8:50 to say "next period". So when you turn Live Activities on, the app tells a small **Cloudflare Worker** two things: your bell times for the day and an anonymous push token. A cron job runs every minute through the school day and, at each bell, sends an update through Apple's push service; at the last bell it dismisses the card.
+A Live Activity can't wake itself up at 8:50 to say "next period". So when you turn Live Activities on, the app tells a small **Cloudflare Worker** one thing: your bell times for the day. The Worker keeps each different schedule once. A cron job runs every minute through the school day and, at each bell in any of today's schedules, sends **one** update to an Apple **broadcast channel** (iOS 18). Apple delivers it to every phone listening, and each card works out its own class from the schedule it already carries. After the day's last bell, one more broadcast clears every card.
 
-- **Anonymous by design.** The Worker never learns who you are — just a random device ID, the bell times, the app build and the iOS version.
-- **Capacity.** On Cloudflare's free plan the Worker serves about 40 phones and tells anyone beyond that, politely, that it's full. On the paid plan, one variable lifts the limit to the whole school (see [Running the server](#running-the-server)).
+- **Anonymous by design.** The Worker never learns who is listening — no device ID, no push token, nothing about the phone. Only the bell times.
+- **No phone limit.** One push per bell for the whole school. Forty phones or the whole school cost the same, and it fits Cloudflare's free plan.
 - **A status page.** When something breaks in a way the school can fix — the calendar is unreachable, a schedule picture can't be read, a school site won't load — the app reports it once a day, and the Worker's `/status` page shows each problem with a count of affected devices.
 
 ---
@@ -103,27 +103,31 @@ A Live Activity can't wake itself up at 8:50 to say "next period". So when you t
 |---|---|
 | `-demoClock "2026-10-12 10:12"` | Launches with a running fake clock — great for screen recordings of the countdown |
 | `-screenshotDemo` | Starts a believable mid-class Live Activity for screenshots, without touching the server |
-| Settings → Debug | Force header text, start test Live Activities, simulate a full server |
+| Settings → Debug | Force header text, start test Live Activities |
 
 ## Running the server
 
-The Worker is a single file. Paste `APNS Worker.json` into a Cloudflare Worker, bind a KV namespace as `TOKENS`, add a cron trigger that runs every minute, and set these variables:
+The Worker is a single file. Paste `APNS Worker.json` into a Cloudflare Worker, bind a KV namespace as `TOKENS`, add a cron trigger that runs every minute (the Worker itself only acts Monday to Friday, 6 AM–5 PM Pacific), and set these variables:
 
 | Variable | What it is |
 |---|---|
 | `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID` | From Apple Developer |
 | `APNS_PRIVATE_KEY` | The Apple push-notification key, pasted in full |
 | `CLIENT_SECRET` | Must match `AppConstants.workerSecret` in the app; also the password for the pages below |
-| `SUBREQUEST_BUDGET` | *Optional.* Requests one bell may spend — default 45, the free plan's ceiling, which serves 40 phones |
-| `MAX_DEVICES` | *Optional.* Holds the phone limit below what the budget allows |
 
-**Moving to the Workers Paid plan?** Set `SUBREQUEST_BUDGET` to about `900`. That's it — the phone limit is worked out from the budget, so it rises to about 895 on its own.
+**Updating it.** Paste the new `APNS Worker.json` into the Worker's editor in the Cloudflare dashboard and click **Deploy**. The KV binding, cron and variables stay as they are.
+
+**Broadcast channels.** The app and the Worker share two channel IDs: one for production (App Store and TestFlight builds) and one for sandbox (builds run from Xcode). Every bell goes to both. The IDs are not secrets; they live in `AppConstants.swift` and at the top of the Worker's broadcast section. The **Broadcast Capability** is turned on for the app's App ID in Apple Developer. **Never turn it off: doing so permanently deletes every channel**, and every phone would need an app update to listen again.
 
 Then open these in a browser (any username, `CLIENT_SECRET` as the password):
 
-- **`/health`** — is it alive? (no sign-in)
-- **`/status`** — today's problems and every registered device · add **`?full=1`** for the past week and exact bell times
-- **`/test-push`** — sends one update and explains, in plain English, what Apple said
+- **`/health`** — no sign-in. Says whether the latest bell's broadcast went out: `broadcast: ok, last 08:55` or `broadcast: FAILED …`. Point a free uptime monitor at it and alert when it says FAILED.
+- **`/status`** — today's bells, how many schedules were reported, every send and Apple's answer, then today's problem reports · add **`?full=1`** for each schedule's times and the past week of problems
+- **`/test-broadcast`** — sends one broadcast now and explains, in plain English, what Apple said. Sandbox by default; `?env=production` or `?env=both` for the real channel. `&end=1` clears every card, and on production also needs `&confirm=yes`.
+
+How many phones are listening is in Apple's Push Notifications Console (Overview → subscriptions), for production builds only. The Worker doesn't know.
+
+**Legacy (v1.2 transition).** Phones still on 1.2 register a push token and get one push each. The Worker keeps that path until students update; on the free plan it serves about 35 of them. `/test-push`, `/purge` and `/rebuild` and the optional `SUBREQUEST_BUDGET` and `MAX_DEVICES` variables only affect this legacy path.
 
 ## Privacy
 
