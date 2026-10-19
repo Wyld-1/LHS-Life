@@ -1078,15 +1078,19 @@ const STATUS_PAGE_HTML = String.raw`<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <title>LHS Life Server</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔔</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%232f5fc4'/><path d='M58 8 22 56h24l-6 36 38-50H54z' fill='%23f5b800'/></svg>">
 <style>
-:root{--bg:#f5f5f4;--card:#fff;--text:#1c1917;--muted:#78716c;--line:#e7e5e4;--soft:#f5f5f4;--accent:#c9691f;--on-accent:#fff;--ok:#15803d;--bad:#dc2626;--warn:#d97706;--idle:#a8a29e;color-scheme:light}
-@media (prefers-color-scheme:dark){:root{--bg:#0c0a09;--card:#1c1917;--text:#f5f5f4;--muted:#a8a29e;--line:#2e2a27;--soft:#292524;--accent:#fb923c;--on-accent:#1c1917;--ok:#4ade80;--bad:#f87171;--warn:#fbbf24;--idle:#78716c;color-scheme:dark}}
+/* La Salle colors, the same values as the app's DesignSystem.swift:
+   royal blue and gold for the brand, the app's own surfaces, text and
+   status colors. Light first, then dark. */
+:root{--bg:#f2f3f7;--card:#fff;--text:#0a0c10;--muted:#5b6472;--line:#e3e6ec;--soft:#f2f3f7;--accent:#2f5fc4;--on-accent:#fff;--gold:#a8790a;--ok:#1f9968;--bad:#d64545;--warn:#c9691f;--idle:#9aa1af;--c3:#6425c4;--c4:#0e8c7a;--c5:#b8368a;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#0a0c10;--card:#13161c;--text:#fff;--muted:#8a93a8;--line:#262b36;--soft:#1c2029;--accent:#3a6fd8;--on-accent:#fff;--gold:#f5b800;--ok:#34c78a;--bad:#ff6b6b;--warn:#fb923c;--idle:#646c82;--c3:#7c3aed;--c4:#2dd4bf;--c5:#f472b6;color-scheme:dark}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-text-size-adjust:100%}
 main{max-width:1100px;margin:0 auto;padding:20px 16px 48px}
 a{color:var(--accent)}
 h1{font-size:22px;margin:0;letter-spacing:-.01em}
+h1::after{content:"";display:block;width:44px;height:3px;border-radius:2px;background:var(--gold);margin-top:6px}
 h2{font-size:17px;margin:0}
 .sub,.desc,.hint,.muted{color:var(--muted)}
 .sub{font-size:13px}
@@ -1117,7 +1121,7 @@ button:disabled{opacity:.6;cursor:default}
 .tick{position:absolute;top:4px;bottom:4px;width:4px;margin-left:-2px;border-radius:2px}
 .s-sent{background:var(--ok)}.s-missed{background:var(--bad)}.s-late{background:var(--warn)}
 .s-upcoming{background:transparent;box-shadow:inset 0 0 0 1.5px var(--idle)}.s-outside{background:var(--idle)}
-.nowline{position:absolute;top:-5px;bottom:-5px;width:2px;margin-left:-1px;background:var(--accent);border-radius:1px}
+.nowline{position:absolute;top:-5px;bottom:-5px;width:2px;margin-left:-1px;background:var(--gold);border-radius:1px}
 .axis{position:relative;height:16px;font-size:11px;color:var(--muted)}
 .axis span{position:absolute;transform:translateX(-50%);white-space:nowrap}
 .legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted);margin-top:10px}
@@ -1191,7 +1195,7 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
     registration: "Server",
     web_load: "School website"
   };
-  var PALETTE = ["--accent", "#3b82f6", "#8b5cf6", "#14b8a6", "#e11d48", "#64748b"];
+  var PALETTE = ["--accent", "--gold", "--c3", "--c4", "--c5", "--warn"];   // brand first
 
   // ── Small helpers ─────────────────────────────────────────────────────────
 
@@ -1387,7 +1391,7 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
       : el("p", { class: "muted", style: "font-size:13px;margin:10px 0 0", text: "Pick a schedule above to list its times." });
     var used = Object.keys(STATUS).filter(function (k) { return bells.some(function (x) { return x.status === k; }); });
     var legend = el("div", { class: "legend" }, used.map(function (k) { return el("span", null, [el("i", { class: "s-" + k }), STATUS[k]]); }));
-    if (nowMin !== null) legend.appendChild(el("span", null, [el("i", { style: "background:var(--accent);width:3px" }), "Now"]));
+    if (nowMin !== null) legend.appendChild(el("span", null, [el("i", { style: "background:var(--gold);width:3px" }), "Now"]));
 
     var options = [["all", "All schedules"]].concat(schedules.map(function (s) {
       return [s.id, s.name + " · " + plural(s.bells.length, "bell") + " · " + clock(s.bells[0]) + "–" + clock(s.bells[s.bells.length - 1])];
