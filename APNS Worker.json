@@ -4,7 +4,7 @@
  * Moves the Live Activity on students' Lock Screens to the next class at each
  * bell, Monday to Friday.
  *
- * ── How it works: broadcast (iOS 18, app builds after 1.2) ─────────────────
+ * ── How it works: broadcast (iOS 18, app 1.2.1 and later) ─────────────────
  * Each phone posts its day's bell times to /bells. Phones on the same schedule
  * post the same list, so the Worker keeps each DISTINCT schedule once — no
  * device ID, no push token, nothing about the phone. A cron runs every minute,
@@ -17,8 +17,8 @@
  * phones are listening: Apple's Push Notifications Console → Overview →
  * subscriptions — this Worker never knows.
  *
- * ── Legacy: one push per phone (v1.2 transition — remove after students update)
- * v1.2 registers a push token per phone (/register) and the cron pushes each
+ * ── Legacy: one push per phone (1.2.0 and earlier — remove after students update)
+ * Those versions register a push token per phone (/register) and the cron pushes each
  * phone at its own bells. Broadcast goes first in every run and legacy gets the
  * requests left over, which on the Free plan is about 35 phones. The device ID
  * it stores is a random number the app invents; it identifies no student.
@@ -30,7 +30,7 @@
  *             point an uptime monitor at it and alert on FAILED.
  *   /status   Start here: a dashboard with charts. Today's bells and whether
  *             each went out, how long Apple took, problem reports from the
- *             past week, and the legacy v1.2 phones. A dropdown picks the day
+ *             past week, and the phones still on 1.2.0 or earlier. A dropdown picks the day
  *             (up to 3 back). /status.json?day=yyyy-MM-dd is the same data
  *             as JSON, for scripts.
  *   /test-broadcast?env=sandbox|production|both&minutes=480&end=1
@@ -84,7 +84,7 @@ export default {
       return handleTestBroadcast(env, url);
     }
 
-    // ── Legacy routes below: v1.2 transition — remove after students update.
+    // ── Legacy routes below: 1.2.0-and-earlier transition — remove after students update.
 
     if (request.method === "POST" && url.pathname === "/register") {
       return handleRegister(request, env);
@@ -150,7 +150,7 @@ export default {
   },
 };
 
-// ── Legacy capacity (v1.2 transition — remove after students update) ───────
+// ── Legacy capacity (1.2.0-and-earlier transition — remove after students update) ───────
 // Everything from here to the Auth section only limits the one-push-per-phone
 // path. Broadcast has no per-phone cost, so none of it applies to broadcast.
 
@@ -927,13 +927,13 @@ async function readBroadcastStatus(env, day) {
   };
 }
 
-/** The legacy part of /status: v1.2 phones on one push per phone. */
+/** The legacy part of /status: phones on 1.2.0 or earlier, one push each. */
 async function readLegacyStatus(env) {
   const devices = await readRegistry(env);
   const { limit, source } = await effectiveLimit(env);
   const observed = await readCapacity(env);
   return {
-    note: "v1.2 phones on one push per phone (transition — remove after students update). Push tokens are never shown.",
+    note: "Phones on 1.2.0 or earlier, one push per phone (transition — remove after students update). Push tokens are never shown.",
     deviceCount: devices.length,
     limit,
     limitSource: source,
@@ -1376,7 +1376,7 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
       item("Last send", last ? clock(last.bell) : "—", last ? (last.kind === "end" ? "end of day · " : "") + last.text : "nothing sent yet", last && last.status !== 200),
       item("Typical delay", typical === null ? "—" : typical + " s", "after the bell"),
       item("Problems today", String(data.issues.devicesReportingToday || 0), plural(data.issues.groupsToday || 0, "kind", "kinds") + " reported", (data.issues.devicesReportingToday || 0) > 0),
-      item("v1.2 phones", L.deviceCount + " / " + L.limit, "old per-phone path", L.atCapacity)
+      item("Older versions", L.deviceCount + " / " + L.limit, "1.2.0 and earlier, per phone", L.atCapacity)
     ]);
   }
 
@@ -1541,26 +1541,26 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
   function legacyCard() {
     var L = data.legacy;
     if (!L) return null;
-    var desc = "Phones still on version 1.2 get one push each instead of the broadcast. On the free plan there's room for about " + L.limit + ". This section goes away once they've all updated.";
-    if (!L.deviceCount) return card("v1.2 phones", desc, null, [el("p", { class: "empty", text: "No v1.2 phones left. Once this stays at zero, the legacy code in the Worker can be removed." })]);
+    var desc = "Phones still on 1.2.0 or earlier get one push each instead of the broadcast. On the free plan there's room for about " + L.limit + ". This section goes away once they've all updated.";
+    if (!L.deviceCount) return card("Older versions", desc, null, [el("p", { class: "empty", text: "No phones on 1.2.0 or earlier left. Once this stays at zero, the legacy code in the Worker can be removed." })]);
 
     var versions = {};
     L.devices.forEach(function (d) { var v = d.appVersion || "unknown"; versions[v] = (versions[v] || 0) + 1; });
     var names = Object.keys(versions).sort();
     var used = Math.min(100, Math.round(L.deviceCount / Math.max(1, L.limit) * 100));
     var summary = el("div", null, [
-      el("div", { text: L.deviceCount + " of " + L.limit + " slots used" + (L.atCapacity ? " — full, new v1.2 phones are turned away" : "") }),
+      el("div", { text: L.deviceCount + " of " + L.limit + " slots used" + (L.atCapacity ? " — full, more phones on old versions are turned away" : "") }),
       el("div", { class: "meter" + (L.atCapacity ? " full" : "") }, [el("span", { style: "width:" + used + "%" })]),
       el("div", { class: "muted", style: "font-size:12px", text: "Limit from " + L.limitSource + (L.provenCapacity ? " · most ever sent at one bell: " + L.provenCapacity : "") + (L.ceilingHitAt ? " · last hit the ceiling " + whenOf(L.ceilingHitAt) : "") })
     ]);
     var byVersion = [
       el("div", { class: "subhead", text: "By app version" }),
-      el("div", { class: "splitbar", role: "img", "aria-label": "v1.2 phones by app version" }, names.map(function (n, i) {
+      el("div", { class: "splitbar", role: "img", "aria-label": "Phones on older versions, by app version" }, names.map(function (n, i) {
         return el("span", { style: "flex:" + versions[n] + " 1 0;background:" + PALETTE[i % PALETTE.length], title: n + ": " + plural(versions[n], "phone") });
       })),
       legendOf(names.map(function (n, i) { return { name: n + " · " + versions[n], color: PALETTE[i % PALETTE.length] }; }))
     ];
-    return card("v1.2 phones", desc, null, [summary].concat(byVersion).concat([
+    return card("Older versions (1.2.0 and earlier)", desc, null, [summary].concat(byVersion).concat([
       el("details", null, [
         el("summary", { text: "Each phone (" + L.deviceCount + ")" }),
         table(["Device", "Build", "App", "iOS", "Bells", "Last bell", "Updated"], L.devices.map(function (d) {
@@ -1624,7 +1624,7 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
 </html>`;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MARK: - Token registration (legacy: v1.2 transition — remove after students update)
+// MARK: - Token registration (legacy: 1.2.0-and-earlier transition — remove after students update)
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function handleRegister(request, env) {
@@ -1731,7 +1731,7 @@ async function handleUnregister(request, env) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MARK: - Purge (legacy: v1.2 transition — remove after students update)
+// MARK: - Purge (legacy: 1.2.0-and-earlier transition — remove after students update)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -1852,7 +1852,7 @@ function clockTime(minutes) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MARK: - Test push (legacy: v1.2 transition — remove after students update)
+// MARK: - Test push (legacy: 1.2.0-and-earlier transition — remove after students update)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -2205,7 +2205,7 @@ async function runCron(rawEnv) {
 
 /**
  * One push per registered phone at that phone's own bells.
- * v1.2 transition — remove after students update.
+ * 1.2.0-and-earlier transition — remove after students update.
  */
 async function runLegacyPushCycle(env, currentMinutes) {
   // Reconcile on even minutes only. list() is capped at 1,000/day: every
@@ -2613,7 +2613,7 @@ async function generateJWT(keyId, teamId, privateKeyPem) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MARK: - Legacy registry (v1.2 transition — remove after students update)
+// MARK: - Legacy registry (1.2.0-and-earlier transition — remove after students update)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**

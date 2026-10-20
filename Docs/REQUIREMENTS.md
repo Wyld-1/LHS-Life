@@ -180,7 +180,7 @@ for periods 0–8), App Icon (holiday windows only), Lock Screen (Live
 Activities mode, Preview Live Activities; footer "Pin your live bell schedule
 to your Lock Screen and Dynamic Island", Lock Screen only on iPad), Reminders,
 ASB (members choose work days as glass capsules that flow together), Map,
-Sign Out, Privacy Policy, Rate LHS Life. Footer: "LHS Life 1.3.0 · La Salle
+Sign Out, Privacy Policy, Rate LHS Life. Footer: "LHS Life 1.2.1 · La Salle
 High School · Yakima".
 
 ### 3.8 Holiday app icons

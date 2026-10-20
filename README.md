@@ -122,12 +122,12 @@ The Worker is a single file. Paste `APNS Worker.json` into a Cloudflare Worker, 
 Then open these in a browser (any username, `CLIENT_SECRET` as the password):
 
 - **`/health`** — no sign-in. Says whether the latest bell's broadcast went out: `broadcast: ok, last 08:55` or `broadcast: FAILED …`. Point a free uptime monitor at it and alert when it says FAILED.
-- **`/status`** — a dashboard with charts: whether each of today's bells went out, how long Apple took, problem reports from the past week, and the phones still on 1.2. Dropdowns pick the day (up to 3 back), a schedule, and which problems to show. The same data is at `/status.json?day=yyyy-MM-dd` for scripts.
+- **`/status`** — a dashboard with charts: whether each of today's bells went out, how long Apple took, problem reports from the past week, and the phones still on 1.2.0 or earlier. Dropdowns pick the day (up to 3 back), a schedule, and which problems to show. The same data is at `/status.json?day=yyyy-MM-dd` for scripts.
 - **`/test-broadcast`** — sends one broadcast now and explains, in plain English, what Apple said. Sandbox by default; `?env=production` or `?env=both` for the real channel. `&end=1` clears every card, and on production also needs `&confirm=yes`.
 
 How many phones are listening is in Apple's Push Notifications Console (Overview → subscriptions), for production builds only. The Worker doesn't know.
 
-**Legacy (v1.2 transition).** Phones still on 1.2 register a push token and get one push each. The Worker keeps that path until students update; on the free plan it serves about 35 of them. `/test-push`, `/purge` and `/rebuild` and the optional `SUBREQUEST_BUDGET` and `MAX_DEVICES` variables only affect this legacy path.
+**Legacy (1.2.0 and earlier).** Phones still on those versions register a push token and get one push each. The Worker keeps that path until students update; on the free plan it serves about 35 of them. `/test-push`, `/purge` and `/rebuild` and the optional `SUBREQUEST_BUDGET` and `MAX_DEVICES` variables only affect this legacy path.
 
 ## Privacy
 

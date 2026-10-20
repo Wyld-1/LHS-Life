@@ -362,8 +362,8 @@ Apple ─► every card on the channel; each works out its own class
   sends one broadcast now and explains Apple's answer; `&minutes=` picks the
   bell, `&end=1` sends an end, which on production also needs `&confirm=yes`.
   Everything but `/health` needs `CLIENT_SECRET`.
-- **Legacy (v1.2 transition — remove after students update).** Version 1.2
-  registers a push token per phone (`/register`, `/unregister`) and the cron
+- **Legacy (1.2.0 and earlier — remove after students update).** Those
+  versions register a push token per phone (`/register`, `/unregister`) and the cron
   pushes each phone at its own bells. Broadcast runs first in every cron run;
   legacy gets the requests left over, about 35 phones on the free plan.
   `SUBREQUEST_BUDGET`, `MAX_DEVICES`, `/test-push`, `/purge` and `/rebuild`

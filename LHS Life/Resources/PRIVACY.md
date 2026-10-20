@@ -34,9 +34,9 @@ The app also says whether it's an App Store or a test build, which the server ig
 
 When something breaks in a way the school can fix — the school calendar can't be reached, a posted schedule can't be read, a school website won't load — the app tells the same server, so the school can see how many devices are affected instead of waiting for someone to report it. It sends a random install ID, the app and iOS version, and a short description of the failure, at most once per device per problem per day. It never sends what you typed, what you were looking at, or anything about you. The install ID is made up by the app, isn't connected to your name, email, or Apple account, and only lets the server count each phone once. Reports are shown only on a password-protected status page for the people who run LHS Life, and are deleted automatically after 7 days.
 
-## If you used version 1.2
+## If you used an earlier version
 
-Before version 1.3, the server sent each phone its own Lock Screen updates, so the app also sent a random device ID, a Live Activity push token from Apple, and its app and iOS version along with your bell times. Once you update, that's no longer sent. The old record is deleted automatically, usually within a day after that version's Live Activity ends, and every remaining one is deleted when the old system is switched off.
+Before version 1.2.1, the server sent each phone its own Lock Screen updates, so the app also sent a random device ID, a Live Activity push token from Apple, and its app and iOS version along with your bell times. Once you update, that's no longer sent. The old record is deleted automatically, usually within a day after that version's Live Activity ends, and every remaining one is deleted when the old system is switched off.
 
 ## Who else is involved
 

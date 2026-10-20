@@ -20,7 +20,7 @@ No network, no UI, no clock: every test builds its own dates with
 `makeDate(...)` (Pacific time) and its own events and schedules from
 `TestHelpers.swift`.
 
-**Status (Oct 2026, version 1.3.0): 118 tests, all pass** (Debug
+**Status (Oct 2026, version 1.2.1): 118 tests, all pass** (Debug
 configuration).
 
 ---
