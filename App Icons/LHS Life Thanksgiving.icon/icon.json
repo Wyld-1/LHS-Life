@@ -1,80 +1,80 @@
 {
-  "fill": {
-    "automatic-gradient": "display-p3:0.49277,0.11373,0.14659,1.00000"
+  "fill" : {
+    "automatic-gradient" : "display-p3:0.49277,0.11373,0.14659,1.00000"
   },
-  "groups": [
+  "groups" : [
     {
-      "layers": [
+      "layers" : [
         {
-          "image-name": "6221672 3.png",
-          "name": "6221672 3",
-          "position": {
-            "scale": 0.4,
-            "translation-in-points": [
-              -138,
-              260
+          "image-name" : "6221672 3.png",
+          "name" : "6221672 3",
+          "position" : {
+            "scale" : 0.4,
+            "translation-in-points" : [
+              -134,
+              256
             ]
           }
         },
         {
-          "glass-specializations": [
+          "glass-specializations" : [
             {
-              "value": true
+              "value" : true
             },
             {
-              "appearance": "dark",
-              "value": true
+              "appearance" : "dark",
+              "value" : true
             },
             {
-              "appearance": "tinted",
-              "value": false
+              "appearance" : "tinted",
+              "value" : false
             }
           ],
-          "image-name": "Lighting nobg.png",
-          "name": "Lighting nobg",
-          "position": {
-            "scale": 0.6,
-            "translation-in-points": [
+          "image-name" : "Lighting nobg.png",
+          "name" : "Lighting nobg",
+          "position" : {
+            "scale" : 0.6,
+            "translation-in-points" : [
               1.5000000000000568,
               -1.2000000000000455
             ]
           }
         }
       ],
-      "shadow": {
-        "kind": "layer-color",
-        "opacity": 0.5
+      "shadow" : {
+        "kind" : "layer-color",
+        "opacity" : 0.5
       },
-      "specular-specializations": [
+      "specular-specializations" : [
         {
-          "value": true
+          "value" : true
         },
         {
-          "appearance": "tinted",
-          "value": true
+          "appearance" : "tinted",
+          "value" : true
         }
       ],
-      "translucency-specializations": [
+      "translucency-specializations" : [
         {
-          "value": {
-            "enabled": false,
-            "value": 0.5
+          "value" : {
+            "enabled" : false,
+            "value" : 0.5
           }
         },
         {
-          "appearance": "tinted",
-          "value": {
-            "enabled": true,
-            "value": 0.5
+          "appearance" : "tinted",
+          "value" : {
+            "enabled" : true,
+            "value" : 0.5
           }
         }
       ]
     }
   ],
-  "supported-platforms": {
-    "circles": [
+  "supported-platforms" : {
+    "circles" : [
       "watchOS"
     ],
-    "squares": "shared"
+    "squares" : "shared"
   }
 }
