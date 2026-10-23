@@ -473,7 +473,7 @@ h1{font-size:20px;margin:0}h1::after{content:"";display:block;width:40px;height:
 label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
 input{width:100%;font:inherit;padding:10px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text)}
 button{width:100%;margin-top:14px;font:inherit;font-weight:600;padding:10px;border:0;border-radius:9px;background:var(--accent);color:#fff;cursor:pointer}
-.error{color:var(--bad);font-size:13px;margin:10px 0 0}.note{color:var(--muted);font-size:12px;margin:14px 0 0}
+.error{color:var(--bad);font-size:13px;margin:10px 0 0}
 </style></head><body>
 <form method="post" action="/login">
 <h1>LHS Life Server</h1>
@@ -483,7 +483,6 @@ button{width:100%;margin-top:14px;font:inherit;font-weight:600;padding:10px;bord
 <input id="password" name="password" type="password" autocomplete="current-password" autofocus required>
 ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ""}
 <button type="submit">Sign in</button>
-<p class="note">This browser stays signed in for a year. Ask ASB for the password.</p>
 </form></body></html>`;
   return new Response(html, {
     status,
