@@ -54,13 +54,17 @@ enum BellScheduleDetector {
         let hasEarlyRel = t.contains("early release") || t.contains("early dismissal")
 
         if t.contains("final exam") || t.contains("finals") { return .finals }
-        if t.contains("late start")                          { return .lateStart }
         if hasEarlyRel && hasLiturgy                         { return .earlyReleaseLiturgy }
         if hasEarlyRel                                       { return .earlyRelease }
         if hasOdd  && hasBlock && hasLiturgy                 { return .oddBlockLiturgy }
         if hasEven && hasBlock && hasLiturgy                 { return .evenBlockLiturgy }
         if hasOdd  && hasBlock                               { return .oddBlock }
         if hasEven && hasBlock                               { return .evenBlock }
+        // After the block checks: every Thursday is posted as "Late Start/
+        // ADVISING/Even Block Schedule" (or CLUBS), and that's the ordinary
+        // Thursday, not an unusual day. A one-off late start has no block in
+        // its title. The late-start reminder goes by bell times, not this.
+        if t.contains("late start")                          { return .lateStart }
         if t.contains("assembly") || t.contains("rally")     { return .assembly }
         if t.contains("regular") && hasLiturgy               { return .regularLiturgy }
         if t.contains("regular")                             { return .regular }

@@ -506,13 +506,15 @@ final class BellScheduleParser {
         let hasEarlyRel    = combined.contains("early release") || combined.contains("early dismissal")
 
         if combined.contains("final exam") || combined.contains("finals") { return .finals }
-        if combined.contains("late start")                                 { return .lateStart }
         if hasEarlyRel && hasLiturgy  { return .earlyReleaseLiturgy }
         if hasEarlyRel                { return .earlyRelease }
         if hasOdd  && hasBlock && hasLiturgy { return .oddBlockLiturgy }
         if hasEven && hasBlock && hasLiturgy { return .evenBlockLiturgy }
         if hasOdd  && hasBlock               { return .oddBlock }
         if hasEven && hasBlock               { return .evenBlock }
+        // After the block checks — see BellScheduleDetector.scheduleType: the
+        // weekly "Late Start/ADVISING/Even Block" Thursday is an Even Block day.
+        if combined.contains("late start")                                 { return .lateStart }
         if combined.contains("assembly") || combined.contains("rally") { return .assembly }
         if combined.contains("regular") && hasLiturgy { return .regularLiturgy }
         if combined.contains("regular")      { return .regular }

@@ -113,6 +113,19 @@ final class BellScheduleParserTests: XCTestCase {
         XCTAssertEqual(parser.parse(from: event).first?.scheduleType, .lateStart)
     }
 
+    // The ordinary Thursday is titled "Late Start/…/Even Block Schedule" every
+    // week. It's an Even Block day, not an unusual one — classing it as a late
+    // start sent "Different Schedule Today" every Thursday (Oct 22 2026).
+    func test_scheduleType_weeklyThursdayIsEvenBlock() {
+        let desc = "Even Block Schedule\n(2,4,6)\nFirst Bell @ 8:55AM\nPeriod\nBegin\nEnd\nTotal\n2\n9:10\n10:40\n90"
+        for title in ["Late Start/CLUBS/Even Block Schedule", "Late Start/ADVISING/Even Block Schedule"] {
+            let event = makeEvent(description: desc, title: title)
+            XCTAssertEqual(parser.parse(from: event).first?.scheduleType, .evenBlock, title)
+            XCTAssertEqual(BellScheduleDetector.scheduleType(fromTitle: title), .evenBlock, title)
+        }
+        XCTAssertEqual(BellScheduleDetector.scheduleType(fromTitle: "Late Start Schedule"), .lateStart)
+    }
+
     // MARK: 4.7 Schedule type inferred as block
 
     func test_scheduleType_block() {
