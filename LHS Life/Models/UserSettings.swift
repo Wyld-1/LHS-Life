@@ -330,12 +330,8 @@ final class UserSettings {
         case .off:          return false
         case .everyDay:     return true
         case .abnormalOnly:
-            let abnormal: Set<ScheduleType> = [
-                .lateStart, .earlyRelease, .earlyReleaseLiturgy,
-                .oddBlock, .evenBlock, .oddBlockLiturgy, .evenBlockLiturgy,
-                .assembly, .custom
-            ]
-            return abnormal.contains(scheduleType ?? .unknown)
+            // Odd and Even Block happen every week, so they're not abnormal.
+            return (scheduleType ?? .unknown).isUnusual
         }
     }
     

@@ -56,6 +56,9 @@ enum BellScheduleDetector {
         if t.contains("final exam") || t.contains("finals") { return .finals }
         if hasEarlyRel && hasLiturgy                         { return .earlyReleaseLiturgy }
         if hasEarlyRel                                       { return .earlyRelease }
+        // Before the block checks: "HOCO Powder Puff/Odd Block/EXTENDED Lunch"
+        // is an unusual day even though it's also an Odd Block day.
+        if t.contains("extended lunch")                      { return .extendedLunch }
         if hasOdd  && hasBlock && hasLiturgy                 { return .oddBlockLiturgy }
         if hasEven && hasBlock && hasLiturgy                 { return .evenBlockLiturgy }
         if hasOdd  && hasBlock                               { return .oddBlock }
@@ -66,6 +69,7 @@ enum BellScheduleDetector {
         // its title. The late-start reminder goes by bell times, not this.
         if t.contains("late start")                          { return .lateStart }
         if t.contains("assembly") || t.contains("rally")     { return .assembly }
+        if t.contains("special")                             { return .special }
         if t.contains("regular") && hasLiturgy               { return .regularLiturgy }
         if t.contains("regular")                             { return .regular }
         if hasLiturgy                                        { return .regularLiturgy }

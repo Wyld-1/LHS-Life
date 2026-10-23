@@ -144,7 +144,10 @@ A change that breaks one of these is revised before it ships.
   first bell and the day's schedule as colored bands.
 - Compact island: progress arc, and a gray bell with the next bell time
   ("8:55").
-- Modes: Every Day (default), Abnormal Days, Off.
+- Modes: Every Day (default), Abnormal Days, Off. Abnormal Days is any day
+  that isn't one of the weekly patterns (Regular, Odd Block, Even Block,
+  Thursday's "Late Start/…/Even Block" included): liturgies, early releases,
+  assemblies, extended lunch, finals, special schedules.
 - Starts when the student opens the app on a school day; a morning reminder
   offers to start it on days they haven't.
 - Days with no school left for this student (after school, holidays, their
@@ -169,7 +172,7 @@ A change that breaks one of these is revised before it ships.
 | Home Games | On, 7:30 AM | Same rule; includes the student-section theme when posted |
 | ASB | Off; ASB members choose days | Announcements before first period; Student Store before Break and Lunch |
 | Start Live Activity | With Live Activities on | Morning of school days |
-| Abnormal schedule | Only with Live Activities off | Morning of a non-regular day |
+| Abnormal schedule | Only with Live Activities off | Morning of a day that isn't Regular, Odd Block or Even Block (the same rule as Abnormal Days) |
 
 Settings shows each reminder as a row with its time ("9:00 PM") that opens a
 screen with Remind Me, Time, and Arrives ("Night before" / "Morning of").

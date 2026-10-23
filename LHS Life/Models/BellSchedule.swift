@@ -35,6 +35,10 @@ enum ScheduleType: String, Codable, CaseIterable {
     case earlyRelease        = "Early Release"
     case earlyReleaseLiturgy = "Early Release Liturgy"
     case assembly              = "Assembly"
+    /// A longer lunch: "Extended Lunch Schedule", "HOCO …/EXTENDED Lunch".
+    case extendedLunch         = "Extended Lunch"
+    /// Posted as "Special": "Thanksgiving Lunch Special Schedule".
+    case special               = "Special"
     case seniorPresentation    = "Senior Presentation"
     /// One grade's whole day of service, 8:00–3:00, no classes.
     case serveAThon            = "Serve-a-thon"
@@ -44,6 +48,22 @@ enum ScheduleType: String, Codable, CaseIterable {
 }
 
 extension ScheduleType {
+    /// Every day that isn't one of the weekly patterns — Regular, Odd Block,
+    /// Even Block (Thursday's "Late Start/…/Even Block" included). Liturgies,
+    /// early releases, assemblies, extended lunch, finals, and so on.
+    ///
+    /// One definition for both places that ask: "Abnormal Days" Live
+    /// Activities and the "Different Schedule Today" notification. They used
+    /// separate lists, which disagreed about block days and liturgies.
+    /// .unknown counts as ordinary: a title nobody recognised is no reason to
+    /// tell anyone their day is different.
+    var isUnusual: Bool {
+        switch self {
+        case .regular, .oddBlock, .evenBlock, .unknown: return false
+        default:                                        return true
+        }
+    }
+
     /// Display label used in the schedule header pill, Live Activity, and calendar.
     /// Most types append " Schedule", but some are already complete names.
     var scheduleLabel: String {

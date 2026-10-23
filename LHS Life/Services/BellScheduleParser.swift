@@ -508,6 +508,7 @@ final class BellScheduleParser {
         if combined.contains("final exam") || combined.contains("finals") { return .finals }
         if hasEarlyRel && hasLiturgy  { return .earlyReleaseLiturgy }
         if hasEarlyRel                { return .earlyRelease }
+        if combined.contains("extended lunch") { return .extendedLunch }   // see BellScheduleDetector
         if hasOdd  && hasBlock && hasLiturgy { return .oddBlockLiturgy }
         if hasEven && hasBlock && hasLiturgy { return .evenBlockLiturgy }
         if hasOdd  && hasBlock               { return .oddBlock }
@@ -516,6 +517,7 @@ final class BellScheduleParser {
         // weekly "Late Start/ADVISING/Even Block" Thursday is an Even Block day.
         if combined.contains("late start")                                 { return .lateStart }
         if combined.contains("assembly") || combined.contains("rally") { return .assembly }
+        if combined.contains("special")      { return .special }
         if combined.contains("regular") && hasLiturgy { return .regularLiturgy }
         if combined.contains("regular")      { return .regular }
         if hasLiturgy                        { return .regularLiturgy }

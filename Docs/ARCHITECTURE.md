@@ -297,7 +297,7 @@ notifications per app, so lookahead windows are short (about two weeks).
 | Home Games | Chosen time; includes the student-section theme when posted |
 | ASB | Announcements before first period; Student Store before Break and Lunch, on the student's work days |
 | Start Live Activity | Morning nudge on days the card should run; cancelled once it starts, never sent on iOS 17 |
-| Abnormal schedule | Morning of a non-regular day, only for students with Live Activities off |
+| Abnormal schedule | Morning of an unusual day (`ScheduleType.isUnusual`: not Regular, Odd Block or Even Block), only for students with Live Activities off |
 | Class Orientation | Before the student's grade-specific orientation window |
 
 ---

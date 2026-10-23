@@ -111,4 +111,54 @@ final class BellScheduleDetectorTests: XCTestCase {
     func test_isProfessionalDress_falseForUnrelatedTitle() {
         XCTAssertFalse(BellScheduleDetector.isProfessionalDress(title: "All School Mass"))
     }
+
+    // MARK: Unusual days — every schedule title in the 2026–27 calendar feed
+
+    /// Odd and Even Block happen every week; liturgies, early releases,
+    /// assemblies, extended lunch and the like don't. Titles copied from the
+    /// school's feed on Oct 22 2026.
+    func test_everyFeedTitle_classifiedAndJudged() {
+        let cases: [(String, ScheduleType, unusual: Bool)] = [
+            ("Regular Schedule",                                   .regular,       false),
+            ("Regular Schedule - 1st Day of Second Semester",      .regular,       false),
+            ("Odd Block Schedule",                                 .oddBlock,      false),
+            ("Late Start/ADVISING/Even Block Schedule",            .evenBlock,     false),
+            ("Late Start/CLUBS/Even Block Schedule",               .evenBlock,     false),
+            ("Jan Term Schedule",                                  .unknown,       false),
+            ("Late Start Schedule",                                .lateStart,     true),
+            ("Extended Lunch Schedule",                            .extendedLunch, true),
+            ("HOCO Powder Puff/Odd Block/EXTENDED Lunch Schedule", .extendedLunch, true),
+            ("Thanksgiving Lunch Special Schedule",                .special,       true),
+            ("Special Schedule/Early Release",                     .earlyRelease,  true),
+            ("Special Schedule- Early Release",                    .earlyRelease,  true),
+            ("Special Early Release (11:40 AM) Schedule",          .earlyRelease,  true),
+            ("HOCO Rally Schedule",                                .assembly,      true),
+            ("Final Exams",                                        .finals,        true),
+        ]
+        for (title, type, unusual) in cases {
+            let found = BellScheduleDetector.scheduleType(fromTitle: title)
+            XCTAssertEqual(found, type, title)
+            XCTAssertEqual(found.isUnusual, unusual, title)
+        }
+        XCTAssertTrue(ScheduleType.regularLiturgy.isUnusual)
+        XCTAssertTrue(ScheduleType.evenBlockLiturgy.isUnusual)
+    }
+
+    /// "Abnormal Days" Live Activities follow the same rule — no card on an
+    /// ordinary Wednesday or Thursday, a card on a liturgy or extended lunch.
+    @MainActor
+    func test_abnormalDaysMode_skipsWeeklyBlocks() {
+        let settings = makeDefaultSettings()
+        settings.liveActivityMode = .abnormalOnly
+        XCTAssertFalse(settings.modeWantsLiveActivity(on: .regular))
+        XCTAssertFalse(settings.modeWantsLiveActivity(on: .oddBlock))
+        XCTAssertFalse(settings.modeWantsLiveActivity(on: .evenBlock))
+        XCTAssertFalse(settings.modeWantsLiveActivity(on: nil))
+        XCTAssertTrue(settings.modeWantsLiveActivity(on: .regularLiturgy))
+        XCTAssertTrue(settings.modeWantsLiveActivity(on: .oddBlockLiturgy))
+        XCTAssertTrue(settings.modeWantsLiveActivity(on: .earlyRelease))
+        XCTAssertTrue(settings.modeWantsLiveActivity(on: .assembly))
+        XCTAssertTrue(settings.modeWantsLiveActivity(on: .extendedLunch))
+    }
 }
+

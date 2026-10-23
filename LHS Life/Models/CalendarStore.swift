@@ -618,6 +618,7 @@ extension ScheduleType {
         case .oddBlockLiturgy, .evenBlockLiturgy:         return Color.lsBlue
         case .lateStart:                                  return Color.lsOrange
         case .earlyRelease, .earlyReleaseLiturgy:         return Color.lsGold
+        case .extendedLunch, .special:                    return Color.lsGold
         case .assembly:                                   return Color.lsSuccess
         case .seniorPresentation:                          return Color.lsGold
         // Same green as the Service category the event itself belongs to.

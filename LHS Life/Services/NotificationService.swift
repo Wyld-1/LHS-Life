@@ -520,18 +520,14 @@ enum NotificationService {
 
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
-        // Notify for anything that isn't a standard school day.
-        // Whitelist the "normal" types and skip everything in that set;
-        // this automatically catches finals, seniorPresentation,
-        // earlyReleaseLiturgy, oddBlockLiturgy, evenBlockLiturgy, etc.
-        // without needing to enumerate every future ScheduleType.
-        let normalTypes: Set<ScheduleType> = [.regular, .oddBlock, .evenBlock, .unknown]
+        // Notify for anything that isn't one of the weekly patterns — the
+        // same rule "Abnormal Days" Live Activities use (ScheduleType.isUnusual).
 
         for dayOffset in 0..<14 {
             guard let date = cal.date(byAdding: .day, value: dayOffset, to: today) else { continue }
             let dayKey = DateFormatter.isoDay.string(from: date)
             guard let schedule = store.bellSchedule(for: dayKey) else { continue }
-            guard !normalTypes.contains(schedule.scheduleType) else { continue }
+            guard schedule.scheduleType.isUnusual else { continue }
 
             // Skip Pathways Days — students know they're off campus
             let isPathways = PathwaysService.isPathwaysDay(
