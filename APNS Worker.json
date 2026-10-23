@@ -24,9 +24,10 @@
  * it stores is a random number the app invents; it identifies no student.
  *
  * ── Pages you can open in a browser ─────────────────────────────────────────
- * Sign-in: a browser shows a sign-in page (the password is CLIENT_SECRET) and
- * stays signed in for a year; /logout signs it out. Scripts can still send
- * Basic auth or "X-LHS-Auth: <secret>". /health needs none.
+ * Sign-in: a browser shows a sign-in page (the password is DASHBOARD_PASSWORD)
+ * and stays signed in for a year; /logout signs it out. Scripts can send it as
+ * Basic auth or "X-LHS-Auth: <password>". /health needs none. The app's own
+ * routes take CLIENT_SECRET instead, and the two never open each other's doors.
  *   /health   Alive? Password set? Did the latest bell's broadcast go out?
  *             Prints "broadcast: ok, last 08:55" or "broadcast: FAILED …" —
  *             point an uptime monitor at it and alert on FAILED.
@@ -52,7 +53,9 @@
  *
  * Variables: APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID, APNS_PRIVATE_KEY (the
  * .p8 file's full contents) from Apple Developer; CLIENT_SECRET, matching
- * AppConstants.workerSecret in the app and doubling as the password above;
+ * AppConstants.workerSecret in the app (change both together, or phones stop
+ * reporting); DASHBOARD_PASSWORD, the sign-in password above, which can be
+ * changed any time (until it's set, CLIENT_SECRET stands in);
  * TOKENS, the KV binding. Optional, legacy only: SUBREQUEST_BUDGET (default
  * 45, the Free plan's ceiling; ~900 on Paid), MAX_DEVICES (hold the cap down).
  */
@@ -84,7 +87,7 @@ export default {
       return new Response(null, { status: 303, headers: { location: "/login", "set-cookie": `${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict`, "cache-control": "no-store" } });
     }
 
-    const denied = await requireAuth(request, env);
+    const denied = await requireAuth(request, env, APP_ROUTES.has(`${request.method} ${url.pathname}`) ? "app" : "admin");
     if (denied) return denied;
 
     // The app reports its day's bell times. See handleBells.
@@ -262,53 +265,75 @@ async function effectiveLimit(env) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Shared-secret gate on every route except /health.
+ * Two keys, two doors. /health is the only open route.
  *
- * This is a lock on the front door, not a vault. The secret ships inside the
- * app, so anyone who unpacks the binary can read it — what it stops is the
- * drive-by: /status used to hand out every device ID to anyone who asked, and
- * /unregister would then take any of them, which is a one-command way to kill
- * Live Activities for the whole school. It also keeps randoms from burning the
- * KV write quota through /register.
+ *   The app's routes (APP_ROUTES) take CLIENT_SECRET, which ships inside the
+ *   app as AppConstants.workerSecret. That makes it a lock on the front door,
+ *   not a vault — anyone who unpacks the app can read it — but it stops the
+ *   drive-by request. Changing it breaks every phone until an app update
+ *   carries the new value, so it is effectively permanent.
  *
- * Three ways to present the secret, all checking the same value:
+ *   Everything a person opens — /status, its data, /test-broadcast,
+ *   /test-push, /purge, /rebuild — takes DASHBOARD_PASSWORD (adminPassword),
+ *   which never ships anywhere and can be changed in Cloudflare at any time.
+ *   The app's secret does NOT open these pages, and the dashboard password
+ *   does NOT work for the app's routes.
+ *
+ * Ways to present either one:
  *
  *   1. "Authorization: Bearer <secret>"      — what the iOS app sends.
- *   2. "Authorization: Basic <base64>"       — what a BROWSER sends after the
- *      sign-in box. Any username works; the password is the secret. A refusal
- *      carries WWW-Authenticate, which is what makes the browser show that box
- *      in the first place, so an admin can open /status and simply log in.
- *   3. "X-LHS-Auth: <secret>"                — for scripts and curl.
+ *   2. The sign-in page's cookie             — what a browser uses; see
+ *      "Dashboard sign-in" below. Dashboard routes only.
+ *   3. "Authorization: Basic <base64>"       — any username; the password is
+ *      the key. Scripts get a WWW-Authenticate challenge when refused.
+ *   4. "X-LHS-Auth: <secret>"                — for scripts and curl.
  *
- * Set CLIENT_SECRET in the Cloudflare dashboard (Worker → Settings →
- * Variables). If it is unset the worker refuses every authenticated route
+ * If CLIENT_SECRET is unset the Worker refuses every authenticated route
  * rather than falling open — a misconfigured deploy should break loudly
  * instead of quietly serving the world.
  */
-async function requireAuth(request, env) {
-  const expected = env.CLIENT_SECRET;
-  if (!expected) {
-    console.error("[Auth] CLIENT_SECRET is not set on this worker — refusing all authenticated routes");
-    // Spelled out, because the person who hits this is an admin in a browser
-    // with no logs in front of them. Fail closed, but say why and how to fix.
-    return new Response(
-      [
-        "This worker has no CLIENT_SECRET set, so it is refusing every request.",
-        "",
-        "Fix it in the Cloudflare dashboard:",
-        "  Workers & Pages -> this worker -> Settings -> Variables and Secrets",
-        "  Add a variable named exactly CLIENT_SECRET (case-sensitive),",
-        "  set its value, then click Deploy.",
-        "",
-        "Check it worked by loading /health — it reports 'auth: configured'.",
-        "",
-        "Nothing is broken for students: bell-schedule pushes keep working.",
-        "Only registration and the admin pages are refused until this is set.",
-      ].join("\n"),
-      { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } }
-    );
-  }
+/** Every route but /health refuses while CLIENT_SECRET is unset — and says why. */
+function missingSecret() {
+  console.error("[Auth] CLIENT_SECRET is not set on this worker — refusing all authenticated routes");
+  // Spelled out, because the person who hits this is an admin in a browser
+  // with no logs in front of them. Fail closed, but say why and how to fix.
+  return new Response(
+    [
+      "This worker has no CLIENT_SECRET set, so it is refusing every request.",
+      "",
+      "Fix it in the Cloudflare dashboard:",
+      "  Workers & Pages -> this worker -> Settings -> Variables and Secrets",
+      "  Add a variable named exactly CLIENT_SECRET (case-sensitive),",
+      "  set its value, then click Deploy.",
+      "",
+      "Check it worked by loading /health — it reports 'auth: configured'.",
+      "",
+      "Nothing is broken for students: bell-schedule pushes keep working.",
+      "Only registration and the admin pages are refused until this is set.",
+    ].join("\n"),
+    { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } }
+  );
+}
 
+/**
+ * What the app itself calls. These take the app's secret (CLIENT_SECRET) and
+ * nothing else; every other route is for people and takes the dashboard
+ * password. The two never open each other's doors.
+ */
+const APP_ROUTES = new Set(["POST /bells", "POST /report", "POST /register", "DELETE /unregister"]);
+
+/**
+ * The password for everything a person opens: DASHBOARD_PASSWORD, set in the
+ * Cloudflare dashboard. Until it is set, the app's secret stands in, so a
+ * deploy can never lock the admin out — and the dashboard says so.
+ */
+function adminPassword(env) {
+  return env.DASHBOARD_PASSWORD || env.CLIENT_SECRET;
+}
+
+async function requireAuth(request, env, kind) {
+  if (!env.CLIENT_SECRET) return missingSecret();
+  const expected = kind === "app" ? env.CLIENT_SECRET : adminPassword(env);
   const header = request.headers.get("authorization") || "";
   const scheme = header.slice(0, header.indexOf(" ")).toLowerCase();
   const value  = header.slice(header.indexOf(" ") + 1).trim();
@@ -324,14 +349,15 @@ async function requireAuth(request, env) {
 
   if (presented && timingSafeEqual(presented, expected)) return null;
 
-  // A signed-in browser. Only for looking (GET): the cookie never authorizes
-  // anything the app does (POST /bells, /report, /register, DELETE). And never
+  // A signed-in browser, on a page for people. Only for looking (GET): the
+  // cookie never authorizes anything the app does (POST /bells, /report,
+  // /register, DELETE). And never
   // for a request another site started: SameSite=Strict already keeps the
   // browser from sending it then, and Sec-Fetch-Site says so outright, so
   // a link elsewhere can't fire /purge with an admin's cookie.
   const looking = request.method === "GET" || request.method === "HEAD";
   const fromElsewhere = request.headers.get("sec-fetch-site") === "cross-site";
-  if (!presented && looking && !fromElsewhere && await validSession(request, env)) return null;
+  if (kind === "admin" && !presented && looking && !fromElsewhere && await validSession(request, env)) return null;
 
   console.log(`[Auth] rejected ${request.method} ${new URL(request.url).pathname}`);
   return unauthorized(request);
@@ -394,10 +420,10 @@ function unauthorized(request) {
 // The sign-in page posts the password once; the Worker answers with a cookie
 // that proves it, good for a year:
 //
-//   __Host-lhs_session = <expiry, Unix seconds>.<HMAC-SHA256 of it, keyed by CLIENT_SECRET>
+//   __Host-lhs_session = <expiry, Unix seconds>.<HMAC-SHA256 of it, keyed by the dashboard password>
 //
-// Nothing is stored on the server. Changing CLIENT_SECRET signs every browser
-// out, because old signatures stop matching. The cookie is HttpOnly (page
+// Nothing is stored on the server. Changing DASHBOARD_PASSWORD signs every
+// browser out, because old signatures stop matching; phones are unaffected. The cookie is HttpOnly (page
 // scripts can't read it), Secure, SameSite=Strict (other sites can't make the
 // browser send it), and __Host- (no other workers.dev subdomain can set it).
 // It only ever authorizes GET requests — see requireAuth. /logout clears it.
@@ -407,7 +433,7 @@ const SESSION_DAYS = 365;
 
 async function sessionSignature(env, expires) {
   const key = await crypto.subtle.importKey(
-    "raw", new TextEncoder().encode(env.CLIENT_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+    "raw", new TextEncoder().encode(adminPassword(env)), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
   );
   const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`lhs-dashboard-session|${expires}`));
   return [...new Uint8Array(mac)].map(b => b.toString(16).padStart(2, "0")).join("");
@@ -437,12 +463,12 @@ function safeNext(next) {
 
 /** POST /login: the password from the sign-in page, then the cookie. */
 async function handleLogin(request, env) {
-  if (!env.CLIENT_SECRET) return requireAuth(request, env);   // explains the missing secret
+  if (!env.CLIENT_SECRET) return missingSecret();
   let form = null;
   try { form = await request.formData(); } catch { /* treated as empty */ }
   const password = String(form?.get("password") ?? "");
   const next = safeNext(String(form?.get("next") ?? ""));
-  if (!password || !timingSafeEqual(password, env.CLIENT_SECRET)) {
+  if (!password || !timingSafeEqual(password, adminPassword(env))) {
     console.log("[Auth] dashboard sign-in refused");
     return loginPage(next, "That password isn't right.", 401);
   }
@@ -1111,6 +1137,7 @@ async function statusData(env, day) {
   try { health = await broadcastHealth(env); } catch (e) { health = `broadcast: UNKNOWN (could not read KV: ${e.message})`; }
   return {
     generatedAt: new Date().toISOString(),
+    separatePassword: Boolean(env.DASHBOARD_PASSWORD),
     today,
     day,
     days: await statusDays(env, today),
@@ -1496,6 +1523,17 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
     ]);
   }
 
+  // Until DASHBOARD_PASSWORD is set, the app's secret opens this page.
+  function passwordNotice() {
+    if (data.separatePassword !== false) return null;
+    return el("div", { class: "banner warn", role: "note" }, [
+      el("div", null, [
+        el("b", { text: "This page uses the app's password" }),
+        el("span", { class: "muted", text: "Add a variable named DASHBOARD_PASSWORD in Cloudflare (this Worker → Settings → Variables and Secrets) to give the dashboard its own password. Phones aren't affected, and you can change it any time." })
+      ])
+    ]);
+  }
+
   function kpis() {
     var b = data.broadcast, bells = b.bells || [];
     var inHours = bells.filter(function (x) { return x.status !== "outside"; });
@@ -1737,7 +1775,7 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
   function render() {
     var app = document.getElementById("app");
     app.textContent = "";
-    [header(), banner(), kpis(), bellsCard(), sendsCard(), issuesCard(), legacyCard(), toolsCard(), footer()]
+    [header(), banner(), passwordNotice(), kpis(), bellsCard(), sendsCard(), issuesCard(), legacyCard(), toolsCard(), footer()]
       .forEach(function (n) { if (n) app.appendChild(n); });
   }
 

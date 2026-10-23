@@ -113,13 +113,14 @@ The Worker is a single file. Paste `APNS Worker.json` into a Cloudflare Worker, 
 |---|---|
 | `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID` | From Apple Developer |
 | `APNS_PRIVATE_KEY` | The Apple push-notification key, pasted in full |
-| `CLIENT_SECRET` | Must match `AppConstants.workerSecret` in the app; also the password for the pages below |
+| `CLIENT_SECRET` | Must match `AppConstants.workerSecret` in the app. Only the app's own requests use it. Don't change it on its own: phones stop reporting until an app update carries the new value |
+| `DASHBOARD_PASSWORD` | The password for the pages below. Change it any time; that signs every browser out and doesn't affect phones. Until it's set, `CLIENT_SECRET` stands in and the dashboard shows a warning |
 
 **Updating it.** Paste the new `APNS Worker.json` into the Worker's editor in the Cloudflare dashboard and click **Deploy**. The KV binding, cron and variables stay as they are.
 
 **Broadcast channels.** The app and the Worker share two channel IDs: one for production (App Store and TestFlight builds) and one for sandbox (builds run from Xcode). Every bell goes to both. The IDs are not secrets; they live in `AppConstants.swift` and at the top of the Worker's broadcast section. The **Broadcast Capability** is turned on for the app's App ID in Apple Developer. **Never turn it off: doing so permanently deletes every channel**, and every phone would need an app update to listen again.
 
-Then open these in a browser. The first visit shows a sign-in page (the password is `CLIENT_SECRET`), and that browser stays signed in for a year; `/logout` signs it out. Scripts can send Basic auth or an `X-LHS-Auth` header instead.
+Then open these in a browser. The first visit shows a sign-in page (the password is `DASHBOARD_PASSWORD`), and that browser stays signed in for a year; `/logout` signs it out. Scripts can send Basic auth or an `X-LHS-Auth` header instead.
 
 - **`/health`** — no sign-in. Says whether the latest bell's broadcast went out: `broadcast: ok, last 08:55` or `broadcast: FAILED …`. Point a free uptime monitor at it and alert when it says FAILED.
 - **`/status`** — a dashboard with charts: whether each of today's bells went out, how long Apple took, problem reports from the past week, and the phones still on 1.2.0 or earlier. Dropdowns pick the day (up to 3 back), a schedule, and which problems to show. The same data is at `/status.json?day=yyyy-MM-dd` for scripts.
