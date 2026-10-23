@@ -49,7 +49,7 @@ enum InstallInfo {
     // model name rather than the user's nickname unless the
     // user-assigned-device-name entitlement is granted by Apple.
 
-    /// e.g. "1.2.1 (3)"
+    /// e.g. "1.2.1 (4)"
     static var appVersion: String {
         let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"

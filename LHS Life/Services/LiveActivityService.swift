@@ -189,7 +189,12 @@ final class LiveActivityService {
         default:
             break
         }
-        let periods = buildSchedule(from: schedule, settings: settings)
+        // The whole day for the worker, what's left of it for the card.
+        // Reporting only the remaining bells made every phone that started
+        // at a different time look like a different schedule (seven of them
+        // on Oct 22 2026), and could run the worker into its 30-a-day cap.
+        let fullDay = buildSchedule(from: schedule, settings: settings, upcomingOnly: false)
+        let periods = fullDay.filter { $0.endDate > Date() }
         guard !periods.isEmpty else {
             LHSLogger.liveActivity.error("bail: periods empty after buildSchedule")
             lastStartFailure = "No classes enabled in your schedule"
@@ -250,7 +255,7 @@ final class LiveActivityService {
 
             // The worker only broadcasts at bells someone has reported, so a
             // card whose bells it hasn't heard would sit still all day.
-            BellReporter.report(periods)
+            BellReporter.report(fullDay)
 
             // Cancel the "school starts soon" reminder — LA is already running
             let todayKey = DateFormatter.isoDay.string(from: Date())
@@ -610,7 +615,8 @@ final class LiveActivityService {
 
     func buildSchedule(
         from schedule: BellSchedule,
-        settings: UserSettings
+        settings: UserSettings,
+        upcomingOnly: Bool = true
     ) -> [ScheduleActivityAttributes.ScheduledPeriod] {
         let mapped = schedule.periods.compactMap { period -> ScheduleActivityAttributes.ScheduledPeriod? in
             guard let start = period.startDate(on: schedule.date),
@@ -674,6 +680,7 @@ final class LiveActivityService {
         // a card started at 8:50, between Period 1 (ending 8:50) and Period 2
         // (8:55), had no Period 1 to measure a gap from, so it showed
         // "Today · Regular Schedule" as if school hadn't started yet.
+        guard upcomingOnly else { return withPassing }
         let now = Date()
         return withPassing.filter { $0.endDate > now }
     }

@@ -52,4 +52,20 @@ final class BellReporterTests: XCTestCase {
         XCTAssertEqual(BellReporter.bellMinutes(for: [slot("Period 1", 8, 0, 8, 50)], calendar: eastern),
                        [660, 710])
     }
+
+    // The worker must hear the whole day, whenever the card starts. Reporting
+    // only what was left made every start time look like its own schedule
+    // (seven on Oct 22 2026). referenceSchedule is in the past, so the card's
+    // view of it is empty while the full day is all of it.
+    func test_fullDayIncludesBellsThatAlreadyRang() {
+        let service = LiveActivityService.shared
+        let settings = makeDefaultSettings()
+        XCTAssertTrue(service.buildSchedule(from: referenceSchedule, settings: settings).isEmpty)
+        let fullDay = service.buildSchedule(from: referenceSchedule, settings: settings, upcomingOnly: false)
+        let minutes = BellReporter.bellMinutes(for: fullDay)
+        XCTAssertEqual(minutes.first, 8 * 60)
+        XCTAssertEqual(minutes.last, 15 * 60)
+        XCTAssertTrue(minutes.contains(8 * 60 + 50) && minutes.contains(8 * 60 + 55), "passing period edges")
+    }
 }
+
