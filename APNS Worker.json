@@ -157,7 +157,7 @@ export default {
       return url.pathname === "/status.json" ? json(data, 200) : statusPage(data);
     }
 
-    return new Response("LHS Life Push Worker", { status: 200 });
+    return new Response("LHS Life APNS Support", { status: 200 });
   },
 
   // Cron handler — fires every minute: broadcast first, then legacy pushes
@@ -397,18 +397,18 @@ function unauthorized(request) {
     // /test-broadcast…), or a link on another site could use the cookie.
     const viewOnly = url.pathname === "/status" || url.pathname === "/status.json";
     if (viewOnly && request.headers.get("sec-fetch-site") === "cross-site") {
-      return new Response('<!doctype html><meta charset="utf-8"><title>LHS Life Server</title><script>location.replace(location.href)</script>', {
+      return new Response('<!doctype html><meta charset="utf-8"><title>LHS Life APNS Support</title><script>location.replace(location.href)</script>', {
         status: 401, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
       });
     }
     return loginPage(safeNext(url.pathname + url.search), null, 401);
   }
   return new Response(
-    "LHS Life Push Worker — sign in to continue. Username: anything. Password: ask ASB.",
+    "LHS Life APNS Support — sign in to continue. Username: anything. Password: ask ASB.",
     {
       status: 401,
       headers: {
-        "WWW-Authenticate": 'Basic realm="LHS Life Push Worker", charset="UTF-8"',
+        "WWW-Authenticate": 'Basic realm="LHS Life APNS Support", charset="UTF-8"',
         "content-type": "text/plain; charset=utf-8",
       },
     }
@@ -489,7 +489,7 @@ function loginPage(next, error, status) {
   const esc = text => String(text).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
-<title>Sign in · LHS Life Server</title>
+<title>Sign in · LHS Life APNS Support</title>
 <style>
 :root{--bg:#f2f3f7;--card:#fff;--text:#0a0c10;--muted:#5b6472;--line:#e3e6ec;--accent:#2f5fc4;--gold:#a8790a;--bad:#d64545;color-scheme:light}
 @media (prefers-color-scheme:dark){:root{--bg:#0a0c10;--card:#13161c;--text:#fff;--muted:#8a93a8;--line:#262b36;--accent:#3a6fd8;--gold:#f5b800;--bad:#ff6b6b;color-scheme:dark}}
@@ -502,9 +502,9 @@ button{width:100%;margin-top:14px;font:inherit;font-weight:600;padding:10px;bord
 .error{color:var(--bad);font-size:13px;margin:10px 0 0}
 </style></head><body>
 <form method="post" action="/login">
-<h1>LHS Life Server</h1>
+<h1>LHS Life APNS Support</h1>
 <input type="hidden" name="next" value="${esc(next)}">
-<input type="text" name="username" value="LHS Life Server" autocomplete="username" hidden>
+<input type="text" name="username" value="LHS Life APNS Support" autocomplete="username" hidden>
 <label for="password">Password</label>
 <input id="password" name="password" type="password" autocomplete="current-password" autofocus required>
 ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ""}
@@ -1251,7 +1251,7 @@ const STATUS_PAGE_HTML = String.raw`<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>LHS Life Server</title>
+<title>LHS Life APNS Support</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%232f5fc4'/><path d='M58 8 22 56h24l-6 36 38-50H54z' fill='%23f5b800'/></svg>">
 <style>
 /* La Salle colors, the same values as the app's DesignSystem.swift:
@@ -1490,7 +1490,7 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
     var options = days.map(function (d) { return [d, (d === data.today ? "Today · " : "") + dayName(d)]; });
     return el("header", { class: "top" }, [
       el("div", null, [
-        el("h1", { text: "LHS Life Server" }),
+        el("h1", { text: "LHS Life APNS Support" }),
         el("div", { class: "sub", text: "Live Activity bells and problem reports · all times Pacific" })
       ]),
       el("div", { class: "controls" }, [
