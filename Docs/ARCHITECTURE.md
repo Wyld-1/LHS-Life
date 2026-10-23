@@ -361,7 +361,11 @@ Apple ─► every card on the channel; each works out its own class
   is only ever set as text. `/test-broadcast?env=sandbox|production|both`
   sends one broadcast now and explains Apple's answer; `&minutes=` picks the
   bell, `&end=1` sends an end, which on production also needs `&confirm=yes`.
-  Everything but `/health` needs `CLIENT_SECRET`.
+  Everything but `/health` needs `CLIENT_SECRET`: the app sends it as a Bearer
+  token; a browser signs in once at `/login` and gets a signed, HttpOnly,
+  SameSite=Strict cookie (`__Host-lhs_session`, HMAC of its expiry keyed by
+  the secret, so changing the secret signs everyone out) that is good for a
+  year and only ever authorizes GET requests that another site didn't start.
 - **Legacy (1.2.0 and earlier — remove after students update).** Those
   versions register a push token per phone (`/register`, `/unregister`) and the cron
   pushes each phone at its own bells. Broadcast runs first in every cron run;

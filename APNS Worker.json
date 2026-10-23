@@ -24,7 +24,9 @@
  * it stores is a random number the app invents; it identifies no student.
  *
  * ── Pages you can open in a browser ─────────────────────────────────────────
- * Sign-in: any username; the password is CLIENT_SECRET. /health needs none.
+ * Sign-in: a browser shows a sign-in page (the password is CLIENT_SECRET) and
+ * stays signed in for a year; /logout signs it out. Scripts can still send
+ * Basic auth or "X-LHS-Auth: <secret>". /health needs none.
  *   /health   Alive? Password set? Did the latest bell's broadcast go out?
  *             Prints "broadcast: ok, last 08:55" or "broadcast: FAILED …" —
  *             point an uptime monitor at it and alert on FAILED.
@@ -71,7 +73,18 @@ export default {
       return handleHealth(env);
     }
 
-    const denied = requireAuth(request, env);
+    // Dashboard sign-in. A browser signs in once and keeps a cookie for a
+    // year, instead of the browser's own password box, which forgets within
+    // hours. See "Dashboard sign-in" below.
+    if (url.pathname === "/login") {
+      if (request.method === "POST") return handleLogin(request, env);
+      if (request.method === "GET") return loginPage(safeNext(url.searchParams.get("next")), null, 200);
+    }
+    if (request.method === "GET" && url.pathname === "/logout") {
+      return new Response(null, { status: 303, headers: { location: "/login", "set-cookie": `${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict`, "cache-control": "no-store" } });
+    }
+
+    const denied = await requireAuth(request, env);
     if (denied) return denied;
 
     // The app reports its day's bell times. See handleBells.
@@ -272,7 +285,7 @@ async function effectiveLimit(env) {
  * rather than falling open — a misconfigured deploy should break loudly
  * instead of quietly serving the world.
  */
-function requireAuth(request, env) {
+async function requireAuth(request, env) {
   const expected = env.CLIENT_SECRET;
   if (!expected) {
     console.error("[Auth] CLIENT_SECRET is not set on this worker — refusing all authenticated routes");
@@ -309,11 +322,19 @@ function requireAuth(request, env) {
     presented = (request.headers.get("x-lhs-auth") || "").trim();
   }
 
-  if (!presented || !timingSafeEqual(presented, expected)) {
-    console.log(`[Auth] rejected ${request.method} ${new URL(request.url).pathname}`);
-    return unauthorized();
-  }
-  return null;
+  if (presented && timingSafeEqual(presented, expected)) return null;
+
+  // A signed-in browser. Only for looking (GET): the cookie never authorizes
+  // anything the app does (POST /bells, /report, /register, DELETE). And never
+  // for a request another site started: SameSite=Strict already keeps the
+  // browser from sending it then, and Sec-Fetch-Site says so outright, so
+  // a link elsewhere can't fire /purge with an admin's cookie.
+  const looking = request.method === "GET" || request.method === "HEAD";
+  const fromElsewhere = request.headers.get("sec-fetch-site") === "cross-site";
+  if (!presented && looking && !fromElsewhere && await validSession(request, env)) return null;
+
+  console.log(`[Auth] rejected ${request.method} ${new URL(request.url).pathname}`);
+  return unauthorized(request);
 }
 
 /**
@@ -332,11 +353,30 @@ function basicPassword(encoded) {
 }
 
 /**
- * 401 with the header that makes a browser pop its own sign-in box. Without
- * WWW-Authenticate the browser just renders the body and there is nowhere to
- * type a password — which is why this exists at all.
+ * What a refused request gets.
+ *
+ * A browser asking for a page gets the sign-in page, which sets a cookie that
+ * lasts a year. Anything else (curl, scripts) gets the classic 401 with
+ * WWW-Authenticate, so Basic auth and "X-LHS-Auth" keep working.
  */
-function unauthorized() {
+function unauthorized(request) {
+  const url = new URL(request.url);
+  const wantsPage = request.method === "GET" && (request.headers.get("accept") || "").includes("text/html");
+  if (wantsPage) {
+    // The cookie is SameSite=Strict, so a browser leaves it off when /status
+    // is opened from a link in another app or site — and a signed-in admin
+    // would be asked to sign in again. For the dashboard only, bounce once:
+    // the page reloads itself, that reload counts as same-site, and the
+    // cookie comes along. Never for routes that DO something (/purge,
+    // /test-broadcast…), or a link on another site could use the cookie.
+    const viewOnly = url.pathname === "/status" || url.pathname === "/status.json";
+    if (viewOnly && request.headers.get("sec-fetch-site") === "cross-site") {
+      return new Response('<!doctype html><meta charset="utf-8"><title>LHS Life Server</title><script>location.replace(location.href)</script>', {
+        status: 401, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+      });
+    }
+    return loginPage(safeNext(url.pathname + url.search), null, 401);
+  }
   return new Response(
     "LHS Life Push Worker — sign in to continue. Username: anything. Password: ask ASB.",
     {
@@ -347,6 +387,108 @@ function unauthorized() {
       },
     }
   );
+}
+
+// ── Dashboard sign-in ────────────────────────────────────────────────────────
+//
+// The sign-in page posts the password once; the Worker answers with a cookie
+// that proves it, good for a year:
+//
+//   __Host-lhs_session = <expiry, Unix seconds>.<HMAC-SHA256 of it, keyed by CLIENT_SECRET>
+//
+// Nothing is stored on the server. Changing CLIENT_SECRET signs every browser
+// out, because old signatures stop matching. The cookie is HttpOnly (page
+// scripts can't read it), Secure, SameSite=Strict (other sites can't make the
+// browser send it), and __Host- (no other workers.dev subdomain can set it).
+// It only ever authorizes GET requests — see requireAuth. /logout clears it.
+
+const SESSION_COOKIE = "__Host-lhs_session";
+const SESSION_DAYS = 365;
+
+async function sessionSignature(env, expires) {
+  const key = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(env.CLIENT_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+  );
+  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`lhs-dashboard-session|${expires}`));
+  return [...new Uint8Array(mac)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function validSession(request, env) {
+  const value = readCookie(request, SESSION_COOKIE);
+  if (!value) return false;
+  const [exp, signature] = value.split(".");
+  const expires = Number(exp);
+  if (!Number.isInteger(expires) || expires <= Date.now() / 1000 || !signature) return false;
+  return timingSafeEqual(signature, await sessionSignature(env, expires));
+}
+
+function readCookie(request, name) {
+  for (const part of (request.headers.get("cookie") || "").split(";")) {
+    const split = part.indexOf("=");
+    if (split !== -1 && part.slice(0, split).trim() === name) return part.slice(split + 1).trim();
+  }
+  return null;
+}
+
+/** Where to go after signing in: a path on this Worker, never another site. */
+function safeNext(next) {
+  return typeof next === "string" && /^\/(?!\/)[^\\\s]*$/.test(next) && !next.startsWith("/login") ? next : "/status";
+}
+
+/** POST /login: the password from the sign-in page, then the cookie. */
+async function handleLogin(request, env) {
+  if (!env.CLIENT_SECRET) return requireAuth(request, env);   // explains the missing secret
+  let form = null;
+  try { form = await request.formData(); } catch { /* treated as empty */ }
+  const password = String(form?.get("password") ?? "");
+  const next = safeNext(String(form?.get("next") ?? ""));
+  if (!password || !timingSafeEqual(password, env.CLIENT_SECRET)) {
+    console.log("[Auth] dashboard sign-in refused");
+    return loginPage(next, "That password isn't right.", 401);
+  }
+  const expires = Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400;
+  const value = `${expires}.${await sessionSignature(env, expires)}`;
+  return new Response(null, {
+    status: 303,
+    headers: {
+      location: next,
+      "set-cookie": `${SESSION_COOKIE}=${value}; Path=/; Max-Age=${SESSION_DAYS * 86400}; HttpOnly; Secure; SameSite=Strict`,
+      "cache-control": "no-store",
+    },
+  });
+}
+
+/** The sign-in page, in the dashboard's colors. */
+function loginPage(next, error, status) {
+  const esc = text => String(text).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const html = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
+<title>Sign in · LHS Life Server</title>
+<style>
+:root{--bg:#f2f3f7;--card:#fff;--text:#0a0c10;--muted:#5b6472;--line:#e3e6ec;--accent:#2f5fc4;--gold:#a8790a;--bad:#d64545;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#0a0c10;--card:#13161c;--text:#fff;--muted:#8a93a8;--line:#262b36;--accent:#3a6fd8;--gold:#f5b800;--bad:#ff6b6b;color-scheme:dark}}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--text);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:16px}
+form{width:100%;max-width:360px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px}
+h1{font-size:20px;margin:0}h1::after{content:"";display:block;width:40px;height:3px;border-radius:2px;background:var(--gold);margin:6px 0 14px}
+label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+input{width:100%;font:inherit;padding:10px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text)}
+button{width:100%;margin-top:14px;font:inherit;font-weight:600;padding:10px;border:0;border-radius:9px;background:var(--accent);color:#fff;cursor:pointer}
+.error{color:var(--bad);font-size:13px;margin:10px 0 0}.note{color:var(--muted);font-size:12px;margin:14px 0 0}
+</style></head><body>
+<form method="post" action="/login">
+<h1>LHS Life Server</h1>
+<input type="hidden" name="next" value="${esc(next)}">
+<input type="text" name="username" value="LHS Life Server" autocomplete="username" hidden>
+<label for="password">Password</label>
+<input id="password" name="password" type="password" autocomplete="current-password" autofocus required>
+${error ? `<p class="error" role="alert">${esc(error)}</p>` : ""}
+<button type="submit">Sign in</button>
+<p class="note">This browser stays signed in for a year. Ask ASB for the password.</p>
+</form></body></html>`;
+  return new Response(html, {
+    status,
+    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-frame-options": "DENY", "referrer-policy": "no-referrer" },
+  });
 }
 
 /** Length-independent comparison, so the check can't be timed character by character. */
@@ -1209,7 +1351,8 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
     schedule_image: "Schedule picture",
     live_activity_start: "Live Activity",
     registration: "Server",
-    web_load: "School website"
+    web_load: "School website",
+    over_capacity: "Server full (old versions)"
   };
   var PALETTE = ["var(--accent)", "var(--gold)", "var(--c3)", "var(--c4)", "var(--c5)", "var(--warn)"];   // brand first
 
@@ -1584,7 +1727,10 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
   }
 
   function footer() {
-    return el("footer", { text: "Loaded " + whenOf(data.generatedAt) + ". Each load uses 2 of the free plan's 1,000 daily storage listings, so this page refreshes only when you press Refresh." });
+    return el("footer", null, [
+      "Loaded " + whenOf(data.generatedAt) + ". Each load uses 2 of the free plan's 1,000 daily storage listings, so this page refreshes only when you press Refresh. This browser stays signed in for a year · ",
+      el("a", { href: "/logout", text: "Sign out" })
+    ]);
   }
 
   // ── Rendering and loading ─────────────────────────────────────────────────
