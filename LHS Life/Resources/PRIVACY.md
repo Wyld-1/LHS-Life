@@ -36,7 +36,7 @@ When something breaks in a way the school can fix — the school calendar can't 
 
 ## If you used an earlier version
 
-Before version 1.2.1, the server sent each phone its own Lock Screen updates, so the app also sent a random device ID, a Live Activity push token from Apple, and its app and iOS version along with your bell times. Once you update, that's no longer sent. The old record is deleted automatically, usually within a day after that version's Live Activity ends, and every remaining one is deleted when the old system is switched off.
+Before version 1.2.1, the server sent each phone its own Lock Screen updates, so the app also sent a random device ID, a Live Activity push token from Apple, and its app and iOS version along with your bell times. That system was switched off in October 2026 and every record it kept has been deleted. An older version that tries it now is simply turned away, and nothing it sends is stored.
 
 ## Who else is involved
 

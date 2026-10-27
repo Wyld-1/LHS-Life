@@ -353,8 +353,8 @@ Apple ─► every card on the channel; each works out its own class
   `broadcast: FAILED …`; watch it with an uptime monitor and alert on FAILED.
   `/status`: a dashboard page, self-contained (no outside scripts): each bell
   marked sent, missed, reported after it rang, or coming up; a chart of how
-  long after each bell Apple accepted the push; the week's problem reports;
-  the legacy phones. Dropdowns pick the day (any with a record left, up to 3
+  long after each bell Apple accepted the push; the week's problem reports.
+  Dropdowns pick the day (any with a record left, up to 3
   back), a schedule, and a problem day and kind. The page embeds its data and
   fetches `/status.json?day=` to switch days; it never refreshes on its own,
   because each load spends 2 of the 1,000 daily KV lists. Phone-supplied text
@@ -362,7 +362,7 @@ Apple ─► every card on the channel; each works out its own class
   sends one broadcast now and explains Apple's answer; `&minutes=` picks the
   bell, `&end=1` sends an end, which on production also needs `&confirm=yes`.
   Two keys, and neither opens the other's routes. The app's routes
-  (`POST /bells`, `/report`, `/register`, `DELETE /unregister`) take
+  (`POST /bells`, `/report`, and the retired `/register`, `/unregister`) take
   `CLIENT_SECRET`, which ships in the app as `AppConstants.workerSecret`, so
   changing it means an app update. Everything a person opens takes
   `DASHBOARD_PASSWORD` (falling back to `CLIENT_SECRET` until it's set): a
@@ -372,12 +372,17 @@ Apple ─► every card on the channel; each works out its own class
   is good for a year and only ever authorizes GET requests that another site
   didn't start. Scripts can send the dashboard password as Basic auth or
   `X-LHS-Auth`.
-- **Legacy (1.2.0 and earlier — remove after students update).** Those
-  versions register a push token per phone (`/register`, `/unregister`) and the cron
-  pushes each phone at its own bells. Broadcast runs first in every cron run;
-  legacy gets the requests left over, about 35 phones on the free plan.
-  `SUBREQUEST_BUDGET`, `MAX_DEVICES`, `/test-push`, `/purge` and `/rebuild`
-  apply only to this path.
+- **Retired: one push per phone (1.2.0 and earlier).** Those versions
+  registered a push token per phone and the cron pushed each at its own bells,
+  about 35 phones at most on the free plan. Removed in October 2026 once the
+  dashboard showed none left. `/register` and `/unregister` now answer 410, so
+  a phone that never updated files a problem report instead of failing
+  silently; its card still counts down on its own clock. Leftover KV keys
+  `registry:devices` and `capacity:observed`, and the variables
+  `SUBREQUEST_BUDGET` and `MAX_DEVICES`, are unused and can be deleted.
+- **KV budget.** The cron lists today's schedules on odd minutes only, and
+  stops once the day's end has gone out: about 280 of the 1,000 daily lists.
+  Each dashboard load spends 2 more.
 
 The Worker URL lives in `AppConstants.workerURL`. Moving the server means
 changing it there and shipping an update.

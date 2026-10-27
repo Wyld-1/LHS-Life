@@ -128,7 +128,9 @@ Then open these in a browser. The first visit shows a sign-in page (the password
 
 How many phones are listening is in Apple's Push Notifications Console (Overview → subscriptions), for production builds only. The Worker doesn't know.
 
-**Legacy (1.2.0 and earlier).** Phones still on those versions register a push token and get one push each. The Worker keeps that path until students update; on the free plan it serves about 35 of them. `/test-push`, `/purge` and `/rebuild` and the optional `SUBREQUEST_BUDGET` and `MAX_DEVICES` variables only affect this legacy path.
+**Tests.** `./Worker\ Tests/run.sh` runs the Worker's tests (see `Docs/TESTS.md`).
+
+**Retired: one push per phone.** Versions 1.2.0 and earlier registered each phone for pushes of its own. That system was removed in October 2026, once no phone was left on it; `/register` and `/unregister` now answer 410. If the KV namespace still has `registry:devices` or `capacity:observed`, or the Worker still has `SUBREQUEST_BUDGET` or `MAX_DEVICES` set, they're unused and can be deleted.
 
 ## Privacy
 

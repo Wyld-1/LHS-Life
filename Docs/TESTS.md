@@ -70,11 +70,20 @@ configuration).
 
 ### 2.3 The Worker
 
-The Worker's logic (bell storage, the broadcast cycle, `/health`, report
-expiry) is tested with a Node harness that runs the Worker against a mock KV:
-24 tests, all passing. The harness is kept outside the repo for now. It
-should be checked in, under `Scripts/` or a `worker-tests/` folder, so the
-Worker is tested alongside the app.
+`Worker Tests/worker.test.mjs` runs the real `APNS Worker.json` against a
+fake KV (which counts every operation), a fake `fetch` (so Apple's answers can
+be scripted) and a fake clock (any Pacific time, weekday or DST change):
+32 tests, all passing. They cover bell storage and merging, the broadcast
+cycle and its catch-up and end rules, `/health`, `/status.json`, the dashboard
+page (self-contained, safe with hostile report text), sign-in and the two
+separate keys, the retired `/register`, and a whole school day's KV totals
+(283 lists, under half the free plan's 1,000).
+
+```bash
+./Worker\ Tests/run.sh
+```
+
+It uses `node` if installed, otherwise the Node runtime inside GitHub Desktop.
 
 ---
 

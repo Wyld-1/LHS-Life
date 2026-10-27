@@ -17,12 +17,6 @@
  * phones are listening: Apple's Push Notifications Console → Overview →
  * subscriptions — this Worker never knows.
  *
- * ── Legacy: one push per phone (1.2.0 and earlier — remove after students update)
- * Those versions register a push token per phone (/register) and the cron pushes each
- * phone at its own bells. Broadcast goes first in every run and legacy gets the
- * requests left over, which on the Free plan is about 35 phones. The device ID
- * it stores is a random number the app invents; it identifies no student.
- *
  * ── Pages you can open in a browser ─────────────────────────────────────────
  * Sign-in: a browser shows a sign-in page (the password is DASHBOARD_PASSWORD)
  * and stays signed in for a year; /logout signs it out. Scripts can send it as
@@ -33,31 +27,31 @@
  *             point an uptime monitor at it and alert on FAILED.
  *   /status   Start here: a dashboard with charts. Today's bells and whether
  *             each went out, how long Apple took, problem reports from the
- *             past week, and the phones still on 1.2.0 or earlier. A dropdown picks the day
+ *             past week. A dropdown picks the day
  *             (up to 3 back). /status.json?day=yyyy-MM-dd is the same data
  *             as JSON, for scripts.
  *   /test-broadcast?env=sandbox|production|both&minutes=480&end=1
  *             Sends one broadcast now and says in plain English what Apple
  *             answered. Default sandbox (Xcode builds). production reaches
  *             every student; ending them there also needs &confirm=yes.
- *   /test-push   The same for one legacy phone. ?deviceId=… picks one.
- *   /purge?confirm=yes   Dismisses and deletes every legacy registration.
- *   /rebuild  Legacy recovery only: rebuilds the device list. Rarely needed.
  *
- * POST /bells, /register, /report and DELETE /unregister belong to the app.
+ * POST /bells and /report belong to the app. POST /register and DELETE
+ * /unregister answer 410: they served the per-phone system that versions
+ * 1.2.0 and earlier used, retired in October 2026 once no phone was left on it.
  *
  * In KV: bells:{day}:{hash}, one per distinct schedule, its minutes in the
  * metadata; broadcast:{day}, what was sent and Apple's answers; issue:…, a
- * reported problem (7 days). The first two expire after 3 days. Legacy:
- * registry:devices, token:{deviceId}, capacity:observed.
+ * reported problem (7 days). The first two expire after 3 days. Nothing
+ * reads registry:devices or capacity:observed any more; if they're still
+ * there, they're left over from the per-phone system and safe to delete.
  *
  * Variables: APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID, APNS_PRIVATE_KEY (the
  * .p8 file's full contents) from Apple Developer; CLIENT_SECRET, matching
  * AppConstants.workerSecret in the app (change both together, or phones stop
  * reporting); DASHBOARD_PASSWORD, the sign-in password above, which can be
  * changed any time (until it's set, CLIENT_SECRET stands in);
- * TOKENS, the KV binding. Optional, legacy only: SUBREQUEST_BUDGET (default
- * 45, the Free plan's ceiling; ~900 on Paid), MAX_DEVICES (hold the cap down).
+ * TOKENS, the KV binding. SUBREQUEST_BUDGET and MAX_DEVICES belonged to the
+ * per-phone system; if they're still set, they do nothing and can go.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -100,44 +94,14 @@ export default {
       return handleTestBroadcast(env, url);
     }
 
-    // ── Legacy routes below: 1.2.0-and-earlier transition — remove after students update.
-
-    if (request.method === "POST" && url.pathname === "/register") {
-      return handleRegister(request, env);
-    }
-
-    if (request.method === "DELETE" && url.pathname === "/unregister") {
-      return handleUnregister(request, env);
-    }
-
-    // Manual recovery: rebuilds registry:devices from the token:{id} backups.
-    // Uses list() (1,000/day cap), so it is never called automatically.
-    if (request.method === "GET" && url.pathname === "/rebuild") {
-      const count = await rebuildRegistry(env);
-      return new Response(`Rebuilt registry with ${count} device(s)`, { status: 200 });
-    }
-
-    // Wipes every registration. Requires ?confirm=yes so a stray click or a
-    // prefetching browser can't empty the registry.
-    //
-    // Devices come back on their own — see handlePurge for exactly when,
-    // because "purged and nothing returned" is the obvious next surprise.
-    if (request.method === "GET" && url.pathname === "/purge") {
-      return handlePurge(request, env, url);
-    }
-
-    // Diagnostics: send ONE push right now and report exactly what APNs said.
-    //
-    // The push cycle only fires in the two minutes after a bell, so a
-    // misconfigured key is otherwise invisible until the next period change —
-    // and then only in the logs. This turns "wait 45 minutes and squint at
-    // the log stream" into one click, and reports the failure reason verbatim
-    // (BadEnvironmentKeyInToken, InvalidProviderToken, TopicDisallowed…).
-    //
-    // Never removes a device: a diagnostic that deletes registrations when the
-    // server is misconfigured is exactly backwards.
-    if (request.method === "GET" && url.pathname === "/test-push") {
-      return handleTestPush(request, env, url);
+    // Versions 1.2.0 and earlier registered each phone for pushes of its own.
+    // That system was retired in October 2026, once no phone was left on it.
+    // A straggler gets 410, which the old app treats as a failed registration:
+    // its card keeps time on its own clock, and it files a problem report, so
+    // it shows up on /status.
+    if ((request.method === "POST" && url.pathname === "/register") ||
+        (request.method === "DELETE" && url.pathname === "/unregister")) {
+      return json({ status: "gone", message: "This version of LHS Life no longer gets Lock Screen updates. Update the app from the App Store." }, 410);
     }
 
     // The app tells us something is broken. See handleReport.
@@ -146,7 +110,7 @@ export default {
     }
 
     // The dashboard: today's bells, every send and Apple's answer, problem
-    // reports, legacy phones. Charts and dropdowns for people; the same data
+    // reports. Charts and dropdowns for people; the same data
     // as JSON at /status.json?day=yyyy-MM-dd for scripts (and for the page
     // itself, when it switches days).
     if (request.method === "GET" && (url.pathname === "/status" || url.pathname === "/status.json")) {
@@ -160,105 +124,11 @@ export default {
     return new Response("LHS Life APNS Support", { status: 200 });
   },
 
-  // Cron handler — fires every minute: broadcast first, then legacy pushes
+  // Cron handler — fires every minute; see runCron
   async scheduled(event, env, ctx) {
     ctx.waitUntil(runCron(env));
   },
 };
-
-// ── Legacy capacity (1.2.0-and-earlier transition — remove after students update) ───────
-// Everything from here to the Auth section only limits the one-push-per-phone
-// path. Broadcast has no per-phone cost, so none of it applies to broadcast.
-
-/**
- * Who to contact about raising the device limit. Sent to the app so the
- * message a student sees names a real person rather than "contact support".
- */
-const CAPACITY_CONTACT = "phudson@lasalleyakima.org";
-
-/**
- * What the Worker has learned about its own capacity, stored in KV under
- * capacity:observed as { proven, wall, wallAt, wallBudget }.
- *
- *   proven     — the most pushes a bell has ever completed without complaint.
- *                Shown on /status; evidence the budget is AT LEAST this high.
- *   wall       — how many got through on a run that had to stop early to stay
- *                inside its subrequest budget. The real ceiling, measured
- *                rather than assumed.
- *   wallBudget — the SUBREQUEST_BUDGET that wall was measured under. A wall
- *                only counts while the budget is unchanged: one recorded on the
- *                Free plan says nothing about the Paid plan, and trusting it
- *                would hold the limit at ~40 forever after an upgrade.
- *
- * HOW THE LIMIT IS CHOSEN (effectiveLimit):
- *   1. MAX_DEVICES, if set — a human holding the number down deliberately.
- *   2. Otherwise, worked out from SUBREQUEST_BUDGET: every phone costs about
- *      one subrequest per bell, plus a small fixed overhead per run, plus
- *      what the broadcast spends first (BROADCAST_RUN_COST). On the Free
- *      plan's default of 45 that is 35 phones; set SUBREQUEST_BUDGET to 900
- *      on the Paid plan and it is ~890. That one variable is all an upgrade
- *      needs.
- *   3. Capped by a wall measured under the current budget, if there is one.
- */
-const CAPACITY_KEY = "capacity:observed";
-
-/**
- * Subrequests one invocation will spend before it stops pushing. The Free
- * plan allows 50 (KV operations included); 45 leaves margin, and
- * CAPACITY_WRITE_RESERVE keeps room for the write that records the shortfall.
- * On the Workers Paid plan the allowance is 10,000 — set SUBREQUEST_BUDGET to
- * something like 900 there and the limit lifts itself from then on.
- */
-const DEFAULT_SUBREQUEST_BUDGET = 45;
-const CAPACITY_WRITE_RESERVE = 3;
-/**
- * Subrequests a run spends before its first push: reading the device list
- * (or, every other minute, listing the registry) and the capacity record.
- * Hydrating newly registered devices can cost more on a busy morning; if it
- * does, that run stops short and records a wall, which caps the limit below.
- */
-const RUN_OVERHEAD = 2;
-/**
- * The most a run's broadcast spends before legacy pushing starts: read
- * broadcast:{day}, list today's schedules, two channel pushes (update OR end,
- * never both), one write. The cron broadcasts first and shares one counter,
- * so legacy pushing gets whatever is left; this keeps the legacy phone limit
- * honest about that.
- */
-const BROADCAST_RUN_COST = 5;
-
-function subrequestBudget(env) {
-  return Number(env.SUBREQUEST_BUDGET ?? DEFAULT_SUBREQUEST_BUDGET);
-}
-
-/** How many phones one bell can reach on this budget: one push each. */
-function budgetLimit(env) {
-  return Math.max(1, subrequestBudget(env) - CAPACITY_WRITE_RESERVE - RUN_OVERHEAD - BROADCAST_RUN_COST);
-}
-
-async function readCapacity(env) {
-  const raw = await env.TOKENS.get(CAPACITY_KEY, "json");
-  return raw ?? { proven: 0, wall: null, wallAt: null, wallBudget: null };
-}
-
-/** The number /register enforces, and where it came from. */
-async function effectiveLimit(env) {
-  if (env.MAX_DEVICES) {
-    return { limit: Number(env.MAX_DEVICES), source: "MAX_DEVICES" };
-  }
-  const budget = subrequestBudget(env);
-  const fromBudget = budgetLimit(env);
-  const source = env.SUBREQUEST_BUDGET ? `SUBREQUEST_BUDGET (${budget})` : `default budget (${budget})`;
-
-  // A wall only applies to the budget it was measured under. Walls recorded
-  // before wallBudget existed were all measured on the default budget.
-  const observed = await readCapacity(env);
-  const wallBudget = observed.wallBudget ?? DEFAULT_SUBREQUEST_BUDGET;
-  if (observed.wall && wallBudget === budget && observed.wall < fromBudget) {
-    return { limit: observed.wall, source: `measured at the wall (budget ${budget})` };
-  }
-  return { limit: fromBudget, source };
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MARK: - Auth
@@ -762,17 +632,17 @@ function emptyBroadcastRecord(day) {
 }
 
 /**
- * Runs inside runCron, before the legacy pushes, every minute 6 AM–5 PM.
+ * Runs from runCron every minute, 6 AM–5 PM.
  *
- * Cost per run, all counted against the shared subrequest budget:
+ * Cost per run:
  *   1 KV read          broadcast:{day}
- *   1 KV list          today's schedules — ODD minutes only (the legacy
- *                      registry lists on even ones; together they stay under
- *                      the 1,000 lists/day cap). Even minutes use the union
- *                      saved in broadcast:{day}.
+ *   1 KV list          today's schedules — ODD minutes only, and only until
+ *                      the day's "end" has gone out: about 270 of the free
+ *                      plan's 1,000 lists a day, so Cloudflare's 50% warning
+ *                      stays quiet with room for dashboard views. Other
+ *                      minutes use the union saved in broadcast:{day}.
  *   2 APNs pushes      only at a bell (one per channel)
  *   1 KV write         only when something changed
- * BROADCAST_RUN_COST is the worst case of these.
  *
  * At a bell: every bell m in the union with now-2 <= m <= now that has not
  * gone out yet is due. Only the LATEST due one is sent (the card needs only
@@ -793,7 +663,7 @@ async function runBroadcastCycle(env, nowPT) {
   const record = { ...emptyBroadcastRecord(day), ...(stored ?? {}) };
   let dirty = false;
 
-  if (now % 2 === 1) {
+  if (now % 2 === 1 && !record.sent.includes("end")) {
     const { bells, schedules } = await readSchedules(env, day);
     if (bells.join(",") !== record.bells.join(",") || schedules.length !== record.schedules) {
       console.log(`[Broadcast] ${day}: ${schedules.length} schedule(s), bells ${bells.map(clockTime).join(" ") || "none"}`);
@@ -900,7 +770,6 @@ async function broadcastEverywhere(env, kind, bell, environments = Object.keys(B
 
 /** One POST to Apple's broadcast endpoint. Success is HTTP 200. */
 async function sendBroadcast(env, environment, payload, jwt) {
-  if (env.__tally) env.__tally.n++;   // a push is a subrequest like any other
   const channel = BROADCAST_CHANNELS[environment];
   const url = `https://${BROADCAST_HOSTS[environment]}/4/broadcasts/apps/${BROADCAST_BUNDLE_ID}`;
   try {
@@ -1128,32 +997,6 @@ async function readBroadcastStatus(env, day) {
   };
 }
 
-/** The legacy part of /status: phones on 1.2.0 or earlier, one push each. */
-async function readLegacyStatus(env) {
-  const devices = await readRegistry(env);
-  const { limit, source } = await effectiveLimit(env);
-  const observed = await readCapacity(env);
-  return {
-    note: "Phones on 1.2.0 or earlier, one push per phone (transition — remove after students update). Push tokens are never shown.",
-    deviceCount: devices.length,
-    limit,
-    limitSource: source,
-    slotsFree: Math.max(0, limit - devices.length),
-    atCapacity: devices.length >= limit,
-    provenCapacity: observed.proven,
-    ceilingHitAt: observed.wallAt,
-    devices: devices.map(d => ({
-      deviceId: d.deviceId,
-      environment: d.environment,
-      appVersion: d.appVersion ?? null,
-      osVersion: d.osVersion ?? null,
-      bells: (d.transitions ?? []).map(clockTime),
-      end: clockTime(d.endMinutes),
-      updatedAt: d.updatedAt,
-    })),
-  };
-}
-
 /**
  * Days the dashboard can show: today, plus the earlier days whose
  * broadcast:{day} record hasn't expired yet (they last 3 days).
@@ -1178,7 +1021,6 @@ async function statusData(env, day) {
     health,
     broadcast: await readBroadcastStatus(env, day),
     issues: await readIssues(env),
-    legacy: await readLegacyStatus(env),
   };
 }
 
@@ -1351,11 +1193,6 @@ button:disabled{opacity:.6;cursor:default}
 .stack{width:100%;max-width:44px;display:flex;flex-direction:column-reverse;border-radius:4px 4px 0 0;overflow:hidden}
 .xlabels{display:flex;gap:8px;padding:5px 4px 0;font-size:11px;color:var(--muted)}
 .xlabels span{flex:1;text-align:center;white-space:nowrap;overflow:hidden;min-width:0}
-.splitbar{display:flex;height:14px;border-radius:999px;overflow:hidden;background:var(--soft);margin:6px 0 4px}
-.subhead{font-size:13px;font-weight:600;margin:16px 0 0}
-.meter{height:12px;background:var(--soft);border-radius:999px;overflow:hidden;margin:8px 0 6px}
-.meter span{display:block;height:100%;background:var(--accent);border-radius:999px}
-.meter.full span{background:var(--bad)}
 .issue{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0}
 .issue .line{display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap}
 .issue .count{font-weight:650;white-space:nowrap}
@@ -1576,7 +1413,6 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
     var last = b.lastResult && b.lastResult.production;
     var delays = (b.sends || []).filter(function (s) { return s.production && s.production.status === 200; }).map(function (s) { return s.delaySeconds; });
     var typical = median(delays);
-    var L = data.legacy || { deviceCount: 0, limit: 0 };
     var item = function (label, value, hint, bad) {
       return el("div", { class: "kpi" }, [
         el("div", { class: "label", text: label }),
@@ -1589,8 +1425,7 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
       item("Schedules", String(b.schedulesReported || 0), "different bell schedules"),
       item("Last send", last ? clock(last.bell) : "—", last ? (last.kind === "end" ? "end of day · " : "") + last.text : "nothing sent yet", last && last.status !== 200),
       item("Typical delay", typical === null ? "—" : typical + " s", "after the bell"),
-      item("Problems today", String(data.issues.devicesReportingToday || 0), plural(data.issues.groupsToday || 0, "kind", "kinds") + " reported", (data.issues.devicesReportingToday || 0) > 0),
-      item("Older versions", L.deviceCount + " / " + L.limit, "1.2.0 and earlier, per phone", L.atCapacity)
+      item("Problems today", String(data.issues.devicesReportingToday || 0), plural(data.issues.groupsToday || 0, "kind", "kinds") + " reported", (data.issues.devicesReportingToday || 0) > 0)
     ]);
   }
 
@@ -1752,39 +1587,6 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
     return card("Problem reports", desc, filters, body);
   }
 
-  function legacyCard() {
-    var L = data.legacy;
-    if (!L) return null;
-    var desc = "Phones still on 1.2.0 or earlier get one push each instead of the broadcast. On the free plan there's room for about " + L.limit + ". This section goes away once they've all updated.";
-    if (!L.deviceCount) return card("Older versions", desc, null, [el("p", { class: "empty", text: "No phones on 1.2.0 or earlier left. Once this stays at zero, the legacy code in the Worker can be removed." })]);
-
-    var versions = {};
-    L.devices.forEach(function (d) { var v = d.appVersion || "unknown"; versions[v] = (versions[v] || 0) + 1; });
-    var names = Object.keys(versions).sort();
-    var used = Math.min(100, Math.round(L.deviceCount / Math.max(1, L.limit) * 100));
-    var summary = el("div", null, [
-      el("div", { text: L.deviceCount + " of " + L.limit + " slots used" + (L.atCapacity ? " — full, more phones on old versions are turned away" : "") }),
-      el("div", { class: "meter" + (L.atCapacity ? " full" : "") }, [el("span", { style: "width:" + used + "%" })]),
-      el("div", { class: "muted", style: "font-size:12px", text: "Limit from " + L.limitSource + (L.provenCapacity ? " · most ever sent at one bell: " + L.provenCapacity : "") + (L.ceilingHitAt ? " · last hit the ceiling " + whenOf(L.ceilingHitAt) : "") })
-    ]);
-    var byVersion = [
-      el("div", { class: "subhead", text: "By app version" }),
-      el("div", { class: "splitbar", role: "img", "aria-label": "Phones on older versions, by app version" }, names.map(function (n, i) {
-        return el("span", { style: "flex:" + versions[n] + " 1 0;background:" + PALETTE[i % PALETTE.length], title: n + ": " + plural(versions[n], "phone") });
-      })),
-      legendOf(names.map(function (n, i) { return { name: n + " · " + versions[n], color: PALETTE[i % PALETTE.length] }; }))
-    ];
-    return card("Older versions (1.2.0 and earlier)", desc, null, [summary].concat(byVersion).concat([
-      el("details", null, [
-        el("summary", { text: "Each phone (" + L.deviceCount + ")" }),
-        table(["Device", "Build", "App", "iOS", "Bells", "Last bell", "Updated"], L.devices.map(function (d) {
-          return [{ text: (d.deviceId || "").slice(0, 8), title: d.deviceId }, d.environment === "sandbox" ? "Xcode" : "App Store", d.appVersion || "—", d.osVersion || "—",
-            String(d.bells.length), d.end ? hhmm(d.end) : "—", whenOf(d.updatedAt)];
-        }))
-      ])
-    ]));
-  }
-
   function toolsCard() {
     var tool = function (href, name, about) {
       return el("div", { class: "tool" }, [el("a", { href: href, target: "_blank", rel: "noopener", text: name }), el("p", { text: about })]);
@@ -1809,7 +1611,7 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
   function render() {
     var app = document.getElementById("app");
     app.textContent = "";
-    [header(), banner(), passwordNotice(), kpis(), bellsCard(), sendsCard(), issuesCard(), legacyCard(), toolsCard(), footer()]
+    [header(), banner(), passwordNotice(), kpis(), bellsCard(), sendsCard(), issuesCard(), toolsCard(), footer()]
       .forEach(function (n) { if (n) app.appendChild(n); });
   }
 
@@ -1840,332 +1642,11 @@ footer{font-size:12px;color:var(--muted);margin-top:8px}
 </body>
 </html>`;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MARK: - Token registration (legacy: 1.2.0-and-earlier transition — remove after students update)
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function handleRegister(request, env) {
-  let body;
-  try { body = await request.json(); } catch {
-    return new Response("Bad JSON", { status: 400 });
-  }
-
-  const { deviceId, pushToken, environment, transitions, endMinutes, appVersion, osVersion } = body;
-  if (!deviceId || !pushToken) {
-    return new Response("Missing deviceId or pushToken", { status: 400 });
-  }
-
-  // Guard against missing KV binding — the most common cause of opaque 500s.
-  if (!env.TOKENS) {
-    const msg = "KV binding 'TOKENS' is not configured on this worker. Check Cloudflare dashboard → Workers → Settings → Variables → KV Namespace Bindings.";
-    console.error(`[Register] ${msg}`);
-    return new Response(msg, { status: 500 });
-  }
-
-  // Capacity gate.
-  //
-  // Without this the overflow is silent AND unfair: the push loop runs out of
-  // subrequests partway through, and because the device list comes back in a
-  // stable order it is the same students at the end of that list who lose
-  // their bell updates every single day, with nothing on screen to say why.
-  //
-  // Refusing the registration outright is worse for one student and better for
-  // everyone: the app can tell them plainly that the server is full, instead
-  // of leaving a Live Activity on their Lock Screen that silently freezes at
-  // first period. Devices already registered are always readmitted, so a
-  // student who had it yesterday does not lose their place to a newcomer.
-  const existing = await env.TOKENS.get(`token:${deviceId}`, "json");
-  if (!existing) {
-    const { limit, source } = await effectiveLimit(env);
-    const registered = await readRegistry(env);
-    if (registered.length >= limit) {
-      console.log(`[Register] REFUSED ${deviceId} — at capacity (${registered.length}/${limit}, ${source})`);
-      // 507, not 200.
-      //
-      // Builds released before this feature existed treat ANY 200 as "you are
-      // registered" and cache that for the rest of the day, so a 200 here
-      // would make an older app stop asking — even if a slot frees up an hour
-      // later. A non-2xx lands in their existing failure branch, which caches
-      // nothing and retries on the next launch. They still cannot show the
-      // explanation (that needs the app update), but they recover on their own
-      // the moment there is room.
-      return json({
-        status: "over_capacity",
-        limit,
-        registered: registered.length,
-        contact: CAPACITY_CONTACT,
-        message: "This school's Live Activity server is full.",
-      }, 507);
-    }
-  }
-
-  const record = {
-    deviceId,
-    pushToken,
-    environment: environment ?? "production",
-    transitions: transitions ?? null,
-    endMinutes:  endMinutes  ?? null,
-    // Build identity — app build and iOS version only, no hardware model.
-    // Optional: older clients don't send these.
-    appVersion: appVersion ?? null,
-    osVersion:  osVersion  ?? null,
-    updatedAt: new Date().toISOString(),
-  };
-
-  try {
-    // The device writes ONLY its own key. No read-modify-write of the shared
-    // registry blob here — that was the race. The cron picks this up within
-    // two minutes via reconcileRegistry().
-    //
-    // The updatedAt stamp is duplicated into KV metadata so reconciliation
-    // can detect a changed record straight from list(), without spending a
-    // read on every device to find the one that moved.
-    await env.TOKENS.put(`token:${deviceId}`, JSON.stringify(record), {
-      metadata: { u: record.updatedAt },
-    });
-  } catch (e) {
-    const msg = `KV write failed: ${e.message}`;
-    console.error(`[Register] ${msg}`);
-    return new Response(msg, { status: 500 });
-  }
-
-  console.log(`[Register] Device ${deviceId} registered (${environment ?? "production"}) — ${(transitions ?? []).length} transitions, build ${appVersion ?? "?"} on iOS ${osVersion ?? "?"}, live within 2min`);
-  return json({ status: "registered" }, 200);
-}
-
-async function handleUnregister(request, env) {
-  let body;
-  try { body = await request.json(); } catch {
-    return new Response("Bad JSON", { status: 400 });
-  }
-
-  const { deviceId } = body;
-  if (!deviceId) return new Response("Missing deviceId", { status: 400 });
-
-  await removeDevice(deviceId, env);
-  console.log(`[Unregister] Device ${deviceId} removed`);
-  return new Response("OK", { status: 200 });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MARK: - Purge (legacy: 1.2.0-and-earlier transition — remove after students update)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * GET /purge?confirm=yes — dismiss every Live Activity, then delete every
- * registration.
- *
- * The end push matters as much as the delete. Without it a purged phone keeps
- * a Live Activity on its Lock Screen that nothing will ever update again —
- * frozen on whatever period was current when the purge ran, for the rest of
- * the day. Sending "end" first means the card disappears on its own.
- *
- * Options:
- *   ?end=no      delete without dismissing (leaves stale cards; rarely right)
- *   ?limit=N     how many devices to process in this call (default 40)
- *
- * WHY A LIMIT: every end push and every KV operation is a subrequest, and a
- * Worker invocation is capped at 50 of them on the free plan. So a big school
- * is purged a batch at a time — the response says how many are left, and you
- * just load the URL again until it reports none. The registry blob is only
- * cleared on the final batch, so /status stays honest in between.
- *
- * WHEN DEVICES COME BACK, which is the part that surprises people:
- *
- * The app skips a registration whose payload it has already sent (see
- * PushTokenService.registrationSignature) to stay inside the KV write quota,
- * and that signature lives on the DEVICE. Deleting the server's copy does not
- * clear it. So a purged device re-registers the next time its signature
- * changes, which is:
- *
- *   - the next calendar day (the date is part of the signature), or
- *   - a new app build, or a rotated push token — which is what stopping and
- *     restarting the Live Activity produces, making that the quickest way to
- *     bring one phone back the same day, or
- *   - Settings -> Delete All Data on that device, which drops the signature
- *     and the device ID outright.
- */
-async function handlePurge(request, env, url) {
-  if (url.searchParams.get("confirm") !== "yes") {
-    return json({
-      error: "Refusing to purge without confirmation.",
-      howTo: "Add ?confirm=yes to this URL.",
-      whatItDoes: "Dismisses the Live Activity on every registered phone, then deletes every registration.",
-      whenDevicesReturn: "Next calendar day, or sooner on a new build, a restarted Live Activity, or Settings -> Delete All Data on the device.",
-    }, 400);
-  }
-
-  if (!env.TOKENS) return json({ error: "KV binding 'TOKENS' is not configured." }, 500);
-
-  const dismiss = url.searchParams.get("end") !== "no";
-  const limit = Math.max(1, Number(url.searchParams.get("limit") ?? 40));
-
-  const page = await env.TOKENS.list({ prefix: "token:" });
-  const keys = page.keys.map(k => k.name);
-  const batch = keys.slice(0, limit);
-
-  // One token signs every push in this batch.
-  let jwt = null, jwtError = null;
-  if (dismiss && batch.length > 0) {
-    try {
-      jwt = await getAPNsJWT(env);
-    } catch (e) {
-      // Still purge: the operator asked for it, and a key problem is exactly
-      // when you most want the stale registrations gone. Just say so plainly.
-      jwtError = e.message;
-      console.error(`[Purge] Could not build an APNs token, deleting without dismissing — ${e.message}`);
-    }
-  }
-
-  let dismissed = 0, dismissFailed = 0, deleted = 0;
-  for (const key of batch) {
-    let record = null;
-    try { record = await env.TOKENS.get(key, "json"); } catch { /* unreadable — delete it anyway */ }
-
-    if (jwt && record && record.pushToken) {
-      try {
-        await sendAPNsEnd(
-          record.pushToken,
-          { slotStartMinutes: 0, isEnded: true },
-          jwt, env, record.environment ?? "production"
-        );
-        dismissed++;
-      } catch (e) {
-        // A device that can't be reached still gets purged; its Live Activity
-        // goes stale, which is strictly better than leaving it registered.
-        dismissFailed++;
-        console.log(`[Purge] End push failed for ${record.deviceId ?? key} — ${e.message}`);
-      }
-    }
-
-    await env.TOKENS.delete(key);
-    deleted++;
-  }
-
-  const remaining = keys.length - batch.length;
-  const complete = remaining === 0 && page.list_complete;
-  if (complete) await env.TOKENS.delete("registry:devices");
-
-  console.log(`[Purge] Dismissed ${dismissed}, failed ${dismissFailed}, deleted ${deleted}, remaining ${remaining}`);
-  return json({
-    dismissed,
-    dismissFailed,
-    purged: deleted,
-    remaining: page.list_complete ? remaining : `${remaining}+ (more pages)`,
-    registryCleared: complete,
-    ...(jwtError ? { warning: `Live Activities were NOT dismissed: ${jwtError}` } : {}),
-    next: complete
-      ? "Done. Every phone has been dismissed and unregistered."
-      : "Load this URL again to continue with the next batch.",
-    whenDevicesReturn: "Next calendar day, or sooner on a new build, a restarted Live Activity, or Settings -> Delete All Data on the device.",
-  }, 200);
-}
-
 /** 480 -> "08:00". Minutes since local midnight, as a human reads a bell schedule. */
 function clockTime(minutes) {
   if (minutes === null || minutes === undefined) return null;
   const h = Math.floor(minutes / 60), m = minutes % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MARK: - Test push (legacy: 1.2.0-and-earlier transition — remove after students update)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * GET /test-push[?deviceId=…][&minutes=…]
- *
- * Pushes to one device immediately and returns APNs's raw verdict per
- * endpoint. Defaults to the most recently registered device, and to that
- * device's first transition of the day, so a bare /test-push is useful.
- */
-async function handleTestPush(request, env, url) {
-  const devices = await readRegistry(env);
-  if (devices.length === 0) {
-    return json({ error: "No devices registered." }, 404);
-  }
-
-  const wanted = url.searchParams.get("deviceId");
-  const device = wanted
-    ? devices.find(d => d.deviceId === wanted)
-    : [...devices].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0];
-  if (!device) return json({ error: `No device with id ${wanted}.` }, 404);
-
-  const minutesParam = url.searchParams.get("minutes");
-  const slotStartMinutes = minutesParam !== null
-    ? Number(minutesParam)
-    : (device.transitions ?? [480])[0];
-
-  let jwt;
-  try {
-    jwt = await getAPNsJWT(env);
-  } catch (e) {
-    // A JWT that won't even build means the key itself is malformed — most
-    // often a .p8 pasted with the BEGIN/END lines mangled or newlines eaten.
-    return json({
-      step: "building the APNs token",
-      ok: false,
-      error: e.message,
-      hint: "Check APNS_PRIVATE_KEY (whole .p8 including BEGIN/END lines), APNS_KEY_ID, APNS_TEAM_ID.",
-    }, 500);
-  }
-
-  const payload = {
-    aps: {
-      timestamp: Math.floor(Date.now() / 1000),
-      event: "update",
-      "content-state": { slotStartMinutes, isEnded: false },
-      alert: {},
-    },
-  };
-
-  // Try both endpoints regardless of what the device claims, so the answer
-  // includes "it works, just on the other host".
-  const attempts = [];
-  for (const host of ["sandbox", "production"]) {
-    attempts.push(await probeAPNs(device.pushToken, payload, jwt, env, host));
-  }
-
-  return json({
-    deviceId: device.deviceId,
-    registeredEnvironment: device.environment,
-    appVersion: device.appVersion,
-    topic: `${env.APNS_BUNDLE_ID}.push-type.liveactivity`,
-    sentSlotStartMinutes: slotStartMinutes,
-    attempts,
-    verdict: attempts.some(a => a.ok)
-      ? "APNs accepted the push. If the Lock Screen did not change, the problem is on the device, not here."
-      : "APNs rejected every attempt — see reason above.",
-  }, 200);
-}
-
-/** One APNs attempt that reports rather than acts. No device is ever removed. */
-async function probeAPNs(pushToken, payload, jwt, env, environment) {
-  const host = (environment === "sandbox") ? "api.sandbox.push.apple.com" : "api.push.apple.com";
-  try {
-    const resp = await fetch(`https://${host}/3/device/${pushToken}`, {
-      method: "POST",
-      headers: {
-        "authorization":  `bearer ${jwt}`,
-        "apns-topic":     `${env.APNS_BUNDLE_ID}.push-type.liveactivity`,
-        "apns-push-type": "liveactivity",
-        "apns-priority":  "10",
-        "content-type":   "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-    const body = await resp.text();
-    return {
-      endpoint: environment,
-      status: resp.status,
-      ok: resp.ok,
-      apnsId: resp.headers.get("apns-id"),
-      response: body || "(empty — this is what success looks like)",
-      meaning: explainAPNs(resp.status, body),
-    };
-  } catch (e) {
-    return { endpoint: environment, status: null, ok: false, error: e.message };
-  }
 }
 
 /** Plain-English translation of the APNs reasons this app actually hits. */
@@ -2368,391 +1849,24 @@ function json(obj, status) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Every minute: the broadcast, then the legacy per-phone pushes.
+ * Every minute, Monday to Friday, 6 AM–5 PM Pacific: the broadcast.
  *
- * Broadcast goes FIRST because it serves everyone on a current build for two
- * requests, and it must never be the thing that runs out of budget. Both
- * share one subrequest counter, so the legacy loop's own budget check sees
- * what the broadcast already spent and simply pushes fewer phones.
+ * Outside those hours there is nothing to send, so nothing is spent. That
+ * matters for the free plan: KV quotas reset at 00:00 UTC, which is 5 PM the
+ * previous day here, so overnight runs would eat into the next school day.
  */
-async function runCron(rawEnv) {
-  // Everything this run touches goes through a counted KV handle, so the
-  // budget checks (broadcast's and legacy's) know what has already been
-  // spent. Reset per run.
-  const tally = { n: 0 };
-  const env = { ...rawEnv, TOKENS: countingKV(rawEnv.TOKENS, tally), __tally: tally };
-
+async function runCron(env) {
   const nowPT = nowInPT();
-  const todayKey = formatDate(nowPT);
   const currentMinutes = nowPT.hours * 60 + nowPT.minutes;
+  console.log(`[Cron] ${nowPT.iso} ${String(nowPT.hours).padStart(2,'0')}:${String(nowPT.minutes).padStart(2,'0')} PT`);
 
-  console.log(`[Cron] ${todayKey} ${String(nowPT.hours).padStart(2,'0')}:${String(nowPT.minutes).padStart(2,'0')} PT`);
-
-  // Only skip weekends — the hours guard was removed when list() was replaced
-  // by the registry key, eliminating the 1k/day list quota concern.
   if (nowPT.dow === 0 || nowPT.dow === 6) return;
+  if (currentMinutes < CRON_FIRST_MINUTE || currentMinutes >= CRON_END_MINUTE) return;
 
-  // Outside school hours there is nothing to push and nothing worth
-  // reconciling, so don't spend quota.
-  //
-  // This matters more than it looks: the KV free tier resets at 00:00 UTC,
-  // which is 5 PM PDT the PREVIOUS day. So by lunchtime local, 19 of the 24
-  // quota-hours are already gone — most of them overnight with an empty
-  // school. Running 24/7 spent ~570 list+write ops before first bell; a
-  // 6 AM–5 PM window cuts that to ~330, and the content-comparison check in
-  // reconcileRegistry drops the writes to roughly one per device per day.
-  //
-  // 6 AM is comfortably before the earliest registration (the Live Activity
-  // starts within an hour of first bell); 5 PM is well after the last one.
-  const hour = Math.floor(currentMinutes / 60);
-  if (hour < 6 || hour >= 17) {
-    return;
-  }
-
-  // A broadcast failure is logged and recorded, never allowed to stop the
-  // legacy pushes that follow.
   try {
     await runBroadcastCycle(env, nowPT);
   } catch (e) {
     console.error(`[Broadcast] cycle failed — ${e.message}`);
-  }
-
-  await runLegacyPushCycle(env, currentMinutes);
-}
-
-/**
- * One push per registered phone at that phone's own bells.
- * 1.2.0-and-earlier transition — remove after students update.
- */
-async function runLegacyPushCycle(env, currentMinutes) {
-  // Reconcile on even minutes only. list() is capped at 1,000/day: every
-  // other minute is 720, every minute would be 1,440 and would start failing
-  // partway through the afternoon. On reconcile minutes the returned list is
-  // reused, so the blob is not read twice. The broadcast lists on the ODD
-  // minutes, so inside the 6 AM–5 PM window the two cost 330 each.
-  //
-  // Keyed off currentMinutes (minutes since local midnight), which the
-  // transition matching below also uses — one source of truth for "what time
-  // is it" in this function.
-  const devices = (currentMinutes % 2 === 0)
-    ? await reconcileRegistry(env)
-    : await readRegistry(env);
-
-  if (devices.length === 0) {
-    console.log("[Cron] No registered devices");
-    return;
-  }
-
-  const jwt = await getAPNsJWT(env);   // crypto only — not a subrequest
-  env.__jwt = jwt;
-
-  // Sent in parallel chunks rather than one device at a time.
-  //
-  // Sequentially, a bell reached the last phone N × round-trip later: at 500
-  // devices and ~60ms each that is half a minute of drift, and the next cron
-  // fires at 60s. In chunks of 25 the same bell lands in about a second.
-  //
-  // This does NOT change how many devices fit on a plan. Subrequests are
-  // counted per invocation, not per wave — 60 pushes is 60 subrequests
-  // whether they go out one at a time or all at once — so the Free plan's
-  // 50-per-invocation cap (KV operations included) still bites at roughly 45
-  // devices. Chunking buys latency, nothing else. The cap is why the chunk
-  // size is modest: a wave that overruns the limit fails unpredictably within
-  // that wave, and smaller waves keep the damage legible in the logs.
-  const CHUNK_SIZE = 25;
-  const budget = subrequestBudget(env);
-  let pushed = 0;
-  let stoppedShort = false;
-
-  for (let i = 0; i < devices.length; i += CHUNK_SIZE) {
-    // Stop BEFORE the platform stops us.
-    //
-    // Cloudflare throws once an invocation exceeds its subrequest allowance
-    // (50 on Free, KV operations included). The catch is that after that
-    // throw every further subrequest fails too — including the KV write that
-    // would record what just happened. So the ceiling cannot be discovered by
-    // running into it; it has to be respected in advance.
-    //
-    // RESERVE leaves room for the bookkeeping write below, so the run always
-    // has enough budget left to say what it could not do.
-    const remaining = budget - spent(env) - CAPACITY_WRITE_RESERVE;
-    if (remaining <= 0) { stoppedShort = true; break; }
-
-    const chunk = devices.slice(i, i + Math.min(CHUNK_SIZE, remaining));
-    await Promise.all(chunk.map(device => pushToDevice(device, currentMinutes, env)));
-    pushed += chunk.length;
-    if (chunk.length < CHUNK_SIZE && i + chunk.length < devices.length) { stoppedShort = true; break; }
-  }
-
-  if (stoppedShort) {
-    console.error(
-      `[Cron] SUBREQUEST CEILING — pushed ${pushed} of ${devices.length}; ` +
-      `the rest get no bell this minute. Recording capacity.`
-    );
-    await recordCapacityWall(env, pushed);
-  } else {
-    await recordCapacityProven(env, pushed);
-  }
-}
-
-/**
- * How many subrequests this invocation has spent so far.
- *
- * Every KV read, write, delete, list and every APNs push counts against the
- * same allowance, so they are all tallied through one counter that
- * runCron() resets at the start of each run.
- */
-function spent(env) { return env.__tally ? env.__tally.n : 0; }
-
-/** Wraps a KV namespace so every operation is counted. */
-function countingKV(tokens, tally) {
-  return {
-    get:    (...a) => { tally.n++; return tokens.get(...a); },
-    put:    (...a) => { tally.n++; return tokens.put(...a); },
-    delete: (...a) => { tally.n++; return tokens.delete(...a); },
-    list:   (...a) => { tally.n++; return tokens.list(...a); },
-  };
-}
-
-/** Remember the ceiling this run had to stop at, and the budget it was under. */
-async function recordCapacityWall(env, pushed) {
-  const observed = await readCapacity(env);
-  const budget = subrequestBudget(env);
-  const sameBudget = (observed.wallBudget ?? DEFAULT_SUBREQUEST_BUDGET) === budget;
-  // Under the same budget keep the LOWEST ceiling seen — that is what actually
-  // fits. Under a new budget the old wall is meaningless, so start over.
-  const wall = observed.wall && sameBudget ? Math.min(observed.wall, pushed) : pushed;
-  await env.TOKENS.put(CAPACITY_KEY, JSON.stringify({
-    proven: observed.proven, wall, wallAt: new Date().toISOString(), wallBudget: budget,
-  }));
-}
-
-/**
- * Remember a bell that went out in full. Only written when the number grows,
- * so this costs one KV write on the day the school adds its biggest cohort
- * and nothing on any other day. Reported on /status as evidence of what has
- * actually worked; the limit itself comes from the budget (effectiveLimit).
- */
-async function recordCapacityProven(env, pushed) {
-  if (pushed === 0) return;
-  const observed = await readCapacity(env);
-  if (pushed <= observed.proven) return;
-  await env.TOKENS.put(CAPACITY_KEY, JSON.stringify({ ...observed, proven: pushed }));
-  console.log(`[Capacity] ${pushed} pushes completed cleanly — new proven capacity`);
-}
-
-/**
- * Everything one device needs this minute: the transition push, and the
- * end-of-day dismissal. Each device is independent, which is what makes the
- * chunked parallelism above safe — no two of these touch the same KV key.
- */
-async function pushToDevice(device, currentMinutes, env) {
-  const jwt = env.__jwt;
-  const transitions = device.transitions ?? [];
-  const endMinutes  = device.endMinutes  ?? null;
-
-  if (transitions.length === 0) {
-    console.log(`[Cron] ${device.deviceId} — no transitions stored, skipping`);
-    return;
-  }
-
-  // Find a transition that just fired (within the last 2 minutes)
-  const firedMinutes = transitions.find(t => {
-    const diff = currentMinutes - t;
-    return diff >= 0 && diff < 2;
-  });
-
-  if (firedMinutes !== undefined) {
-    const isLast = firedMinutes === transitions[transitions.length - 1];
-    console.log(`[Cron] ${device.deviceId} → transition at ${firedMinutes}min${isLast ? " (last)" : ""}`);
-
-    const { dead, environment: workingEnv } = await sendAPNsUpdate(device.pushToken,
-      { slotStartMinutes: firedMinutes, isEnded: false },
-      jwt, env, device.environment).catch(err => { console.log(`[APNs] ✗ ${device.deviceId}: ${err.message}`); return { dead: false }; });
-
-    if (dead) {
-      console.log(`[APNs] 💀 ${device.deviceId} — dead token, removing`);
-      await removeDevice(device.deviceId, env);
-      return;
-    }
-
-    // The retry found the other endpoint — persist it so subsequent pushes
-    // go straight there instead of paying the failed attempt every time.
-    if (workingEnv && workingEnv !== device.environment) {
-      await updateDeviceEnvironment(device.deviceId, workingEnv, env);
-    }
-  }
-
-  // End-of-day dismissal.
-  //
-  // Fired directly off endMinutes rather than via an endpush:{id}:{date}
-  // key. That key cost one KV READ per device per minute (half the read
-  // budget) and one WRITE per device per day, purely to remember something
-  // already present in the record. The same 2-minute window used for
-  // transitions applies; a duplicate "end" event is harmless because iOS
-  // has already dismissed the activity and the second push is a no-op.
-  if (endMinutes !== null && endMinutes > 0) {
-    const endDiff = currentMinutes - endMinutes;
-    if (endDiff >= 0 && endDiff < 2) {
-      console.log(`[Cron] ${device.deviceId} — sending end push (${endMinutes}min)`);
-      const { dead } = await sendAPNsEnd(device.pushToken,
-        { slotStartMinutes: 0, isEnded: true },
-        jwt, env, device.environment).catch(err => { console.log(`[APNs] ✗ ${device.deviceId}: ${err.message}`); return { dead: false }; });
-      if (dead) await removeDevice(device.deviceId, env);
-    }
-  }
-}
-
-
-
-/**
- * Sends a Live Activity update push (event: "update").
- * Returns { dead: true } if the token is no longer valid.
- * Throws on unexpected errors.
- */
-async function sendAPNsUpdate(pushToken, contentState, jwt, env, environment = "production") {
-  const payload = {
-    aps: {
-      timestamp: Math.floor(Date.now() / 1000),
-      event: "update",
-      "content-state": contentState,
-      alert: {},
-    },
-  };
-  return sendAPNsPayload(pushToken, payload, jwt, env, environment);
-}
-
-/**
- * Sends a Live Activity end push (event: "end").
- * iOS immediately dismisses the Live Activity on all surfaces.
- * Returns { dead: true } if the token is no longer valid.
- * Throws on unexpected errors.
- */
-async function sendAPNsEnd(pushToken, contentState, jwt, env, environment = "production") {
-  const payload = {
-    aps: {
-      timestamp: Math.floor(Date.now() / 1000),
-      event: "end",
-      "content-state": contentState,
-      "dismissal-date": Math.floor(Date.now() / 1000), // dismiss immediately
-      alert: {},
-    },
-  };
-  return sendAPNsPayload(pushToken, payload, jwt, env, environment);
-}
-
-/**
- * Shared APNs HTTP/2 request.
- * Returns { dead: bool, environment: string } — environment is the one that
- * actually worked, which may differ from the one passed in.
- * Throws on non-dead errors.
- *
- * Environment fallback: a token is only valid against the endpoint matching
- * the aps-environment entitlement it was minted under, and clients have
- * historically mis-reported that (the app derived it from #if DEBUG rather
- * than from the entitlement, so a Release-from-Xcode build claimed
- * "production" while holding a sandbox token). Rather than trust the claim,
- * a BadDeviceToken is retried once against the other host before the token is
- * declared dead. Without this, one mis-labeled registration silently removed
- * the device from the registry for the rest of the day.
- */
-async function sendAPNsPayload(pushToken, payload, jwt, env, environment = "production") {
-  const primary  = (environment === "sandbox") ? "sandbox" : "production";
-  const fallback = (primary === "sandbox") ? "production" : "sandbox";
-
-  let result = await sendToHost(pushToken, payload, jwt, env, primary);
-
-  // Only a token/topic mismatch is worth retrying — 410 Gone means the
-  // activity genuinely ended on the device, and that's final.
-  if (result.badToken) {
-    console.log(`[APNs] retrying on ${fallback} after BadDeviceToken on ${primary}`);
-    result = await sendToHost(pushToken, payload, jwt, env, fallback);
-    if (!result.dead && !result.badToken) {
-      return { dead: false, environment: fallback };
-    }
-  }
-
-  return { dead: result.dead || result.badToken, environment: primary };
-}
-
-/** Single APNs attempt against one host. Returns { dead, badToken }. */
-async function sendToHost(pushToken, payload, jwt, env, environment) {
-  if (env.__tally) env.__tally.n++;   // an APNs push is a subrequest like any other
-  const bundleId = env.APNS_BUNDLE_ID;
-  const host = (environment === "sandbox")
-    ? "api.sandbox.push.apple.com"
-    : "api.push.apple.com";
-  const url = `https://${host}/3/device/${pushToken}`;
-
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: {
-      "authorization":  `bearer ${jwt}`,
-      "apns-topic":     `${bundleId}.push-type.liveactivity`,
-      "apns-push-type": "liveactivity",
-      "apns-priority":  "10",
-      "content-type":   "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-
-  // 410 Gone — activity ended on device; token permanently dead. Never retried.
-  if (resp.status === 410) {
-    console.log(`[APNs] 410 Gone on ${environment} — activity ended on device`);
-    return { dead: true, badToken: false };
-  }
-
-  if (resp.status === 403) {
-    // Auth-class failure: the JWT is being rejected, not the token. Most
-    // often an environment-restricted .p8 (BadEnvironmentKeyInToken) or a
-    // Key ID that doesn't match the key file (InvalidProviderToken).
-    // Logged loudly and NOT swallowed as a dead token — killing the device
-    // registration over a server-side key problem is exactly backwards.
-    const body = await resp.text();
-    console.error(`[APNs] ⚠ 403 AUTH FAILURE on ${environment} — ${body}`);
-    console.error(`[APNs]   → check the .p8 key's environment + Key ID in Worker vars`);
-    return { dead: false, badToken: false };
-  }
-
-  if (resp.status === 400) {
-    const body = await resp.text();
-    if (body.includes("BadDeviceToken") || body.includes("DeviceTokenNotForTopic")) {
-      console.log(`[APNs] 400 bad token on ${environment} — ${body}`);
-      return { dead: false, badToken: true };
-    }
-    throw new Error(`APNs 400 (${environment}): ${body}`);
-  }
-
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(`APNs ${resp.status} (${environment}): ${body}`);
-  }
-
-  // Success is logged explicitly. Without this, "APNs accepted the push" and
-  // "we never got as far as sending" produce identical log output — silence —
-  // which is exactly the ambiguity that made the 403 take days to find.
-  // apns-id is Apple's own request identifier: quoting it in a support ticket
-  // or matching it against a device log is the only way to trace one push.
-  console.log(`[APNs] ✓ 200 on ${environment} — apns-id: ${resp.headers.get("apns-id") || "none"}`);
-  return { dead: false, badToken: false };
-}
-
-/** Persists a corrected environment so the next push skips the retry. */
-async function updateDeviceEnvironment(deviceId, environment, env) {
-  try {
-    // Write through the device's own key. The blob picks it up on the next
-    // reconcile via the metadata stamp — same path as a registration, so
-    // there's only ever one writer per key.
-    const value = await env.TOKENS.get(`token:${deviceId}`, "json");
-    if (!value || value.environment === environment) return;
-    value.environment = environment;
-    value.updatedAt = new Date().toISOString();
-    await env.TOKENS.put(`token:${deviceId}`, JSON.stringify(value), {
-      metadata: { u: value.updatedAt },
-    });
-    console.log(`[Registry] ${deviceId} environment corrected → ${environment}`);
-  } catch (e) {
-    console.error(`[Registry] Failed to update environment for ${deviceId}: ${e.message}`);
   }
 }
 
@@ -2830,181 +1944,6 @@ async function generateJWT(keyId, teamId, privateKeyPem) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MARK: - Legacy registry (1.2.0-and-earlier transition — remove after students update)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Reads every device record in ONE KV read.
- *
- * WHY ONE BLOB, AND WHY ONLY THE CRON WRITES IT — two separate problems:
- *
- * 1. READS. The push cycle used to read token:{deviceId} for every device
- *    every minute: 1 + 2N reads × 1,440 minutes against a 100,000/day
- *    free-tier cap put the ceiling at ~34 devices, and KV caps are hard
- *    failures rather than throttling. One blob makes the cycle 1,440
- *    reads/day regardless of how many phones there are.
- *
- * 2. WRITES RACING. If each registration read-modify-wrote the shared blob,
- *    records would be lost: KV is eventually consistent, reads are edge-cached
- *    for up to 60s, and concurrent writes to one key silently overwrite each
- *    other. With a few hundred handsets registering across a morning that is
- *    routine data loss. So devices write only their OWN key, and the cron — a
- *    single process — owns the blob, reconciling every 2 minutes via list()
- *    (capped at 1,000/day: 720 fits, 1,440 would not). The cost is that a new
- *    device waits up to two minutes to be picked up.
- *
- * Handles the legacy format transparently: registry:devices used to be an
- * array of deviceId STRINGS, with the records themselves in token:{id}. If
- * that shape is found it is migrated in place — N reads and one write, once —
- * so an in-flight school day keeps working across the deploy without anyone
- * re-registering.
- */
-async function readRegistry(env) {
-  const raw = await env.TOKENS.get("registry:devices");
-  if (!raw) return [];
-
-  let parsed;
-  try { parsed = JSON.parse(raw); } catch { return []; }
-  if (!Array.isArray(parsed) || parsed.length === 0) return [];
-
-  // New format: array of record objects.
-  if (typeof parsed[0] === "object" && parsed[0] !== null) {
-    return parsed.filter(d => d && d.deviceId && d.pushToken);
-  }
-
-  // Legacy format: array of deviceId strings — hydrate and migrate.
-  console.log(`[Registry] Legacy format detected — migrating ${parsed.length} device(s)`);
-  const records = [];
-  for (const deviceId of parsed) {
-    const value = await env.TOKENS.get(`token:${deviceId}`, "json");
-    if (value?.pushToken) {
-      records.push({
-        deviceId,
-        pushToken:   value.pushToken,
-        environment: value.environment ?? "production",
-        transitions: value.transitions ?? null,
-        endMinutes:  value.endMinutes  ?? null,
-        appVersion:  value.appVersion  ?? null,
-        osVersion:   value.osVersion   ?? null,
-        updatedAt:   value.updatedAt   ?? new Date().toISOString(),
-      });
-    }
-  }
-  await env.TOKENS.put("registry:devices", JSON.stringify(records));
-  console.log(`[Registry] Migration complete — ${records.length} device(s) carried over`);
-  return records;
-}
-
-/** Replaces the whole registry blob. Cron-only — see the header note. */
-async function writeRegistry(devices, env) {
-  await env.TOKENS.put("registry:devices", JSON.stringify(devices));
-}
-
-/**
- * Reconciles registry:devices against the token:{id} keys.
- *
- * The cron is the ONLY writer of the blob, which is what makes this race-free
- * — there is exactly one scheduled invocation per minute, so no two processes
- * modify the key concurrently.
- *
- * list() returns each key's metadata, so a device whose record changed is
- * detected by comparing the metadata stamp against the blob — no read needed
- * for unchanged devices. Only new or updated records cost a get().
- *
- * Returns the reconciled device list so the caller doesn't read it again.
- */
-async function reconcileRegistry(env) {
-  const existing = await readRegistry(env);
-  const byId = new Map(existing.map(d => [d.deviceId, d]));
-
-  const next = [];
-  let hydrated = 0;
-  let cursor;
-
-  do {
-    const page = await env.TOKENS.list({ prefix: "token:", cursor });
-    for (const key of page.keys) {
-      const deviceId = key.name.slice("token:".length);
-      const stamp = key.metadata?.u ?? null;
-      const current = byId.get(deviceId);
-
-      // Unchanged and already known — carry it over, no read.
-      if (current && stamp && current.updatedAt === stamp) {
-        next.push(current);
-        continue;
-      }
-
-      // No stamp means a record written before metadata was introduced. Read
-      // it, and re-put it WITH a stamp so this pass is the last one that has
-      // to. Costs one write once per stale record, rather than a read every
-      // two minutes indefinitely.
-      const value = await env.TOKENS.get(key.name, "json");
-      hydrated++;
-      if (value?.pushToken) {
-        const record = {
-          deviceId,
-          pushToken:   value.pushToken,
-          environment: value.environment ?? "production",
-          transitions: value.transitions ?? null,
-          endMinutes:  value.endMinutes  ?? null,
-          appVersion:  value.appVersion  ?? null,
-          osVersion:   value.osVersion   ?? null,
-          updatedAt:   value.updatedAt   ?? new Date().toISOString(),
-        };
-        if (!stamp) {
-          await env.TOKENS.put(key.name, JSON.stringify(record), {
-            metadata: { u: record.updatedAt },
-          });
-          console.log(`[Registry] Backfilled metadata stamp for ${deviceId}`);
-        }
-        next.push(record);
-      }
-    }
-    cursor = page.list_complete ? null : page.cursor;
-  } while (cursor);
-
-  // Write only when the CONTENT actually changed.
-  //
-  // Previously this triggered on `hydrated > 0`, which conflated "had to
-  // read a record" with "the record is different." A token: key written
-  // before metadata stamps existed has no stamp, so it gets re-hydrated on
-  // every single pass — and the old condition then rewrote the blob every
-  // two minutes, forever, with byte-identical content. Three devices were
-  // enough to burn a third of the daily write quota by noon.
-  //
-  // Comparing the serialized form is exact and cheap: list() returns keys in
-  // a stable order, so an unchanged registry serializes identically.
-  const nextJson = JSON.stringify(next);
-  if (nextJson !== JSON.stringify(existing)) {
-    await env.TOKENS.put("registry:devices", nextJson);
-    console.log(`[Registry] Reconciled — ${next.length} device(s), ${hydrated} hydrated, blob updated`);
-  } else if (hydrated > 0) {
-    // Reads happened but nothing moved — worth seeing, because it means
-    // records are missing their metadata stamps and every pass is paying
-    // for reads it shouldn't need.
-    console.log(`[Registry] Reconciled — ${hydrated} record(s) re-read but unchanged (missing metadata stamp?)`);
-  }
-
-  return next;
-}
-
-/**
- * Rebuilds registry:devices from the token:{id} keys, ignoring the existing
- * blob entirely. Manual recovery via GET /rebuild.
- */
-async function rebuildRegistry(env) {
-  await env.TOKENS.put("registry:devices", JSON.stringify([]));
-  const devices = await reconcileRegistry(env);
-  console.log(`[Registry] Rebuilt — ${devices.length} device(s)`);
-  return devices.length;
-}
-
-// Deletes a device's token. The blob catches up on the next reconcile.
-async function removeDevice(deviceId, env) {
-  await env.TOKENS.delete(`token:${deviceId}`);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // MARK: - Time utilities (Pacific Time)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -3061,10 +2000,3 @@ function nowInPT(now = new Date()) { // any epoch-safe Date; default now
   return { year, month, day, hours, minutes, seconds, dow, iso };
 }
 
-/**
- * Returns "YYYY-MM-DD" from a PT time struct returned by nowInPT().
- * Kept as a separate function to mirror the original call sites.
- */
-function formatDate(ptTime) {
-  return ptTime.iso;
-}

@@ -244,8 +244,8 @@ High School · Yakima".
 - Every page but `/health` behind the shared secret.
 - The Broadcast Capability stays on for the App ID; turning it off deletes
   every channel permanently.
-- Until students update from 1.2, the legacy one-push-per-phone path keeps
-  working (about 35 phones on the free plan).
+- Inside the free plan's daily KV limits with room to spare: a school day
+  costs about 280 of the 1,000 lists, so Cloudflare's 50% warning stays quiet.
 - Before release, the app's Worker URL must point somewhere the school can
   keep running.
 
